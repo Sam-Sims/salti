@@ -28,6 +28,8 @@ Aiming to be feature rich, fast and optimised for large alignments - salti is un
 
 ## Demo
 
+https://github.com/user-attachments/assets/1af28bde-7685-489f-9464-387de78d2fa0
+
 ## Installation
 
 ### Building from Source
