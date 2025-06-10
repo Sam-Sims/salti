@@ -32,6 +32,10 @@ https://github.com/user-attachments/assets/1af28bde-7685-489f-9464-387de78d2fa0
 
 ## Installation
 
+## Binaries
+
+Binaries are attached to the latest release.
+
 ### Building from Source
 
 salti currently requires building from source:
