@@ -82,15 +82,22 @@ impl App {
 
     fn parse_alignments(&mut self) {
         self.app_state.loading_state = LoadingState::Loading;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.loading_receiver = Some(rx);
 
         if let Some(file_path) = self.app_state.file_path.clone() {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            self.loading_receiver = Some(rx);
-
-            tokio::spawn(async move {
-                let result = parser::parse_fasta(&file_path).await;
-                let _ = tx.send(result);
-            });
+            if file_path.as_os_str() == "-" {
+                tokio::spawn(async move {
+                    let result = parser::parse_fasta_stdin().await;
+                    let _ = tx.send(result);
+                });
+                return;
+            } else {
+                tokio::spawn(async move {
+                    let result = parser::parse_fasta_file(file_path).await;
+                    let _ = tx.send(result);
+                });
+            }
         }
     }
 
