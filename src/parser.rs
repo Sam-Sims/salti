@@ -3,11 +3,50 @@ use needletail::parse_fastx_stdin;
 use needletail::parser::parse_fastx_file;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use rand::seq::{IndexedRandom};
+
+const SEQUENCE_TYPE_TRESHOLD: f32 = 0.5;
+
+#[derive(Debug, Clone, PartialEq)]
+enum SequenceType {
+    Dna,
+    AminoAcid,
+}
 
 #[derive(Debug, Clone)]
 pub struct Alignment {
     pub id: Arc<str>,
     pub sequence: Arc<[u8]>,
+}
+
+async fn detect_sequence_type(alignments: Vec<Alignment>) -> Result<SequenceType> {
+    let aa_chars = b"DEFHIKLMNPQRSVWY";
+    let sampled_alignments: Vec<_> = alignments.choose_multiple(&mut rand::rng(), 100).collect();
+    
+    let (aa_count, total_count) = sampled_alignments.iter().fold(
+        (0, 0),
+        |(aa_count, total_count), alignment| {
+            let seq = alignment.sequence.as_ref();
+            let aa_in_seq = seq.iter().filter(|&&c| aa_chars.contains(&c)).count();
+            let total_in_seq = seq.len();
+
+            (
+                aa_count + aa_in_seq,
+                total_count + total_in_seq,
+            )
+        },
+    );
+
+    println!(
+        "Amino Acid Count: {}, Total Count: {}",
+        aa_count, total_count
+    );
+
+    if aa_count as f32 / total_count as f32 >= SEQUENCE_TYPE_TRESHOLD {
+        Ok(SequenceType::AminoAcid)
+    } else {
+        Ok(SequenceType::Dna)
+    }
 }
 
 pub async fn parse_fasta_file(path: PathBuf) -> Result<Vec<Alignment>> {
@@ -158,5 +197,37 @@ mod tests {
         let temp_file = create_temp_fasta(content);
         let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_detect_sequence_type_dna() {
+        let alignments = vec![
+            Alignment {
+                id: Arc::from("seq1"),
+                sequence: Arc::from(b"ACGTACGT".to_vec()),
+            },
+            Alignment {
+                id: Arc::from("seq2"),
+                sequence: Arc::from(b"TGCA".to_vec()),
+            },
+        ];
+        let result = detect_sequence_type(alignments).await;
+        assert_eq!(result.unwrap(), SequenceType::Dna);
+    }
+
+    #[tokio::test]
+    async fn test_detect_sequence_type_aa() {
+        let alignments = vec![
+            Alignment {
+                id: Arc::from("seq1"),
+                sequence: Arc::from(b"ACDEFGHIKLMNPQRSTVWY".to_vec()),
+            },
+            Alignment {
+                id: Arc::from("seq2"),
+                sequence: Arc::from(b"ACDEFGHIKLMNPQRSTVWY".to_vec()),
+            },
+        ];
+        let result = detect_sequence_type(alignments).await;
+        assert_eq!(result.unwrap(), SequenceType::AminoAcid);
     }
 }
