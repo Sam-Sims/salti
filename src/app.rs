@@ -44,6 +44,7 @@ pub struct App {
     keybindings: KeyBindings,
     options: Options,
     loading_receiver: Option<tokio::sync::oneshot::Receiver<Result<Vec<Alignment>>>>,
+    sequence_type: Option<parser::SequenceType>,
 }
 
 impl App {
@@ -77,6 +78,7 @@ impl App {
             keybindings,
             options,
             loading_receiver: None,
+            sequence_type: None,
         }
     }
 
@@ -103,7 +105,6 @@ impl App {
 
     fn on_parse_success(&mut self, alignments: Vec<Alignment>) {
         self.app_state.load_alignments(alignments);
-
         let sequence_length = self.app_state.sequence_length;
         let sequence_count = self.app_state.alignments.len();
         // viewport keeps its own state - this is fine as these dont change once loaded
@@ -111,6 +112,8 @@ impl App {
             .set_sequence_params(sequence_length, sequence_count);
         self.viewport
             .set_initial_position(self.options.initial_position);
+
+        self.sequence_type = Some(parser::detect_sequence_type(&self.app_state.alignments));
     }
 
     fn switch_app_mode(&mut self, new_state: AppMode) {

@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use rand::seq::{IndexedRandom};
 
-const SEQUENCE_TYPE_TRESHOLD: f32 = 0.5;
+const SEQUENCE_TYPE_THRESHOLD: f32 = 0.5;
 
 #[derive(Debug, Clone, PartialEq)]
-enum SequenceType {
+pub enum SequenceType {
     Dna,
     AminoAcid,
 }
@@ -19,7 +19,7 @@ pub struct Alignment {
     pub sequence: Arc<[u8]>,
 }
 
-async fn detect_sequence_type(alignments: Vec<Alignment>) -> Result<SequenceType> {
+pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
     let aa_chars = b"DEFHIKLMNPQRSVWY";
     let sampled_alignments: Vec<_> = alignments.choose_multiple(&mut rand::rng(), 100).collect();
     
@@ -37,15 +37,10 @@ async fn detect_sequence_type(alignments: Vec<Alignment>) -> Result<SequenceType
         },
     );
 
-    println!(
-        "Amino Acid Count: {}, Total Count: {}",
-        aa_count, total_count
-    );
-
-    if aa_count as f32 / total_count as f32 >= SEQUENCE_TYPE_TRESHOLD {
-        Ok(SequenceType::AminoAcid)
+    if aa_count as f32 / total_count as f32 >= SEQUENCE_TYPE_THRESHOLD {
+        SequenceType::AminoAcid
     } else {
-        Ok(SequenceType::Dna)
+        SequenceType::Dna
     }
 }
 
@@ -211,7 +206,7 @@ mod tests {
                 sequence: Arc::from(b"TGCA".to_vec()),
             },
         ];
-        let result = detect_sequence_type(alignments).await;
+        let result = detect_sequence_type(&alignments);
         assert_eq!(result.unwrap(), SequenceType::Dna);
     }
 
@@ -227,7 +222,7 @@ mod tests {
                 sequence: Arc::from(b"ACDEFGHIKLMNPQRSTVWY".to_vec()),
             },
         ];
-        let result = detect_sequence_type(alignments).await;
+        let result = detect_sequence_type(&alignments);
         assert_eq!(result.unwrap(), SequenceType::AminoAcid);
     }
 }

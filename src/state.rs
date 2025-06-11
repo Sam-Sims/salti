@@ -46,6 +46,7 @@ impl State {
         self.sequence_length = alignments.first().map_or(0, |a| a.sequence.len());
         self.alignments = alignments;
     }
+    
     pub fn cycle_color_scheme(&mut self) {
         self.color_scheme_manager.cycle_scheme();
     }
