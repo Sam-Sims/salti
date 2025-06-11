@@ -1,9 +1,9 @@
 use color_eyre::{Result, eyre::eyre};
 use needletail::parse_fastx_stdin;
 use needletail::parser::parse_fastx_file;
+use rand::seq::IndexedRandom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use rand::seq::{IndexedRandom};
 
 const SEQUENCE_TYPE_THRESHOLD: f32 = 0.5;
 
@@ -22,20 +22,17 @@ pub struct Alignment {
 pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
     let aa_chars = b"DEFHIKLMNPQRSVWY";
     let sampled_alignments: Vec<_> = alignments.choose_multiple(&mut rand::rng(), 100).collect();
-    
-    let (aa_count, total_count) = sampled_alignments.iter().fold(
-        (0, 0),
-        |(aa_count, total_count), alignment| {
-            let seq = alignment.sequence.as_ref();
-            let aa_in_seq = seq.iter().filter(|&&c| aa_chars.contains(&c)).count();
-            let total_in_seq = seq.len();
 
-            (
-                aa_count + aa_in_seq,
-                total_count + total_in_seq,
-            )
-        },
-    );
+    let (aa_count, total_count) =
+        sampled_alignments
+            .iter()
+            .fold((0, 0), |(aa_count, total_count), alignment| {
+                let seq = alignment.sequence.as_ref();
+                let aa_in_seq = seq.iter().filter(|&&c| aa_chars.contains(&c)).count();
+                let total_in_seq = seq.len();
+
+                (aa_count + aa_in_seq, total_count + total_in_seq)
+            });
 
     if aa_count as f32 / total_count as f32 >= SEQUENCE_TYPE_THRESHOLD {
         SequenceType::AminoAcid
