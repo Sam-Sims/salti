@@ -1,4 +1,4 @@
-use crate::config::schemes::ColorSchemeType;
+use crate::config::schemes::ColorScheme;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -10,7 +10,7 @@ pub struct Options {
     /// fps
     pub fps: f32,
     /// Color scheme to use for nucleotides
-    pub color_scheme: ColorSchemeType,
+    pub color_scheme: ColorScheme,
 }
 
 impl Default for Options {
@@ -19,7 +19,7 @@ impl Default for Options {
             file_path: PathBuf::new(),
             initial_position: 0,
             fps: 25.0,
-            color_scheme: ColorSchemeType::default(),
+            color_scheme: ColorScheme::default(),
         }
     }
 }

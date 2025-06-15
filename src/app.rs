@@ -11,7 +11,6 @@ use crate::components::sequence_id::SequenceIdComponent;
 use crate::components::ui::UiComponent;
 use crate::config::keybindings::{KeyAction, KeyBindings};
 use crate::config::options::Options;
-use crate::config::schemes::ColorSchemeFormatter;
 use crate::layout::AppLayout;
 use crate::parser::{self, Alignment};
 use crate::state::{LoadingState, State};
@@ -55,7 +54,7 @@ impl App {
 
         let mut app_state = State::new(consensus_rx);
         app_state.file_path = Some(options.file_path.clone());
-        app_state.color_scheme_manager = ColorSchemeFormatter::new(options.color_scheme);
+        app_state.color_scheme = options.color_scheme;
         let viewport = Viewport::default();
         let main_ui_component = UiComponent;
         let alignment_component = AlignmentComponent;
@@ -113,7 +112,13 @@ impl App {
         self.viewport
             .set_initial_position(self.options.initial_position);
 
-        self.sequence_type = Some(parser::detect_sequence_type(&self.app_state.alignments));
+        // Detect sequence type and automatically set appropriate color scheme
+        let detected_sequence_type = parser::detect_sequence_type(&self.app_state.alignments);
+        self.sequence_type = Some(detected_sequence_type);
+
+        // Update color scheme based on detected sequence type
+        self.app_state.color_scheme =
+            crate::config::schemes::ColorScheme::get_default_scheme(detected_sequence_type);
     }
 
     fn switch_app_mode(&mut self, new_state: AppMode) {

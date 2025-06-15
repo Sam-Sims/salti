@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 const SEQUENCE_TYPE_THRESHOLD: f32 = 0.5;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SequenceType {
     Dna,
     AminoAcid,
@@ -191,8 +191,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_detect_sequence_type_dna() {
+    #[test]
+    fn test_detect_sequence_type_dna() {
         let alignments = vec![
             Alignment {
                 id: Arc::from("seq1"),
@@ -204,11 +204,11 @@ mod tests {
             },
         ];
         let result = detect_sequence_type(&alignments);
-        assert_eq!(result.unwrap(), SequenceType::Dna);
+        assert_eq!(result, SequenceType::Dna);
     }
 
-    #[tokio::test]
-    async fn test_detect_sequence_type_aa() {
+    #[test]
+    fn test_detect_sequence_type_aa() {
         let alignments = vec![
             Alignment {
                 id: Arc::from("seq1"),
@@ -220,6 +220,6 @@ mod tests {
             },
         ];
         let result = detect_sequence_type(&alignments);
-        assert_eq!(result.unwrap(), SequenceType::AminoAcid);
+        assert_eq!(result, SequenceType::AminoAcid);
     }
 }
