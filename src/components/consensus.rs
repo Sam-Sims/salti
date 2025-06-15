@@ -166,7 +166,6 @@ impl ConsensusComponent {
 
         let consensus = &app_state.consensus;
         let color_scheme = app_state.color_scheme;
-        let _sequence_length = app_state.sequence_length;
         let horizontal_range = viewport.horizontal_range();
 
         let consensus_paragraph = if let Some(consensus_data) = &consensus {

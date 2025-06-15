@@ -93,12 +93,11 @@ impl App {
                     let _ = tx.send(result);
                 });
                 return;
-            } else {
-                tokio::spawn(async move {
-                    let result = parser::parse_fasta_file(file_path).await;
-                    let _ = tx.send(result);
-                });
             }
+            tokio::spawn(async move {
+                let result = parser::parse_fasta_file(file_path).await;
+                let _ = tx.send(result);
+            });
         }
     }
 

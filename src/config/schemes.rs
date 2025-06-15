@@ -1,8 +1,9 @@
 use crate::parser::SequenceType;
 use ratatui::prelude::{Color, Span, Style, Stylize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorScheme {
+    #[default]
     Dna,
     DnaBackground,
     AminoAcid,
@@ -10,7 +11,7 @@ pub enum ColorScheme {
 }
 
 impl ColorScheme {
-    pub fn name(&self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             ColorScheme::Dna => "DNA",
             ColorScheme::DnaBackground => "DNA - Background",
@@ -43,11 +44,6 @@ impl ColorScheme {
     }
 }
 
-impl Default for ColorScheme {
-    fn default() -> Self {
-        ColorScheme::Dna
-    }
-}
 
 fn format_nucleotide(byte: u8) -> Option<Color> {
     match byte {
@@ -75,31 +71,16 @@ const PROLINE: ratatui::prelude::Color = Color::LightYellow;
 const AROMATIC: ratatui::prelude::Color = Color::LightCyan;
 const SPECIAL: ratatui::prelude::Color = Color::White;
 
-
 fn format_amino_acid(byte: u8) -> Option<Color> {
     match byte {
-        b'A' | b'a' => Some(HYDROPHOBIC),
-        b'V' | b'v' => Some(HYDROPHOBIC),
-        b'L' | b'l' => Some(HYDROPHOBIC),
-        b'I' | b'i' => Some(HYDROPHOBIC),
-        b'M' | b'm' => Some(HYDROPHOBIC),
-        b'F' | b'f' => Some(HYDROPHOBIC),
-        b'W' | b'w' => Some(HYDROPHOBIC),
-        b'Y' | b'y' => Some(AROMATIC),
-        b'S' | b's' => Some(POLAR),
-        b'T' | b't' => Some(POLAR),
-        b'N' | b'n' => Some(POLAR),
-        b'Q' | b'q' => Some(POLAR),
-        b'C' | b'c' => Some(HYDROPHOBIC),
-        b'K' | b'k' => Some(POSITIVE_CHARGE),
-        b'R' | b'r' => Some(POSITIVE_CHARGE),
-        b'H' | b'h' => Some(AROMATIC),
-        b'D' | b'd' => Some(NEGATIVE_CHARGE),
-        b'E' | b'e' => Some(NEGATIVE_CHARGE),
+        b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f' | b'W' | b'w' | b'C' | b'c' => Some(HYDROPHOBIC),
+        b'Y' | b'y' | b'H' | b'h' => Some(AROMATIC),
+        b'S' | b's' | b'T' | b't' | b'N' | b'n' | b'Q' | b'q' => Some(POLAR),
+        b'K' | b'k' | b'R' | b'r' => Some(POSITIVE_CHARGE),
+        b'D' | b'd' | b'E' | b'e' => Some(NEGATIVE_CHARGE),
         b'G' | b'g' => Some(GLYCINES),
         b'P' | b'p' => Some(PROLINE),
-        b'-' => Some(SPECIAL),
-        b'X' | b'x' => Some(SPECIAL),
+        b'-' | b'X' | b'x' => Some(SPECIAL),
         _ => None,
     }
 }
@@ -131,7 +112,10 @@ pub fn get_nucleotide_style(byte: u8, scheme: ColorScheme) -> Style {
 
     match color {
         Some(c) => {
-            if matches!(scheme, ColorScheme::DnaBackground | ColorScheme::AminoAcidBackground) {
+            if matches!(
+                scheme,
+                ColorScheme::DnaBackground | ColorScheme::AminoAcidBackground
+            ) {
                 Style::default().bg(c).fg(Color::Black)
             } else {
                 Style::default().fg(c).bold()
@@ -194,7 +178,6 @@ mod tests {
         assert_eq!(spans[5].style.bg, None);
         assert_eq!(spans[6].style.fg, None);
     }
-
 
     #[test]
     fn test_scheme_cycling() {

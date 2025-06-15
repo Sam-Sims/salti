@@ -293,7 +293,7 @@ pub fn format_key_for_display(key: KeyCode, modifiers: KeyModifiers) -> String {
     };
 
     if modifiers.contains(KeyModifiers::SHIFT) {
-        format!("Shift + {}", key_str)
+        format!("Shift + {key_str}")
     } else {
         key_str
     }
