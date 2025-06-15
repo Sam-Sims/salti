@@ -165,14 +165,13 @@ impl ConsensusComponent {
         f.render_widget(block, area);
 
         let consensus = &app_state.consensus;
-        let color_scheme_manager = &app_state.color_scheme_manager;
-        let _sequence_length = app_state.sequence_length;
+        let color_scheme = app_state.color_scheme;
         let horizontal_range = viewport.horizontal_range();
 
         let consensus_paragraph = if let Some(consensus_data) = &consensus {
             let seq_slice = &consensus_data
                 [horizontal_range.start..horizontal_range.end.min(consensus_data.len())];
-            let spans = color_scheme_manager.format_sequence_bytes(seq_slice);
+            let spans = crate::config::schemes::format_sequence_bytes(seq_slice, color_scheme);
             Paragraph::new(Line::from(spans))
         } else {
             let loading_message = Line::from("Calculating consensus...")

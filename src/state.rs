@@ -1,4 +1,4 @@
-use crate::config::schemes::ColorSchemeFormatter;
+use crate::config::schemes::ColorScheme;
 use crate::parser::Alignment;
 use std::path::PathBuf;
 
@@ -25,7 +25,7 @@ pub struct State {
     pub sequence_length: usize,
     pub loading_state: LoadingState,
     pub consensus: Option<Vec<u8>>,
-    pub color_scheme_manager: ColorSchemeFormatter,
+    pub color_scheme: ColorScheme,
     consensus_receiver: tokio::sync::watch::Receiver<Vec<u8>>,
 }
 
@@ -37,7 +37,7 @@ impl State {
             sequence_length: 0,
             loading_state: LoadingState::default(),
             consensus: None,
-            color_scheme_manager: ColorSchemeFormatter::default(),
+            color_scheme: ColorScheme::default(),
             consensus_receiver,
         }
     }
@@ -46,8 +46,9 @@ impl State {
         self.sequence_length = alignments.first().map_or(0, |a| a.sequence.len());
         self.alignments = alignments;
     }
+
     pub fn cycle_color_scheme(&mut self) {
-        self.color_scheme_manager.cycle_scheme();
+        self.color_scheme = ColorScheme::cycle(self.color_scheme);
     }
 
     pub fn check_consensus_updates(&mut self) {

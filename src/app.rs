@@ -11,7 +11,6 @@ use crate::components::sequence_id::SequenceIdComponent;
 use crate::components::ui::UiComponent;
 use crate::config::keybindings::{KeyAction, KeyBindings};
 use crate::config::options::Options;
-use crate::config::schemes::ColorSchemeFormatter;
 use crate::layout::AppLayout;
 use crate::parser::{self, Alignment};
 use crate::state::{LoadingState, State};
@@ -44,6 +43,7 @@ pub struct App {
     keybindings: KeyBindings,
     options: Options,
     loading_receiver: Option<tokio::sync::oneshot::Receiver<Result<Vec<Alignment>>>>,
+    sequence_type: Option<parser::SequenceType>,
 }
 
 impl App {
@@ -54,7 +54,7 @@ impl App {
 
         let mut app_state = State::new(consensus_rx);
         app_state.file_path = Some(options.file_path.clone());
-        app_state.color_scheme_manager = ColorSchemeFormatter::new(options.color_scheme);
+        app_state.color_scheme = options.color_scheme;
         let viewport = Viewport::default();
         let main_ui_component = UiComponent;
         let alignment_component = AlignmentComponent;
@@ -77,18 +77,25 @@ impl App {
             keybindings,
             options,
             loading_receiver: None,
+            sequence_type: None,
         }
     }
 
     fn parse_alignments(&mut self) {
         self.app_state.loading_state = LoadingState::Loading;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.loading_receiver = Some(rx);
 
         if let Some(file_path) = self.app_state.file_path.clone() {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            self.loading_receiver = Some(rx);
-
+            if file_path.as_os_str() == "-" {
+                tokio::spawn(async move {
+                    let result = parser::parse_fasta_stdin().await;
+                    let _ = tx.send(result);
+                });
+                return;
+            }
             tokio::spawn(async move {
-                let result = parser::parse_fasta(&file_path).await;
+                let result = parser::parse_fasta_file(file_path).await;
                 let _ = tx.send(result);
             });
         }
@@ -96,7 +103,6 @@ impl App {
 
     fn on_parse_success(&mut self, alignments: Vec<Alignment>) {
         self.app_state.load_alignments(alignments);
-
         let sequence_length = self.app_state.sequence_length;
         let sequence_count = self.app_state.alignments.len();
         // viewport keeps its own state - this is fine as these dont change once loaded
@@ -104,6 +110,14 @@ impl App {
             .set_sequence_params(sequence_length, sequence_count);
         self.viewport
             .set_initial_position(self.options.initial_position);
+
+        // Detect sequence type and automatically set appropriate color scheme
+        let detected_sequence_type = parser::detect_sequence_type(&self.app_state.alignments);
+        self.sequence_type = Some(detected_sequence_type);
+
+        // Update color scheme based on detected sequence type
+        self.app_state.color_scheme =
+            crate::config::schemes::ColorScheme::get_default_scheme(detected_sequence_type);
     }
 
     fn switch_app_mode(&mut self, new_state: AppMode) {

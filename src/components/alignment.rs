@@ -1,4 +1,4 @@
-use crate::config::schemes::ColorSchemeFormatter;
+use crate::config::schemes::{ColorScheme, format_sequence_bytes};
 use crate::state::State;
 use crate::viewport::Viewport;
 use ratatui::Frame;
@@ -69,7 +69,7 @@ impl AlignmentComponent {
     fn render_sequence_column(
         alignments: &[crate::parser::Alignment],
         viewport: &Viewport,
-        color_scheme_manager: &ColorSchemeFormatter,
+        color_scheme: ColorScheme,
         area: Rect,
         f: &mut Frame,
     ) {
@@ -86,7 +86,7 @@ impl AlignmentComponent {
             .map(|alignment| {
                 let end = horizontal_range.end.min(alignment.sequence.len());
                 let seq_slice = &alignment.sequence[horizontal_range.start..end];
-                let spans = color_scheme_manager.format_sequence_bytes(seq_slice);
+                let spans = format_sequence_bytes(seq_slice, color_scheme);
                 Line::from(spans)
             })
             .collect();
@@ -110,7 +110,7 @@ impl AlignmentComponent {
         viewport: &Viewport,
     ) {
         let alignments = &app_state.alignments;
-        let color_scheme_manager = &app_state.color_scheme_manager;
+        let color_scheme = app_state.color_scheme;
 
         let inner_area = Self::render_sequence_border(layout.sequence_area, f);
 
@@ -120,12 +120,6 @@ impl AlignmentComponent {
         let sequence_content_area = areas[1];
 
         Self::render_ruler(viewport, ruler_area, f, app_state);
-        Self::render_sequence_column(
-            alignments,
-            viewport,
-            color_scheme_manager,
-            sequence_content_area,
-            f,
-        );
+        Self::render_sequence_column(alignments, viewport, color_scheme, sequence_content_area, f);
     }
 }
