@@ -44,7 +44,6 @@ impl ColorScheme {
     }
 }
 
-
 fn format_nucleotide(byte: u8) -> Option<Color> {
     match byte {
         b'A' | b'a' => Some(Color::Green),
@@ -73,7 +72,8 @@ const SPECIAL: ratatui::prelude::Color = Color::White;
 
 fn format_amino_acid(byte: u8) -> Option<Color> {
     match byte {
-        b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f' | b'W' | b'w' | b'C' | b'c' => Some(HYDROPHOBIC),
+        b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f'
+        | b'W' | b'w' | b'C' | b'c' => Some(HYDROPHOBIC),
         b'Y' | b'y' | b'H' | b'h' => Some(AROMATIC),
         b'S' | b's' | b'T' | b't' | b'N' | b'n' | b'Q' | b'q' => Some(POLAR),
         b'K' | b'k' | b'R' | b'r' => Some(POSITIVE_CHARGE),
