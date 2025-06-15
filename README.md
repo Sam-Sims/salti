@@ -1,3 +1,7 @@
+![GitHub release (with filter)](https://img.shields.io/github/v/release/sam-sims/salti)
+[![test](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/Sam-Sims/kractor/actions/workflows/test.yaml)
+[![check](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml/badge.svg?branch=main)](https://github.com/Sam-Sims/kractor/actions/workflows/check.yaml)
+
 # salti
 
 A modern, multiple sequence alignment (MSA) viewer - built for the terminal.
