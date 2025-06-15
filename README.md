@@ -14,15 +14,13 @@ Aiming to be feature rich, fast and optimised for large alignments - salti is un
 - **Consensus calculation**: Consensus is calcualted in the background for the visable alignment range
 - **Navigation**: Quick navigation to specific alignment positions or sequence names
 - **Fuzzy sequence name search**: Find sequences by name using fuzzy matching
-
+- **Supports DNA and AA alignments**: Guesses file type (DNA/AA) and loads an appropriate colour scheme by default
 
 ## Planned Features
-- **Amino Acid support** - Auto-detect and colour amino acids
 - **Amino Acid translation** - Background translation of AA codons
 - **Support other file formats** - Support other alignment file formats e.g phylip
 - **Extended colour schemes** - e.g by identity
 - **Screenshots** - Ability to export screenshots of current region
-- **stdin** - Read from stdin
 - **Filtering** - Filter records
 - **Options** - Options widget to configure options in app
 
