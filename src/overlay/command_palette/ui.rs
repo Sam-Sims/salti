@@ -258,10 +258,9 @@ impl CommandPaletteState {
         let area_width = area.width as usize;
         let area_height = area.height as usize;
         let help_spec = self.help_overlay_spec();
-        let help_height = help_spec
-            .map_or(0, |spec| {
-                Self::help_overlay_required_rows(spec, area_width, theme).min(area_height) as u16
-            });
+        let help_height = help_spec.map_or(0, |spec| {
+            Self::help_overlay_required_rows(spec, area_width, theme).min(area_height) as u16
+        });
 
         let (help_area, content_area) = if help_height == 0 {
             (None, area)
@@ -311,9 +310,9 @@ impl CommandPaletteState {
                 .clamp(1, COMMAND_GRID_MAX_VISIBLE_ROWS)
         };
 
-        let help_rows = self
-            .help_overlay_spec()
-            .map_or(0, |spec| Self::help_overlay_required_rows(spec, width, theme));
+        let help_rows = self.help_overlay_spec().map_or(0, |spec| {
+            Self::help_overlay_required_rows(spec, width, theme)
+        });
 
         rows.saturating_add(help_rows).min(max_height) as u16
     }

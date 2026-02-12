@@ -109,7 +109,12 @@ fn render_mouse_selection(f: &mut Frame, layout: &AppLayout, core: &CoreState, u
         shader(
             f,
             id_inner_area,
-            Rect::new(id_inner_area.x, row_y, id_end_x.saturating_sub(id_inner_area.x), 1),
+            Rect::new(
+                id_inner_area.x,
+                row_y,
+                id_end_x.saturating_sub(id_inner_area.x),
+                1,
+            ),
             ui.theme.accent,
             0.3,
         );
