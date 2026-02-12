@@ -15,6 +15,8 @@ It is designed for fast interactive browsing primarily on remote servers, and HP
 
 ## Features
 
+https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
+
 ### Fast
 
 `salti` is built for speed while browsing and loading large alignments.
