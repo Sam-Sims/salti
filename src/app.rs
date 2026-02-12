@@ -1,298 +1,499 @@
 use std::time::Duration;
 
-use color_eyre::{Result, eyre::eyre};
-use crossterm::event::{Event, EventStream, KeyCode};
-
-use crate::components::alignment::AlignmentComponent;
-use crate::components::consensus::ConsensusComponent;
-use crate::components::help::HelpComponent;
-use crate::components::jump::JumpComponent;
-use crate::components::sequence_id::SequenceIdComponent;
-use crate::components::ui::UiComponent;
-use crate::config::keybindings::{KeyAction, KeyBindings};
-use crate::config::options::Options;
-use crate::layout::AppLayout;
-use crate::parser::{self, Alignment};
-use crate::state::{LoadingState, State};
-use crate::viewport::Viewport;
-use ratatui::{DefaultTerminal, Frame};
+use color_eyre::Result;
+use crossterm::event::{
+    Event as TermEvent, EventStream, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
+use ratatui::DefaultTerminal;
+use ratatui::layout::Rect;
+use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
+use tracing::{debug, error, info, trace, warn};
 
-const SCROLL_AMOUNT: usize = 1;
-const SKIP_SCROLL_AMOUNT: usize = 10;
+use crate::cli::StartupState;
+use crate::config::keybindings::{self, KeyAction};
+use crate::core::command::CoreAction;
+use crate::core::jobs::{ConsensusRequest, spawn_consensus_worker};
+use crate::core::{CoreAsyncEvent, CoreState, LoadingState};
+use crate::ui::layout::AppLayout;
+use crate::ui::render;
+use crate::ui::selection::visible_sequence_rows;
+use crate::ui::{MouseSelection, UiAction, UiState};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMode {
-    Alignment,
-    Help,
-    Jump,
+/// step size (rows) for single scroll commands
+const SCROLL_STEP: usize = 1;
+/// step size (rows) for fast scroll commands
+const FAST_SCROLL_STEP: usize = 10;
+/// fps of render loop
+const RENDER_FPS: f32 = 120.0;
+
+#[derive(Debug)]
+pub enum Action {
+    Core(CoreAction),
+    Ui(UiAction),
+    Quit,
 }
 
 #[derive(Debug)]
 pub struct App {
+    core: CoreState,
+    ui: UiState,
     should_quit: bool,
-    state: AppMode,
-    app_state: State,
-    viewport: Viewport,
-    ui_component: UiComponent,
-    alignment_component: AlignmentComponent,
-    consensus_component: ConsensusComponent,
-    sequence_id_component: SequenceIdComponent,
-    help_component: HelpComponent,
-    jump_component: JumpComponent,
-    keybindings: KeyBindings,
-    options: Options,
-    loading_receiver: Option<tokio::sync::oneshot::Receiver<Result<Vec<Alignment>>>>,
-    sequence_type: Option<parser::SequenceType>,
+    terminal_size: Rect,
+    box_selection_anchor: Option<(usize, usize)>,
 }
 
 impl App {
-    pub fn new(options: Options) -> Self {
-        let keybindings = KeyBindings::default();
-
-        let (consensus_tx, consensus_rx) = tokio::sync::watch::channel(Vec::new());
-
-        let mut app_state = State::new(consensus_rx);
-        app_state.file_path = Some(options.file_path.clone());
-        app_state.color_scheme = options.color_scheme;
-        let viewport = Viewport::default();
-        let main_ui_component = UiComponent;
-        let alignment_component = AlignmentComponent;
-        let id_view_component = SequenceIdComponent;
-        let help_component = HelpComponent;
-        let consensus_component = ConsensusComponent::new(consensus_tx);
-        let jump_component = JumpComponent::new();
-
+    #[must_use]
+    pub fn new(startup: StartupState) -> Self {
         Self {
+            core: CoreState::new(startup),
+            ui: UiState::default(),
             should_quit: false,
-            state: AppMode::Alignment,
-            app_state,
-            viewport,
-            ui_component: main_ui_component,
-            alignment_component,
-            consensus_component,
-            sequence_id_component: id_view_component,
-            help_component,
-            jump_component,
-            keybindings,
-            options,
-            loading_receiver: None,
-            sequence_type: None,
+            terminal_size: Rect::new(0, 0, 0, 0),
+            box_selection_anchor: None,
         }
     }
 
-    fn parse_alignments(&mut self) {
-        self.app_state.loading_state = LoadingState::Loading;
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.loading_receiver = Some(rx);
+    #[must_use]
+    fn terminal_area(&self) -> Rect {
+        Rect::new(
+            0,
+            0,
+            self.terminal_size.width,
+            self.terminal_size.height.saturating_sub(1),
+        )
+    }
 
-        if let Some(file_path) = self.app_state.file_path.clone() {
-            if file_path.as_os_str() == "-" {
-                tokio::spawn(async move {
-                    let result = parser::parse_fasta_stdin().await;
-                    let _ = tx.send(result);
-                });
-                return;
+    /// Applies a sequence of [`Action`] values in order and performs their side effects immediately.
+    ///
+    /// Actions are either core commands, UI actions, or quit signals and define how the app state
+    /// should change in response to user input or async events.
+    ///
+    /// Core actions are forwarded to [`CoreState::apply_action`], which may run async functions
+    /// via the `*_tx` channels.
+    ///
+    /// UI actions are applied to [`UiState`] via its own handler.
+    ///
+    /// [`Action::Quit`] sets `should_quit`, which causes the main event loop to exit on its next check.
+    fn apply_actions<I>(
+        &mut self,
+        actions: I,
+        async_tx: &mpsc::Sender<CoreAsyncEvent>,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) where
+        I: IntoIterator<Item = Action>,
+    {
+        for action in actions {
+            match action {
+                Action::Core(action) => {
+                    let resets_mouse_selection = matches!(
+                        action,
+                        CoreAction::SetFilter { .. }
+                            | CoreAction::ClearFilter
+                            | CoreAction::SetReference(_)
+                            | CoreAction::ClearReference
+                            | CoreAction::LoadAlignment { .. }
+                    );
+                    trace!(?action, "dispatching core action");
+                    self.core.apply_action(action, async_tx, consensus_tx);
+                    if resets_mouse_selection {
+                        self.clear_mouse_state();
+                        self.ui
+                            .apply_action(UiAction::ClearMouseSelection, &self.core);
+                    }
+                }
+                Action::Ui(action) => {
+                    self.ui.apply_action(action, &self.core);
+                }
+                Action::Quit => {
+                    self.should_quit = true;
+                }
             }
-            tokio::spawn(async move {
-                let result = parser::parse_fasta_file(file_path).await;
-                let _ = tx.send(result);
-            });
         }
     }
 
-    fn on_parse_success(&mut self, alignments: Vec<Alignment>) {
-        self.app_state.load_alignments(alignments);
-        let sequence_length = self.app_state.sequence_length;
-        let sequence_count = self.app_state.alignments.len();
-        // viewport keeps its own state - this is fine as these dont change once loaded
-        self.viewport
-            .set_sequence_params(sequence_length, sequence_count);
-        self.viewport
-            .set_initial_position(self.options.initial_position);
-
-        // Detect sequence type and automatically set appropriate color scheme
-        let detected_sequence_type = parser::detect_sequence_type(&self.app_state.alignments);
-        self.sequence_type = Some(detected_sequence_type);
-
-        // Update color scheme based on detected sequence type
-        self.app_state.color_scheme =
-            crate::config::schemes::ColorScheme::get_default_scheme(detected_sequence_type);
-    }
-
-    fn switch_app_mode(&mut self, new_state: AppMode) {
-        match new_state {
-            AppMode::Jump => {
-                let alignments = &self.app_state.alignments;
-                let sequence_names: Vec<String> =
-                    alignments.iter().map(|a| a.id.to_string()).collect();
-                self.jump_component.clear(&sequence_names);
-            }
-            AppMode::Help | AppMode::Alignment => {}
-        }
-        self.state = new_state;
-    }
-
-    fn execute_action(&mut self, action: KeyAction) {
+    /// Simple match to convert keybinding actions where extra logic isnt needed
+    ///
+    /// `match_action` handles key actions that require extra logic,
+    #[must_use]
+    fn map_key_action(action: KeyAction) -> Option<Action> {
         match action {
-            KeyAction::Quit => self.should_quit = true,
-            KeyAction::ToggleHelp => match self.state {
-                AppMode::Help => self.switch_app_mode(AppMode::Alignment),
-                _ => self.switch_app_mode(AppMode::Help),
-            },
-            KeyAction::ToggleJump => {
-                self.switch_app_mode(AppMode::Jump);
+            KeyAction::Quit => Some(Action::Quit),
+            KeyAction::OpenCommandPalette => Some(Action::Ui(UiAction::OpenCommandPalette)),
+            KeyAction::ToggleTranslationView => {
+                Some(Action::Core(CoreAction::ToggleTranslationView))
             }
-            KeyAction::CloseWidget => {
-                self.switch_app_mode(AppMode::Alignment);
-            }
-            KeyAction::RunJump => {
-                if let Some(seq_index) = self.jump_component.get_selected_sequence_index() {
-                    self.viewport.jump_to_sequence(seq_index);
-                }
-                if let Some(position) = self.jump_component.get_position() {
-                    self.viewport.jump_to_position(position.saturating_sub(1));
-                }
-                self.switch_app_mode(AppMode::Alignment);
-            }
-            KeyAction::JumpInputChar(c) => {
-                let alignments = &self.app_state.alignments;
-                let sequence_names: Vec<String> =
-                    alignments.iter().map(|a| a.id.to_string()).collect();
-                self.jump_component.add_char(c, &sequence_names);
-            }
-            KeyAction::JumpInputBackspace => {
-                let alignments = &self.app_state.alignments;
-                let sequence_names: Vec<String> =
-                    alignments.iter().map(|a| a.id.to_string()).collect();
-                self.jump_component.backspace(&sequence_names);
-            }
-            KeyAction::JumpToggleMode => {
-                self.jump_component.toggle_mode();
-            }
-            KeyAction::JumpMoveUp => {
-                self.jump_component.move_selection_up();
-            }
-            KeyAction::JumpMoveDown => {
-                self.jump_component.move_selection_down();
-            }
-            KeyAction::ScrollDown => {
-                self.viewport.scroll_down(SCROLL_AMOUNT);
-            }
-            KeyAction::SkipDown => {
-                self.viewport.scroll_down(SKIP_SCROLL_AMOUNT);
-            }
-            KeyAction::ScrollUp => {
-                self.viewport.scroll_up(SCROLL_AMOUNT);
-            }
-            KeyAction::SkipUp => {
-                self.viewport.scroll_up(SKIP_SCROLL_AMOUNT);
-            }
-            KeyAction::ScrollLeft => {
-                self.viewport.scroll_left(SCROLL_AMOUNT);
-            }
-            KeyAction::ScrollRight => {
-                self.viewport.scroll_right(SCROLL_AMOUNT);
-            }
-            KeyAction::SkipLeft => {
-                self.viewport.scroll_left(SKIP_SCROLL_AMOUNT);
-            }
-            KeyAction::SkipRight => {
-                self.viewport.scroll_right(SKIP_SCROLL_AMOUNT);
-            }
+            KeyAction::ScrollDown => Some(Action::Core(CoreAction::ScrollDown {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::SkipDown => Some(Action::Core(CoreAction::ScrollDown {
+                amount: FAST_SCROLL_STEP,
+            })),
+            KeyAction::ScrollUp => Some(Action::Core(CoreAction::ScrollUp {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::SkipUp => Some(Action::Core(CoreAction::ScrollUp {
+                amount: FAST_SCROLL_STEP,
+            })),
+            KeyAction::ScrollLeft => Some(Action::Core(CoreAction::ScrollLeft {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::SkipLeft => Some(Action::Core(CoreAction::ScrollLeft {
+                amount: FAST_SCROLL_STEP,
+            })),
+            KeyAction::ScrollRight => Some(Action::Core(CoreAction::ScrollRight {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::SkipRight => Some(Action::Core(CoreAction::ScrollRight {
+                amount: FAST_SCROLL_STEP,
+            })),
+            KeyAction::ScrollNamesLeft => Some(Action::Core(CoreAction::ScrollNamesLeft {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::ScrollNamesRight => Some(Action::Core(CoreAction::ScrollNamesRight {
+                amount: SCROLL_STEP,
+            })),
+            KeyAction::JumpToStart | KeyAction::JumpToEnd => None,
+        }
+    }
+
+    /// Maps a keybinding action to an app action with any extra logic needed and applies it.
+    fn match_action(
+        &mut self,
+        action: KeyAction,
+        async_tx: &mpsc::Sender<CoreAsyncEvent>,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) {
+        match action {
             KeyAction::JumpToStart => {
-                self.viewport.jump_to_start();
+                if self.core.data.sequence_length > 0 {
+                    self.apply_actions(
+                        [Action::Core(CoreAction::JumpToPosition(0))],
+                        async_tx,
+                        consensus_tx,
+                    );
+                }
             }
             KeyAction::JumpToEnd => {
-                self.viewport.jump_to_end();
+                if let Some(position) = self.core.data.sequence_length.checked_sub(1) {
+                    self.apply_actions(
+                        [Action::Core(CoreAction::JumpToPosition(position))],
+                        async_tx,
+                        consensus_tx,
+                    );
+                }
             }
-            KeyAction::CycleColorScheme => {
-                self.app_state.cycle_color_scheme();
-            }
-        }
-    }
-
-    fn handle_event(&mut self, event: &Event) {
-        if let Some(key) = event.as_key_press_event() {
-            if let Some(binding) =
-                self.keybindings
-                    .loookup_binding_context(key.code, key.modifiers, self.state)
-            {
-                self.execute_action(binding.action);
-                return;
-            }
-
-            if let KeyCode::Char(c) = key.code {
-                self.execute_action(KeyAction::JumpInputChar(c));
+            other => {
+                if let Some(mapped_action) = Self::map_key_action(other) {
+                    self.apply_actions([mapped_action], async_tx, consensus_tx);
+                }
             }
         }
     }
 
-    fn render(&mut self, frame: &mut Frame) {
-        let layout = AppLayout::new(frame.area());
+    /// Handles a terminal key event.
+    ///
+    /// When the command palette is open, all key input is passed to the palette until it closes
+    /// Otherwise, the key is resolved through configured keybindings. Unbound keys are ignored.
+    fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        async_tx: &mpsc::Sender<CoreAsyncEvent>,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) {
+        trace!(?key, "received key event");
+        self.ui
+            .apply_action(UiAction::ClearCommandError, &self.core);
 
-        let visible_width = layout.sequence_area.width.saturating_sub(2) as usize;
-        let visible_height = layout.sequence_area.height.saturating_sub(4) as usize;
-        self.viewport
-            .update_dimensions(visible_width, visible_height);
-
-        let viewport = self.viewport.clone();
-        self.ui_component
-            .render(frame, frame.area(), &self.app_state, &viewport);
-
-        self.sequence_id_component
-            .render(frame, &layout, &self.app_state, &viewport);
-
-        self.alignment_component
-            .render(frame, &layout, &self.app_state, &viewport);
-
-        self.consensus_component
-            .render(frame, &layout, &mut self.app_state, &viewport);
-
-        match self.state {
-            AppMode::Help => {
-                self.help_component
-                    .render(frame, frame.area(), &self.keybindings);
-            }
-            AppMode::Jump => {
-                self.jump_component
-                    .render(frame, frame.area(), &self.app_state);
-            }
-            AppMode::Alignment => {}
+        // if a palette is open, all key events go to it until it's closed
+        if let Some(palette) = self.ui.overlay.palette.as_mut() {
+            trace!("forwarding key event to command palette");
+            // the palette will only ever return an action, even if its an action to close itself,
+            // so they are immediately applied
+            let actions = palette.handle_key_event(key);
+            self.apply_actions(actions, async_tx, consensus_tx);
+            return;
+        }
+        if let Some(action) = keybindings::lookup(key.code, key.modifiers) {
+            trace!(?action, "resolved keybinding action");
+            self.match_action(action, async_tx, consensus_tx);
+        } else {
+            trace!("no keybinding action for key event");
         }
     }
 
+    /// Try and load an alignment file.
+    ///
+    /// If no file path is configured, loading is marked as [`LoadingState::Idle`] so the UI can
+    /// present an idle status. If a path exists, this issues [`CoreAction::LoadAlignment`]
+    /// command, which performs the loading async.
+    fn try_file_load(
+        &mut self,
+        async_tx: &mpsc::Sender<CoreAsyncEvent>,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) {
+        let Some(file_path) = self.core.data.file_path.as_ref() else {
+            info!("no startup file provided; entering idle loading state");
+            self.core.loading_state = LoadingState::Idle;
+            return;
+        };
+        let file_path = file_path.clone();
+        debug!(path = ?file_path, "queueing startup alignment load");
+        self.core.apply_action(
+            CoreAction::LoadAlignment { path: file_path },
+            async_tx,
+            consensus_tx,
+        );
+    }
+
+    /// Updates viewport after a terminal resize.
+    ///
+    /// A viewport update can trigger a consensus recalculation if the visible alignment pane width
+    /// changes enough to alter the current windowing.
+    fn handle_resize(
+        &mut self,
+        width: u16,
+        height: u16,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) {
+        self.terminal_size = Rect::new(0, 0, width, height);
+        let content_height = height.saturating_sub(1);
+        let layout = AppLayout::new(Rect::new(0, 0, width, content_height));
+
+        let visible_width = layout.alignment_pane_area.width.saturating_sub(2) as usize;
+        let visible_height = layout.alignment_pane_area.height.saturating_sub(4) as usize;
+        let number_width = self.core.data.sequences.len().max(1).to_string().len();
+        let number_prefix_width = number_width + 1;
+        let name_visible_width = layout
+            .sequence_id_pane_area
+            .width
+            .saturating_sub(2)
+            .saturating_sub(number_prefix_width as u16) as usize;
+
+        debug!(
+            terminal_width = width,
+            terminal_height = height,
+            visible_width,
+            visible_height,
+            name_visible_width,
+            "applied viewport dimensions after terminal resize"
+        );
+
+        self.core.update_viewport_dimensions(
+            visible_width,
+            visible_height,
+            name_visible_width,
+            consensus_tx,
+        );
+    }
+
+    fn selection_point_crosshair(&self, mouse_x: u16, mouse_y: u16) -> Option<(usize, usize)> {
+        let sequence_rows_area =
+            AppLayout::new(self.terminal_area()).alignment_pane_sequence_rows_area();
+
+        // stops panic in debug mode when clicking outside the alignment pane sequence rows area.
+        if !sequence_rows_area.contains((mouse_x, mouse_y).into()) {
+            return None;
+        }
+
+        let row_index = usize::from(mouse_y - sequence_rows_area.y);
+        let col_index = usize::from(mouse_x - sequence_rows_area.x);
+        let row_capacity = usize::from(sequence_rows_area.height);
+        let sequence_id = visible_sequence_rows(&self.core, row_capacity)
+            .get(row_index)
+            .copied()
+            .flatten()?;
+        let absolute_col = self.core.viewport.window().col_range.start + col_index;
+        // limits selection in short alignments where the pane can extend beyond sequence length.
+        (absolute_col < self.core.data.sequence_length).then_some((sequence_id, absolute_col))
+    }
+
+    fn clear_mouse_state(&mut self) {
+        self.box_selection_anchor = None;
+    }
+
+    fn apply_mouse_selection(
+        &mut self,
+        start_sequence_id: usize,
+        start_column: usize,
+        end_sequence_id: usize,
+        end_column: usize,
+    ) {
+        self.ui.apply_action(
+            UiAction::SetMouseSelection(MouseSelection {
+                sequence_id: start_sequence_id,
+                column: start_column,
+                end_sequence_id,
+                end_column,
+            }),
+            &self.core,
+        );
+    }
+
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some((sequence_id, column)) =
+                    self.selection_point_crosshair(mouse.column, mouse.row)
+                else {
+                    // user can click outside the alignment pane to clear a selection.
+                    self.clear_mouse_state();
+                    self.ui
+                        .apply_action(UiAction::ClearMouseSelection, &self.core);
+                    return;
+                };
+
+                // handle box mode modifier with CTRL
+                self.box_selection_anchor = mouse
+                    .modifiers
+                    .contains(KeyModifiers::CONTROL)
+                    .then_some((sequence_id, column));
+                self.apply_mouse_selection(sequence_id, column, sequence_id, column);
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some((sequence_id, column)) =
+                    self.selection_point_crosshair(mouse.column, mouse.row)
+                else {
+                    return;
+                };
+
+                if let Some((anchor_sequence_id, anchor_column)) = self.box_selection_anchor {
+                    self.apply_mouse_selection(
+                        anchor_sequence_id,
+                        anchor_column,
+                        sequence_id,
+                        column,
+                    );
+                } else {
+                    self.apply_mouse_selection(sequence_id, column, sequence_id, column);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some((sequence_id, column)) =
+                    self.selection_point_crosshair(mouse.column, mouse.row)
+                else {
+                    self.clear_mouse_state();
+                    return;
+                };
+
+                if let Some((anchor_sequence_id, anchor_column)) = self.box_selection_anchor {
+                    self.apply_mouse_selection(
+                        anchor_sequence_id,
+                        anchor_column,
+                        sequence_id,
+                        column,
+                    );
+                } else {
+                    self.apply_mouse_selection(sequence_id, column, sequence_id, column);
+                }
+
+                self.clear_mouse_state();
+            }
+            _ => {}
+        }
+    }
+
+    /// Entrypoint for main app loop
+    ///
+    /// The loop handles three event sources:
+    /// - frame ticks at `RENDER_TARGET_FPS` for rendering,
+    /// - terminal input (including resize)
+    /// - async events produced by background jobs.
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        self.parse_alignments();
+        info!(target_fps = RENDER_FPS, "starting app runtime");
+        let (async_tx, mut async_rx) = mpsc::channel(128);
+        let (consensus_tx, consensus_rx) = tokio::sync::watch::channel(None::<ConsensusRequest>);
+        let consensus_worker = spawn_consensus_worker(consensus_rx, async_tx.clone());
+        debug!("spawned consensus worker");
 
-        let period = Duration::from_secs_f32(1.0 / self.options.fps);
+        // will try and load input fasta file immediately
+        // if none, core is set to idle and a status message is displayed
+        // otherwise starts an async load job
+        self.try_file_load(&async_tx, &consensus_tx);
+
+        match terminal.size() {
+            Ok(area) => {
+                debug!(
+                    width = area.width,
+                    height = area.height,
+                    "captured initial terminal size"
+                );
+                self.handle_resize(area.width, area.height, &consensus_tx);
+            }
+            Err(error_value) => {
+                warn!(error = ?error_value, "failed to capture initial terminal size");
+            }
+        }
+
+        let period = Duration::from_secs_f32(1.0 / RENDER_FPS);
         let mut interval = tokio::time::interval(period);
         let mut events = EventStream::new();
 
+        // main event loop
+        // TODO: maybe let ctrl+c break the loop
         while !self.should_quit {
             tokio::select! {
-                _ = interval.tick() => { terminal.draw(|frame| { self.render(frame) })?; },
-                Some(Ok(event)) = events.next() => self.handle_event(&event),
-                result = async {
-                    if let Some(receiver) = &mut self.loading_receiver {
-                        receiver.await
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    self.loading_receiver = None;
-                    match result {
-                        Ok(Ok(alignments)) => {
-                            self.on_parse_success(alignments);
-                        }
-                        Ok(Err(e)) => {
-                            return Err(eyre!("Failed to load alignments: {}", e));
-                        }
-                        Err(_) => {
-                        }
+                _ = interval.tick() => {
+                    if let Err(error_value) = terminal.draw(|frame| { render(frame, &self.core, &self.ui) }) {
+                        error!(error = ?error_value, "terminal draw failed");
+                        return Err(error_value.into());
                     }
                 },
+                Some(Ok(event)) = events.next() => {
+                    match event {
+                        TermEvent::Resize(width, height) => {
+                            self.handle_resize(width, height, &consensus_tx);
+                        }
+                        TermEvent::Key(key) => {
+                            self.handle_key_event(key, &async_tx, &consensus_tx);
+                        }
+                        TermEvent::Mouse(mouse) => {
+                            if self.ui.overlay.palette.is_none() {
+                                self.handle_mouse_event(mouse);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some(event) = async_rx.recv() => {
+                    match &event {
+                        CoreAsyncEvent::AlignmentsLoaded(result) => {
+                            match result {
+                                Ok(alignments) => {
+                                    trace!(
+                                        sequence_count = alignments.len(),
+                                        "received alignments loaded event"
+                                    );
+                                }
+                                Err(error_value) => {
+                                    trace!(
+                                        error = %error_value,
+                                        "received alignment load failure event"
+                                    );
+                                }
+                            }
+                        }
+                        CoreAsyncEvent::ConsensusUpdated { updates } => {
+                            trace!(
+                                updated_positions = updates.len(),
+                                "received consensus update event"
+                            );
+                        }
+                    }
+                    self.core.handle_event(event, &consensus_tx);
+                }
             }
+        }
+
+        info!("quit requested, stopping consensus worker");
+        drop(consensus_tx);
+        if let Err(join_error) = consensus_worker.await {
+            warn!(
+                error = ?join_error,
+                "consensus worker failed to shut down cleanly"
+            );
         }
         Ok(())
     }
