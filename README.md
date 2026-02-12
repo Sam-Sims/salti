@@ -33,12 +33,11 @@ Press `:` to open a command palette for most actions. See [Usage](#command-palet
 
 Can translate NT codons to AA on the fly, with support for all 3 frames, although designed for browsing, rather than a dedicated translation tool.
 
-### Diff views
+### Useful viz tools
 
-Two comparison focused display modes are available:
-
-- `toggle-reference-diff` to highlight differences against a selected reference sequence.
-- `toggle-consensus-diff` to highlight differences against the consensus sequence.
+- Collapse positions that match the reference or consensus to `.` for easier visualisation of differences.
+- Mouse selection to highlight regions or sequences
+- Pin important sequences fixed at the top while browsing.
 
 ## Installation
 
@@ -85,7 +84,6 @@ Tested on my setup (Arch linux + ghostty) - but should work on any modern termin
 ```bash
 salti <alignment.fasta>
 ```
-
 If no file is passed, the app starts and waits for you to load one via the command palette.
 
 ## Quick start keybinds
@@ -100,6 +98,8 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Left` / `Right` - Scroll horizontally.
 - `Shift` + A navigation key scrolls faster in that direction.
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
+- `Left cick` - Select a sequence or position. Click again to clear selection.
+- `Ctrl + Left click` - Select a range of sequences or positions
 
 ### Command palette
 
@@ -128,7 +128,7 @@ Commands:
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (currently only 1 `everforest-dark`).
 - `set-sequence-type` - Override auto-detection if it fails (`dna` or `aa`).
-  - `quit` - Quit the app.
+- `quit` - Quit the app.
 
 ## Some notes on features
 
