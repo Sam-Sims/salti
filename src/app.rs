@@ -42,6 +42,7 @@ pub struct App {
     should_quit: bool,
     terminal_size: Rect,
     box_selection_anchor: Option<(usize, usize)>,
+    middle_pan_anchor: Option<(u16, u16)>,
 }
 
 impl App {
@@ -53,6 +54,7 @@ impl App {
             should_quit: false,
             terminal_size: Rect::new(0, 0, 0, 0),
             box_selection_anchor: None,
+            middle_pan_anchor: None,
         }
     }
 
@@ -99,7 +101,7 @@ impl App {
                     trace!(?action, "dispatching core action");
                     self.core.apply_action(action, async_tx, consensus_tx);
                     if resets_mouse_selection {
-                        self.clear_mouse_state();
+                        self.clear_box_selection_anchor();
                         self.ui
                             .apply_action(UiAction::ClearMouseSelection, &self.core);
                     }
@@ -289,6 +291,7 @@ impl App {
         );
     }
 
+    #[must_use]
     fn selection_point_crosshair(&self, mouse_x: u16, mouse_y: u16) -> Option<(usize, usize)> {
         let sequence_rows_area =
             AppLayout::new(self.terminal_area()).alignment_pane_sequence_rows_area();
@@ -310,8 +313,9 @@ impl App {
         (absolute_col < self.core.data.sequence_length).then_some((sequence_id, absolute_col))
     }
 
-    fn clear_mouse_state(&mut self) {
+    fn clear_box_selection_anchor(&mut self) {
         self.box_selection_anchor = None;
+        self.middle_pan_anchor = None;
     }
 
     fn apply_mouse_selection(
@@ -332,14 +336,19 @@ impl App {
         );
     }
 
-    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+    fn handle_mouse_event(
+        &mut self,
+        mouse: MouseEvent,
+        async_tx: &mpsc::Sender<CoreAsyncEvent>,
+        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
+    ) {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some((sequence_id, column)) =
                     self.selection_point_crosshair(mouse.column, mouse.row)
                 else {
                     // user can click outside the alignment pane to clear a selection.
-                    self.clear_mouse_state();
+                    self.clear_box_selection_anchor();
                     self.ui
                         .apply_action(UiAction::ClearMouseSelection, &self.core);
                     return;
@@ -359,37 +368,63 @@ impl App {
                     return;
                 };
 
-                if let Some((anchor_sequence_id, anchor_column)) = self.box_selection_anchor {
-                    self.apply_mouse_selection(
-                        anchor_sequence_id,
-                        anchor_column,
-                        sequence_id,
-                        column,
-                    );
-                } else {
-                    self.apply_mouse_selection(sequence_id, column, sequence_id, column);
-                }
+                let (start_seq, start_col) = self.box_selection_anchor.unwrap_or((sequence_id, column));
+                self.apply_mouse_selection(start_seq, start_col, sequence_id, column);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let Some((sequence_id, column)) =
                     self.selection_point_crosshair(mouse.column, mouse.row)
                 else {
-                    self.clear_mouse_state();
+                    self.clear_box_selection_anchor();
                     return;
                 };
 
-                if let Some((anchor_sequence_id, anchor_column)) = self.box_selection_anchor {
-                    self.apply_mouse_selection(
-                        anchor_sequence_id,
-                        anchor_column,
-                        sequence_id,
-                        column,
-                    );
-                } else {
-                    self.apply_mouse_selection(sequence_id, column, sequence_id, column);
-                }
+                let (start_seq, start_col) = self.box_selection_anchor.unwrap_or((sequence_id, column));
+                self.apply_mouse_selection(start_seq, start_col, sequence_id, column);
+                self.clear_box_selection_anchor();
+            }
+            MouseEventKind::Down(MouseButton::Middle) => {
+                self.middle_pan_anchor = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Drag(MouseButton::Middle) => {
+                let Some((anchor_x, anchor_y)) = self.middle_pan_anchor else {
+                    return;
+                };
 
-                self.clear_mouse_state();
+                let (dy_amount, scroll_up) = if mouse.row >= anchor_y {
+                    (usize::from(mouse.row - anchor_y), true)
+                } else {
+                    (usize::from(anchor_y - mouse.row), false)
+                };
+
+                let (dx_amount, scroll_left) = if mouse.column >= anchor_x {
+                    (usize::from(mouse.column - anchor_x), true)
+                } else {
+                    (usize::from(anchor_x - mouse.column), false)
+                };
+
+                let actions = [
+                    (dy_amount > 0).then(|| {
+                        if scroll_up {
+                            Action::Core(CoreAction::ScrollUp { amount: dy_amount })
+                        } else {
+                            Action::Core(CoreAction::ScrollDown { amount: dy_amount })
+                        }
+                    }),
+                    (dx_amount > 0).then(|| {
+                        if scroll_left {
+                            Action::Core(CoreAction::ScrollLeft { amount: dx_amount })
+                        } else {
+                            Action::Core(CoreAction::ScrollRight { amount: dx_amount })
+                        }
+                    }),
+                ];
+                self.apply_actions(actions.into_iter().flatten(), async_tx, consensus_tx);
+
+                self.middle_pan_anchor = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Up(MouseButton::Middle) => {
+                self.middle_pan_anchor = None;
             }
             _ => {}
         }
@@ -451,7 +486,7 @@ impl App {
                         }
                         TermEvent::Mouse(mouse) => {
                             if self.ui.overlay.palette.is_none() {
-                                self.handle_mouse_event(mouse);
+                                self.handle_mouse_event(mouse, &async_tx, &consensus_tx);
                             }
                         }
                         _ => {}
