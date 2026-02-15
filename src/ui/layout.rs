@@ -20,7 +20,7 @@ pub struct AppLayout {
 impl AppLayout {
     #[must_use]
     pub fn new(area: Rect) -> Self {
-        let content_area = Block::bordered().inner(area);
+        let content_area = area;
 
         let [alignment_area, consensus_area] = content_area
             .layout(&vertical![*=1, ==CONSENSUS_PANE_HEIGHT_ROWS].spacing(Spacing::Overlap(1)));
@@ -28,37 +28,11 @@ impl AppLayout {
         let [sequence_id_pane_area, alignment_pane_area] = alignment_area.layout(
             &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
         );
-        let sequence_id_pane_area = Rect::new(
-            area.left(),
-            sequence_id_pane_area.y,
-            sequence_id_pane_area.right().saturating_sub(area.left()),
-            sequence_id_pane_area.height,
-        );
-        let alignment_pane_area = Rect::new(
-            alignment_pane_area.x,
-            alignment_pane_area.y,
-            area.right().saturating_sub(alignment_pane_area.x),
-            alignment_pane_area.height,
-        );
         let [
             consensus_sequence_id_pane_area,
             consensus_alignment_pane_area,
         ] = consensus_area.layout(
             &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
-        );
-        let consensus_sequence_id_pane_area = Rect::new(
-            area.left(),
-            consensus_sequence_id_pane_area.y,
-            consensus_sequence_id_pane_area
-                .right()
-                .saturating_sub(area.left()),
-            consensus_sequence_id_pane_area.height,
-        );
-        let consensus_alignment_pane_area = Rect::new(
-            consensus_alignment_pane_area.x,
-            consensus_alignment_pane_area.y,
-            area.right().saturating_sub(consensus_alignment_pane_area.x),
-            consensus_alignment_pane_area.height,
         );
 
         Self {
