@@ -59,12 +59,12 @@ impl App {
     }
 
     #[must_use]
-    fn terminal_area(&self) -> Rect {
+    fn content_area(&self) -> Rect {
         Rect::new(
             0,
-            0,
+            1,
             self.terminal_size.width,
-            self.terminal_size.height.saturating_sub(1),
+            self.terminal_size.height.saturating_sub(3),
         )
     }
 
@@ -261,8 +261,7 @@ impl App {
         consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
     ) {
         self.terminal_size = Rect::new(0, 0, width, height);
-        let content_height = height.saturating_sub(1);
-        let layout = AppLayout::new(Rect::new(0, 0, width, content_height));
+        let layout = AppLayout::new(self.content_area());
 
         let visible_width = layout.alignment_pane_area.width.saturating_sub(2) as usize;
         let visible_height = layout.alignment_pane_area.height.saturating_sub(4) as usize;
@@ -294,7 +293,7 @@ impl App {
     #[must_use]
     fn selection_point_crosshair(&self, mouse_x: u16, mouse_y: u16) -> Option<(usize, usize)> {
         let sequence_rows_area =
-            AppLayout::new(self.terminal_area()).alignment_pane_sequence_rows_area();
+            AppLayout::new(self.content_area()).alignment_pane_sequence_rows_area();
 
         // stops panic in debug mode when clicking outside the alignment pane sequence rows area.
         if !sequence_rows_area.contains((mouse_x, mouse_y).into()) {
