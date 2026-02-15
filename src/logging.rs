@@ -27,7 +27,7 @@ fn create_log() -> Result<File> {
             Err(error) => return Err(error.into()),
         }
     }
-        unreachable!("file error")
+    unreachable!("file error")
 }
 
 pub fn init_logging() -> Result<WorkerGuard> {

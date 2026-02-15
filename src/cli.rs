@@ -10,7 +10,11 @@ pub struct StartupState {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about="A modern, fast, multiple sequence alignment browser - built for the terminal.")]
+#[command(
+    author,
+    version,
+    about = "A modern, fast, multiple sequence alignment browser - built for the terminal."
+)]
 pub struct Cli {
     /// Path to the FASTA alignment file
     #[arg(value_name = "FILE")]

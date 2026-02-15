@@ -368,7 +368,8 @@ impl App {
                     return;
                 };
 
-                let (start_seq, start_col) = self.box_selection_anchor.unwrap_or((sequence_id, column));
+                let (start_seq, start_col) =
+                    self.box_selection_anchor.unwrap_or((sequence_id, column));
                 self.apply_mouse_selection(start_seq, start_col, sequence_id, column);
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -379,7 +380,8 @@ impl App {
                     return;
                 };
 
-                let (start_seq, start_col) = self.box_selection_anchor.unwrap_or((sequence_id, column));
+                let (start_seq, start_col) =
+                    self.box_selection_anchor.unwrap_or((sequence_id, column));
                 self.apply_mouse_selection(start_seq, start_col, sequence_id, column);
                 self.clear_box_selection_anchor();
             }
