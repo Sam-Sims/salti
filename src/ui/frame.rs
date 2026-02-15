@@ -4,6 +4,7 @@ use crate::ui::selection::{display_index_by_sequence_id, selection_row_bounds};
 use crate::ui::utils::truncate_label;
 use ratatui::Frame;
 use ratatui::style::Styled;
+use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
 
@@ -111,6 +112,7 @@ pub fn render_frame(
     let block = Block::bordered()
         .border_style(theme.border)
         .style(theme.base_block)
+        .merge_borders(MergeStrategy::Exact)
         .title_top(Line::from(top_status_bar).right_aligned())
         .title_bottom(Line::from(bottom_status_bar).left_aligned())
         .title_bottom(Line::from("Press 'q' to quit".set_style(theme.text_dim)).right_aligned());
