@@ -1,7 +1,7 @@
 use crate::config::theme::SequenceTheme;
 use crate::core::lookups::{BYTE_TO_CHAR, translate_codon};
 use crate::core::parser::SequenceType;
-use crate::core::{CONSENSUS_BUFFER_COLS, CoreState};
+use crate::core::{COLUMN_STATS_BUFFER_COLS, CoreState};
 use ratatui::style::{Styled, Stylize};
 use ratatui::text::Span;
 use std::ops::Range;
@@ -228,14 +228,14 @@ pub fn format_row_spans(
                 diff_against,
                 frame,
                 window,
-                CONSENSUS_BUFFER_COLS,
+                COLUMN_STATS_BUFFER_COLS,
                 sequence_theme,
             ),
             None => build_translated_spans(
                 sequence,
                 frame,
                 window,
-                CONSENSUS_BUFFER_COLS,
+                COLUMN_STATS_BUFFER_COLS,
                 sequence_theme,
             ),
         },

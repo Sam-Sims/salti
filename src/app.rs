@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use color_eyre::Result;
@@ -7,15 +8,17 @@ use crossterm::event::{
 };
 use ratatui::DefaultTerminal;
 use ratatui::layout::Rect;
-use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::cli::StartupState;
 use crate::config::keybindings::{self, KeyAction};
+use crate::core::column_stats::{ColumnStats, ColumnStatsRequest, compute_column_stats};
 use crate::core::command::CoreAction;
-use crate::core::jobs::{ConsensusRequest, spawn_consensus_worker};
-use crate::core::{CoreAsyncEvent, CoreState, LoadingState};
+use crate::core::parser::{self, Alignment};
+use crate::core::{CoreState, LoadingState};
 use crate::ui::layout::AppLayout;
 use crate::ui::render;
 use crate::ui::selection::visible_sequence_rows;
@@ -32,7 +35,14 @@ const RENDER_FPS: f32 = 120.0;
 pub enum Action {
     Core(CoreAction),
     Ui(UiAction),
+    LoadFile { path: PathBuf },
     Quit,
+}
+
+#[derive(Debug)]
+struct AsyncJob<T> {
+    handle: JoinHandle<T>,
+    cancel: CancellationToken,
 }
 
 #[derive(Debug)]
@@ -43,6 +53,7 @@ pub struct App {
     terminal_size: Rect,
     box_selection_anchor: Option<(usize, usize)>,
     middle_pan_anchor: Option<(u16, u16)>,
+    pending_load_path: Option<PathBuf>,
 }
 
 impl App {
@@ -55,6 +66,7 @@ impl App {
             terminal_size: Rect::new(0, 0, 0, 0),
             box_selection_anchor: None,
             middle_pan_anchor: None,
+            pending_load_path: None,
         }
     }
 
@@ -73,33 +85,30 @@ impl App {
     /// Actions are either core commands, UI actions, or quit signals and define how the app state
     /// should change in response to user input or async events.
     ///
-    /// Core actions are forwarded to [`CoreState::apply_action`], which may run async functions
-    /// via the `*_tx` channels.
+    /// Core actions are forwarded to [`CoreState::apply_action`].
     ///
     /// UI actions are applied to [`UiState`] via its own handler.
     ///
     /// [`Action::Quit`] sets `should_quit`, which causes the main event loop to exit on its next check.
-    fn apply_actions<I>(
-        &mut self,
-        actions: I,
-        async_tx: &mpsc::Sender<CoreAsyncEvent>,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) where
+    ///
+    /// [`Action::LoadFile`] sets `pending_load_path`, which the event loop polls to spawn an async
+    /// task
+    fn apply_actions<I>(&mut self, actions: I)
+    where
         I: IntoIterator<Item = Action>,
     {
         for action in actions {
             match action {
                 Action::Core(action) => {
                     let resets_mouse_selection = matches!(
-                        action,
+                        &action,
                         CoreAction::SetFilter { .. }
                             | CoreAction::ClearFilter
                             | CoreAction::SetReference(_)
                             | CoreAction::ClearReference
-                            | CoreAction::LoadAlignment { .. }
                     );
                     trace!(?action, "dispatching core action");
-                    self.core.apply_action(action, async_tx, consensus_tx);
+                    self.core.apply_action(action);
                     if resets_mouse_selection {
                         self.clear_box_selection_anchor();
                         self.ui
@@ -108,6 +117,13 @@ impl App {
                 }
                 Action::Ui(action) => {
                     self.ui.apply_action(action, &self.core);
+                }
+                Action::LoadFile { path } => {
+                    trace!(?path, "queuing file load");
+                    self.clear_box_selection_anchor();
+                    self.ui
+                        .apply_action(UiAction::ClearMouseSelection, &self.core);
+                    self.pending_load_path = Some(path);
                 }
                 Action::Quit => {
                     self.should_quit = true;
@@ -162,34 +178,21 @@ impl App {
     }
 
     /// Maps a keybinding action to an app action with any extra logic needed and applies it.
-    fn match_action(
-        &mut self,
-        action: KeyAction,
-        async_tx: &mpsc::Sender<CoreAsyncEvent>,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) {
+    fn match_action(&mut self, action: KeyAction) {
         match action {
             KeyAction::JumpToStart => {
                 if self.core.data.sequence_length > 0 {
-                    self.apply_actions(
-                        [Action::Core(CoreAction::JumpToPosition(0))],
-                        async_tx,
-                        consensus_tx,
-                    );
+                    self.apply_actions([Action::Core(CoreAction::JumpToPosition(0))]);
                 }
             }
             KeyAction::JumpToEnd => {
                 if let Some(position) = self.core.data.sequence_length.checked_sub(1) {
-                    self.apply_actions(
-                        [Action::Core(CoreAction::JumpToPosition(position))],
-                        async_tx,
-                        consensus_tx,
-                    );
+                    self.apply_actions([Action::Core(CoreAction::JumpToPosition(position))]);
                 }
             }
             other => {
                 if let Some(mapped_action) = Self::map_key_action(other) {
-                    self.apply_actions([mapped_action], async_tx, consensus_tx);
+                    self.apply_actions([mapped_action]);
                 }
             }
         }
@@ -199,12 +202,7 @@ impl App {
     ///
     /// When the command palette is open, all key input is passed to the palette until it closes
     /// Otherwise, the key is resolved through configured keybindings. Unbound keys are ignored.
-    fn handle_key_event(
-        &mut self,
-        key: KeyEvent,
-        async_tx: &mpsc::Sender<CoreAsyncEvent>,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) {
+    fn handle_key_event(&mut self, key: KeyEvent) {
         trace!(?key, "received key event");
         self.ui
             .apply_action(UiAction::ClearCommandError, &self.core);
@@ -215,12 +213,12 @@ impl App {
             // the palette will only ever return an action, even if its an action to close itself,
             // so they are immediately applied
             let actions = palette.handle_key_event(key);
-            self.apply_actions(actions, async_tx, consensus_tx);
+            self.apply_actions(actions);
             return;
         }
         if let Some(action) = keybindings::lookup(key.code, key.modifiers) {
             trace!(?action, "resolved keybinding action");
-            self.match_action(action, async_tx, consensus_tx);
+            self.match_action(action);
         } else {
             trace!("no keybinding action for key event");
         }
@@ -229,37 +227,23 @@ impl App {
     /// Try and load an alignment file.
     ///
     /// If no file path is configured, loading is marked as [`LoadingState::Idle`] so the UI can
-    /// present an idle status. If a path exists, this issues [`CoreAction::LoadAlignment`]
-    /// command, which performs the loading async.
-    fn try_file_load(
-        &mut self,
-        async_tx: &mpsc::Sender<CoreAsyncEvent>,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) {
-        let Some(file_path) = self.core.data.file_path.as_ref() else {
+    /// present an idle status. If a path exists, it is queued via `pending_load_path` for the
+    /// event loop to spawn an async load job.
+    fn try_file_load(&mut self) {
+        let Some(file_path) = self.core.data.file_path.clone() else {
             info!("no startup file provided; entering idle loading state");
             self.core.loading_state = LoadingState::Idle;
             return;
         };
-        let file_path = file_path.clone();
         debug!(path = ?file_path, "queueing startup alignment load");
-        self.core.apply_action(
-            CoreAction::LoadAlignment { path: file_path },
-            async_tx,
-            consensus_tx,
-        );
+        self.pending_load_path = Some(file_path);
     }
 
     /// Updates viewport after a terminal resize.
     ///
-    /// A viewport update can trigger a consensus recalculation if the visible alignment pane width
-    /// changes enough to alter the current windowing.
-    fn handle_resize(
-        &mut self,
-        width: u16,
-        height: u16,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) {
+    /// A viewport update can trigger consensus/conservation recalculation if the visible
+    /// alignment pane width changes enough to alter the current windowing.
+    fn handle_resize(&mut self, width: u16, height: u16) {
         self.terminal_size = Rect::new(0, 0, width, height);
         let layout = AppLayout::new(self.content_area());
 
@@ -282,14 +266,10 @@ impl App {
             "applied viewport dimensions after terminal resize"
         );
 
-        self.core.update_viewport_dimensions(
-            visible_width,
-            visible_height,
-            name_visible_width,
-            consensus_tx,
-        );
+        self.core
+            .update_viewport_dimensions(visible_width, visible_height, name_visible_width);
     }
-
+    /// Returns the sequence ID and column index corresponding to the mouse position
     #[must_use]
     fn selection_point_crosshair(&self, mouse_x: u16, mouse_y: u16) -> Option<(usize, usize)> {
         let sequence_rows_area =
@@ -312,11 +292,13 @@ impl App {
         (absolute_col < self.core.data.sequence_length).then_some((sequence_id, absolute_col))
     }
 
+    /// Clear mouse selection anchors.
     fn clear_box_selection_anchor(&mut self) {
         self.box_selection_anchor = None;
         self.middle_pan_anchor = None;
     }
 
+    /// Applys a SetMouseSelection action with the given start and end positions.
     fn apply_mouse_selection(
         &mut self,
         start_sequence_id: usize,
@@ -335,12 +317,8 @@ impl App {
         );
     }
 
-    fn handle_mouse_event(
-        &mut self,
-        mouse: MouseEvent,
-        async_tx: &mpsc::Sender<CoreAsyncEvent>,
-        consensus_tx: &tokio::sync::watch::Sender<Option<ConsensusRequest>>,
-    ) {
+    /// Event handler for mouse input.
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some((sequence_id, column)) =
@@ -420,8 +398,7 @@ impl App {
                         }
                     }),
                 ];
-                self.apply_actions(actions.into_iter().flatten(), async_tx, consensus_tx);
-
+                self.apply_actions(actions.into_iter().flatten());
                 self.middle_pan_anchor = Some((mouse.column, mouse.row));
             }
             MouseEventKind::Up(MouseButton::Middle) => {
@@ -431,23 +408,88 @@ impl App {
         }
     }
 
+    /// Spawns an async task to load alignments from a file path and cancels any previous load task.
+    fn start_load_job(
+        &mut self,
+        file_path: PathBuf,
+        active_job: &mut Option<AsyncJob<Result<Vec<Alignment>, String>>>,
+    ) {
+        if let Some(previous) = active_job.take() {
+            trace!("cancelling previous alignment load task");
+            previous.cancel.cancel();
+            previous.handle.abort();
+        }
+
+        self.core.data.file_path = Some(file_path.clone());
+
+        let cancel = CancellationToken::new();
+        debug!(path = ?file_path, "spawning alignment load task");
+        let handle = tokio::task::spawn_blocking({
+            let cancel = cancel.clone();
+            move || {
+                parser::parse_fasta_file(file_path, &cancel).map_err(|error| error.to_string())
+            }
+        });
+
+        *active_job = Some(AsyncJob { handle, cancel });
+    }
+
+    /// Spawns an async task to compute column stats for the current viewport and cancels any previous stats task.
+    fn refresh_column_stats_job(
+        &mut self,
+        active_job: &mut Option<AsyncJob<ColumnStats>>,
+    ) {
+        let Some(request) = self.core.build_column_stats_request() else {
+            return;
+        };
+
+        if let Some(previous) = active_job.take() {
+            trace!("cancelling previous column stats task");
+            previous.cancel.cancel();
+            previous.handle.abort();
+        }
+
+        let cancel = CancellationToken::new();
+        let handle = tokio::task::spawn_blocking({
+            let cancel = cancel.clone();
+            move || {
+                let ColumnStatsRequest {
+                    sequences,
+                    positions,
+                    method,
+                    sequence_type,
+                } = request;
+
+                compute_column_stats(
+                    sequences.as_slice(),
+                    &positions,
+                    method,
+                    sequence_type,
+                    &cancel,
+                )
+            }
+        });
+
+        trace!("spawned column stats task");
+        *active_job = Some(AsyncJob { handle, cancel });
+    }
+
     /// Entrypoint for main app loop
     ///
-    /// The loop handles three event sources:
+    /// The loop handles four event sources:
     /// - frame ticks at `RENDER_TARGET_FPS` for rendering,
     /// - terminal input (including resize)
-    /// - async events produced by background jobs.
+    /// - alignment load job completion
+    /// - column stats job completion
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         info!(target_fps = RENDER_FPS, "starting app runtime");
-        let (async_tx, mut async_rx) = mpsc::channel(128);
-        let (consensus_tx, consensus_rx) = tokio::sync::watch::channel(None::<ConsensusRequest>);
-        let consensus_worker = spawn_consensus_worker(consensus_rx, async_tx.clone());
-        debug!("spawned consensus worker");
+        let mut load_job: Option<AsyncJob<Result<Vec<Alignment>, String>>> = None;
+        let mut stats_job: Option<AsyncJob<ColumnStats>> = None;
 
         // will try and load input fasta file immediately
         // if none, core is set to idle and a status message is displayed
-        // otherwise starts an async load job
-        self.try_file_load(&async_tx, &consensus_tx);
+        // otherwise queues the file path for the event loop to spawn the load job
+        self.try_file_load();
 
         match terminal.size() {
             Ok(area) => {
@@ -456,80 +498,136 @@ impl App {
                     height = area.height,
                     "captured initial terminal size"
                 );
-                self.handle_resize(area.width, area.height, &consensus_tx);
+                self.handle_resize(area.width, area.height);
             }
             Err(error_value) => {
                 warn!(error = ?error_value, "failed to capture initial terminal size");
             }
         }
 
+        if let Some(file_path) = self.pending_load_path.take() {
+            self.start_load_job(file_path, &mut load_job);
+        }
+        self.refresh_column_stats_job(&mut stats_job);
+
         let period = Duration::from_secs_f32(1.0 / RENDER_FPS);
         let mut interval = tokio::time::interval(period);
         let mut events = EventStream::new();
+        let mut needs_redraw = true;
 
         // main event loop
         // TODO: maybe let ctrl+c break the loop
         while !self.should_quit {
             tokio::select! {
                 _ = interval.tick() => {
-                    if let Err(error_value) = terminal.draw(|frame| { render(frame, &self.core, &self.ui) }) {
-                        error!(error = ?error_value, "terminal draw failed");
-                        return Err(error_value.into());
+                    if needs_redraw {
+                        if let Err(error_value) = terminal.draw(|frame| { render(frame, &self.core, &self.ui) }) {
+                            error!(error = ?error_value, "terminal draw failed");
+                            return Err(error_value.into());
+                        }
+                        needs_redraw = false;
                     }
                 },
                 Some(Ok(event)) = events.next() => {
                     match event {
                         TermEvent::Resize(width, height) => {
-                            self.handle_resize(width, height, &consensus_tx);
+                            self.handle_resize(width, height);
                         }
                         TermEvent::Key(key) => {
-                            self.handle_key_event(key, &async_tx, &consensus_tx);
+                            self.handle_key_event(key);
                         }
                         TermEvent::Mouse(mouse) => {
                             if self.ui.overlay.palette.is_none() {
-                                self.handle_mouse_event(mouse, &async_tx, &consensus_tx);
+                                self.handle_mouse_event(mouse);
                             }
                         }
                         _ => {}
                     }
+
+                    if let Some(file_path) = self.pending_load_path.take() {
+                        self.start_load_job(file_path, &mut load_job);
+                    }
+                    self.refresh_column_stats_job(&mut stats_job);
+                    needs_redraw = true;
                 }
-                Some(event) = async_rx.recv() => {
-                    match &event {
-                        CoreAsyncEvent::AlignmentsLoaded(result) => {
-                            match result {
+
+                // alignment load completion
+                Some(join_result) = async {
+                    match load_job.as_mut() {
+                        Some(job) => Some((&mut job.handle).await),
+                        None => None,
+                    }
+                } => {
+                    load_job = None;
+                    match join_result {
+                        Ok(result) => {
+                            match &result {
                                 Ok(alignments) => {
                                     trace!(
                                         sequence_count = alignments.len(),
-                                        "received alignments loaded event"
+                                        "received alignments loaded result"
                                     );
                                 }
                                 Err(error_value) => {
                                     trace!(
                                         error = %error_value,
-                                        "received alignment load failure event"
+                                        "received alignment load failure result"
                                     );
                                 }
                             }
+                            self.core.handle_alignments_loaded(result);
                         }
-                        CoreAsyncEvent::ConsensusUpdated { updates } => {
-                            trace!(
-                                updated_positions = updates.len(),
-                                "received consensus update event"
-                            );
+                        Err(join_error) => {
+                            if join_error.is_cancelled() {
+                                trace!("alignment load task cancelled");
+                            } else {
+                                warn!(error = ?join_error, "alignment load task panicked");
+                            }
                         }
                     }
-                    self.core.handle_event(event, &consensus_tx);
+                    self.refresh_column_stats_job(&mut stats_job);
+                    needs_redraw = true;
+                }
+
+                // column stats completion
+                Some(join_result) = async {
+                    match stats_job.as_mut() {
+                        Some(job) => Some((&mut job.handle).await),
+                        None => None,
+                    }
+                } => {
+                    stats_job = None;
+                    match join_result {
+                        Ok(stats) => {
+                            trace!(
+                                consensus_updates = stats.consensus.len(),
+                                conservation_updates = stats.conservation.len(),
+                                "received column stats update result"
+                            );
+                            self.core.apply_column_stats(stats);
+                        }
+                        Err(join_error) => {
+                            if join_error.is_cancelled() {
+                                trace!("column stats task cancelled");
+                            } else {
+                                warn!(error = ?join_error, "column stats task panicked");
+                            }
+                        }
+                    }
+                    self.refresh_column_stats_job(&mut stats_job);
+                    needs_redraw = true;
                 }
             }
         }
 
-        info!("quit requested, stopping consensus worker");
-        drop(consensus_tx);
-        if let Err(join_error) = consensus_worker.await {
-            warn!(
-                error = ?join_error,
-                "consensus worker failed to shut down cleanly"
-            );
+        info!("quit requested, cancelling background tasks");
+        if let Some(job) = load_job.take() {
+            job.cancel.cancel();
+            job.handle.abort();
+        }
+        if let Some(job) = stats_job.take() {
+            job.cancel.cancel();
+            job.handle.abort();
         }
         Ok(())
     }

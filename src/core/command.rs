@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use crate::core::consensus::ConsensusMethod;
+use crate::core::column_stats::ConsensusMethod;
 use crate::core::parser::SequenceType;
 use regex::Regex;
 
@@ -27,5 +25,4 @@ pub enum CoreAction {
     ToggleReferenceDiff,
     ToggleConsensusDiff,
     ToggleTranslationView,
-    LoadAlignment { path: PathBuf },
 }

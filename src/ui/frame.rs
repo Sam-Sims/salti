@@ -1,12 +1,12 @@
 use crate::core::{CoreState, LoadingState};
-use crate::ui::UiState;
 use crate::ui::selection::{display_index_by_sequence_id, selection_row_bounds};
 use crate::ui::utils::truncate_label;
-use ratatui::Frame;
+use crate::ui::UiState;
 use ratatui::layout::Rect;
 use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use ratatui::Frame;
 
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
@@ -86,7 +86,6 @@ fn build_top_status_bar(
     let loading_text = core.loading_state.to_string();
     let loading_style = match &core.loading_state {
         LoadingState::Idle => theme.text_dim,
-        LoadingState::Loading => theme.warning,
         LoadingState::Loaded => theme.success,
         LoadingState::Failed(_) => theme.error,
     };
