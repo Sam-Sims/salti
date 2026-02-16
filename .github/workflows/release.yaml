@@ -38,6 +38,6 @@ jobs:
       - name: Publish artifacts and release
         uses: houseabsolute/actions-rust-release@v0
         with:
-          executable-name: hashfasta
+          executable-name: salti
           target: ${{ matrix.platform.target }}
           changes-file: CHANGELOG.md
