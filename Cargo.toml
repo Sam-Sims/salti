@@ -1,6 +1,6 @@
 [package]
 name = "salti"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Samuel Sims"]
 description = "A modern, fast, multiple sequence alignment browser - built for the terminal. "
