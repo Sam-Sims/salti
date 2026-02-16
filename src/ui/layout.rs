@@ -20,7 +20,7 @@ pub struct AppLayout {
 impl AppLayout {
     #[must_use]
     pub fn new(area: Rect) -> Self {
-        let content_area = Block::bordered().inner(area);
+        let content_area = area;
 
         let [alignment_area, consensus_area] = content_area
             .layout(&vertical![*=1, ==CONSENSUS_PANE_HEIGHT_ROWS].spacing(Spacing::Overlap(1)));

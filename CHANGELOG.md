@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-16
+
+### Added
+- Middle-mouse drag panning in the alignment pane.
+- Conservation bar chart rendering in the consensus pane. The calculation algorithim is the same as Jbrowse MSA - that is to say that it is calculated as shannon entropy of the column, normalised to [0,1] by max entropy for the column's symbol count (e.g. 4 for DNA, 20 for AA). 
+
+### Changed
+- Reworked async handling into a more unified system for both consensus and conservation.
+- File loading is now an App command, not Core.
+- Rendering now redraws on state changes only, rather than every frame tick.
+- Refined the UI, removed the outer frame border, and converted status lines into dedicated top/bottom bars. This removed the double borders around the app, and hopefully gives a cleaner feel.
+
+### Fixed
+- Mouse selection now functions correctly in the pinned rows area (previously pinned sequences were not selectable).
+
 ## [0.3.0] - 2026-02-12
 
 ### Added

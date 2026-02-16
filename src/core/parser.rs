@@ -3,6 +3,7 @@ use needletail::parser::parse_fastx_file;
 use rand::seq::IndexedRandom;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 /// minimum amino-acid character fraction required to classify input as amino acid.
@@ -85,63 +86,65 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
     }
 }
 
-/// Parses the actual fasta into `Alignment`s
+/// Parses a fasta file into `Alignment`s with cooperative cancellation.
 ///
-/// Parsing is executed on a blocking worker thread.
-/// Returns an error when the file is missing, invalid record or sequence lengths differ.
-pub async fn parse_fasta_file(path: PathBuf) -> Result<Vec<Alignment>> {
+/// Intended to run on a blocking worker thread (via `tokio::task::spawn_blocking`).
+/// Returns an error when the file is missing, a record is invalid, or sequence lengths differ.
+pub fn parse_fasta_file(path: PathBuf, cancel: &CancellationToken) -> Result<Vec<Alignment>> {
     info!(path = ?path, "starting fasta parse");
-    tokio::task::spawn_blocking(move || -> Result<Vec<Alignment>> {
-        let mut parser = parse_fastx_file(&path).map_err(|e| {
-            error!(path = ?path, error = %e, "failed to initialise fastx parser");
-            eyre!("Failed to parse file: {}", e)
-        })?;
-        let mut alignments = Vec::new();
-        let mut expected_length: Option<usize> = None;
+    let mut parser = parse_fastx_file(&path).map_err(|e| {
+        error!(path = ?path, error = %e, "failed to initialise fastx parser");
+        eyre!("Failed to parse file: {}", e)
+    })?;
+    let mut alignments = Vec::new();
+    let mut expected_length: Option<usize> = None;
 
-        while let Some(record) = parser.next() {
-            let record = record.map_err(|e| {
-                error!(path = ?path, error = %e, "error reading fasta record");
-                eyre!("Error reading record: {}", e)
-            })?;
-            let id = Arc::from(std::str::from_utf8(record.id()).map_err(|e| {
-                error!(path = ?path, error = %e, "invalid fasta sequence id");
-                eyre!("Invalid sequence ID: {}", e)
-            })?);
-
-            let sequence = Arc::from(record.seq().to_vec());
-            let sequence_length = record.seq().len();
-            if let Some(length) = expected_length {
-                if sequence_length != length {
-                    warn!(
-                        path = ?path,
-                        expected_length = length,
-                        found_length = sequence_length,
-                        id = %id,
-                        "sequence length mismatch while parsing fasta"
-                    );
-                    return Err(eyre!(
-                        "Sequence length mismatch: expected {}, found {} for id {}",
-                        length,
-                        sequence_length,
-                        id
-                    ));
-                }
-            } else {
-                expected_length = Some(sequence_length);
-            }
-
-            alignments.push(Alignment { id, sequence });
+    while let Some(record) = parser.next() {
+        if cancel.is_cancelled() {
+            debug!(path = ?path, "cancelled fasta parse");
+            return Err(eyre!("Cancelled fasta parse"));
         }
-        debug!(
-            path = ?path,
-            alignment_count = alignments.len(),
-            expected_length = expected_length.unwrap_or(0),
-            "completed fasta parse"
-        );
-        Ok(alignments)
-    })
-    .await?
+
+        let record = record.map_err(|e| {
+            error!(path = ?path, error = %e, "error reading fasta record");
+            eyre!("Error reading record: {}", e)
+        })?;
+        let id = Arc::from(std::str::from_utf8(record.id()).map_err(|e| {
+            error!(path = ?path, error = %e, "invalid fasta sequence id");
+            eyre!("Invalid sequence ID: {}", e)
+        })?);
+
+        let sequence = Arc::from(record.seq().to_vec());
+        let sequence_length = record.seq().len();
+        if let Some(length) = expected_length {
+            if sequence_length != length {
+                warn!(
+                    path = ?path,
+                    expected_length = length,
+                    found_length = sequence_length,
+                    id = %id,
+                    "sequence length mismatch while parsing fasta"
+                );
+                return Err(eyre!(
+                    "Sequence length mismatch: expected {}, found {} for id {}",
+                    length,
+                    sequence_length,
+                    id
+                ));
+            }
+        } else {
+            expected_length = Some(sequence_length);
+        }
+
+        alignments.push(Alignment { id, sequence });
+    }
+    debug!(
+        path = ?path,
+        alignment_count = alignments.len(),
+        expected_length = expected_length.unwrap_or(0),
+        "completed fasta parse"
+    );
+    Ok(alignments)
 }
 
 #[cfg(test)]
@@ -157,11 +160,11 @@ mod tests {
         temp_file
     }
 
-    #[tokio::test]
-    async fn test_parse_valid() {
+    #[test]
+    fn test_parse_valid() {
         let content = ">seq1\nA-CG\n>seq2\nTGCA\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
+        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
         assert!(result.is_ok());
         let alignments = result.unwrap();
         assert_eq!(alignments.len(), 2);
@@ -171,41 +174,44 @@ mod tests {
         assert_eq!(alignments[1].sequence.as_ref(), b"TGCA");
     }
 
-    #[tokio::test]
-    async fn test_parse_nonexistant() {
-        let result = parse_fasta_file(PathBuf::from_str("idontexist.fasta").unwrap()).await;
+    #[test]
+    fn test_parse_nonexistant() {
+        let result = parse_fasta_file(
+            PathBuf::from_str("idontexist.fasta").unwrap(),
+            &CancellationToken::new(),
+        );
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_parse_empty() {
+    #[test]
+    fn test_parse_empty() {
         let content = "";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
+        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_parse_no_seqs() {
+    #[test]
+    fn test_parse_no_seqs() {
         let content = ">seq1\n>seq2\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
+        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_parse_length_mismatch() {
+    #[test]
+    fn test_parse_length_mismatch() {
         let content = ">seq1\nATCG\n>seq2\nTGCAAA\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
+        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_parse_invalid() {
+    #[test]
+    fn test_parse_invalid() {
         let content = "imaninvalidfasta\nfile\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf()).await;
+        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
         assert!(result.is_err());
     }
 

@@ -9,6 +9,8 @@ use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 
+const CONSERVATION_SPARK_CHARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
 pub fn render_consensus_pane(
     f: &mut Frame,
     layout: &crate::ui::layout::AppLayout,
@@ -31,6 +33,7 @@ fn render_consensus_sequence_id_pane(area: Rect, _core: &CoreState, ui: &UiState
     let lines = vec![
         Line::from("Reference Sequence:".set_style(theme.accent)),
         Line::from("Consensus Sequence:".set_style(theme.accent)),
+        Line::from("Conservation:".set_style(theme.accent)),
     ];
 
     let consensus_id_paragraph = Paragraph::new(lines).style(theme.base_block);
@@ -47,6 +50,7 @@ fn render_consensus_alignment_pane(area: Rect, core: &CoreState, ui: &UiState, f
     f.render_widget(block, area);
 
     let consensus = &core.consensus;
+    let conservation = &core.conservation;
     let window = core.viewport.window();
     let horizontal_range = window.col_range;
     let resolved_sequence_type = core.data.sequence_type.unwrap_or(SequenceType::Dna);
@@ -89,8 +93,31 @@ fn render_consensus_alignment_pane(area: Rect, core: &CoreState, ui: &UiState, f
         },
     );
 
-    let lines = vec![reference_line, consensus_line];
+    let conservation_line = if let Some(conservation_data) = conservation {
+        let sparkline: String = horizontal_range
+            .clone()
+            .map(|position| {
+                conservation_data
+                    .get(position)
+                    .copied()
+                    .filter(|value| value.is_finite())
+                    .map_or(' ', conservation_to_spark)
+            })
+            .collect();
+        Line::from(sparkline).set_style(theme.accent_alt)
+    } else {
+        Line::from("Calculating conservation...".fg(ui.theme.text_dim).italic())
+    };
+
+    let lines = vec![reference_line, consensus_line, conservation_line];
     let consensus_paragraph = Paragraph::new(lines).style(theme.base_block);
 
     f.render_widget(consensus_paragraph, inner_area);
+}
+
+fn conservation_to_spark(value: f32) -> char {
+    let value = value.clamp(0.0, 1.0);
+    let max_idx = CONSERVATION_SPARK_CHARS.len() - 1;
+    let idx = (value * max_idx as f32).round() as usize;
+    CONSERVATION_SPARK_CHARS[idx]
 }

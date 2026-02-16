@@ -27,11 +27,11 @@ fn create_log() -> Result<File> {
             Err(error) => return Err(error.into()),
         }
     }
-
-    unreachable!("unbounded filename search should always return or fail")
+    unreachable!("file error")
 }
 
-fn setup_subscriber(log_file: File) -> Result<WorkerGuard> {
+pub fn init_logging() -> Result<WorkerGuard> {
+    let log_file = create_log()?;
     let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
     let env_filter =
         EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))?;
@@ -46,8 +46,4 @@ fn setup_subscriber(log_file: File) -> Result<WorkerGuard> {
         .try_init()?;
 
     Ok(guard)
-}
-
-pub fn init_debug_tracing() -> Result<WorkerGuard> {
-    setup_subscriber(create_log()?)
 }

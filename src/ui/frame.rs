@@ -3,9 +3,10 @@ use crate::ui::UiState;
 use crate::ui::selection::{display_index_by_sequence_id, selection_row_bounds};
 use crate::ui::utils::truncate_label;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
+use ratatui::widgets::Paragraph;
 
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
@@ -85,7 +86,6 @@ fn build_top_status_bar(
     let loading_text = core.loading_state.to_string();
     let loading_style = match &core.loading_state {
         LoadingState::Idle => theme.text_dim,
-        LoadingState::Loading => theme.warning,
         LoadingState::Loaded => theme.success,
         LoadingState::Failed(_) => theme.error,
     };
@@ -100,7 +100,8 @@ fn build_top_status_bar(
 
 pub fn render_frame(
     f: &mut Frame,
-    full_area: ratatui::layout::Rect,
+    top_status_area: Rect,
+    bottom_status_area: Rect,
     core: &CoreState,
     ui: &UiState,
 ) {
@@ -108,12 +109,20 @@ pub fn render_frame(
     let top_status_bar = build_top_status_bar(core, ui, theme);
     let bottom_status_bar = build_bottom_status_bar(core, ui, theme);
 
-    let block = Block::bordered()
-        .border_style(theme.border)
-        .style(theme.base_block)
-        .title_top(Line::from(top_status_bar).right_aligned())
-        .title_bottom(Line::from(bottom_status_bar).left_aligned())
-        .title_bottom(Line::from("Press 'q' to quit".set_style(theme.text_dim)).right_aligned());
-
-    f.render_widget(block, full_area);
+    if top_status_area.height > 0 {
+        let top_line = Line::from(top_status_bar).right_aligned();
+        f.render_widget(Paragraph::new(top_line), top_status_area);
+    }
+    if bottom_status_area.height > 0 {
+        let left_line = Line::from(bottom_status_bar).left_aligned();
+        let right_line = Line::from("Press 'q' to quit".set_style(theme.text_dim)).right_aligned();
+        f.render_widget(
+            Paragraph::new(left_line).style(theme.panel_block),
+            bottom_status_area,
+        );
+        f.render_widget(
+            Paragraph::new(right_line).style(theme.panel_block),
+            bottom_status_area,
+        );
+    }
 }

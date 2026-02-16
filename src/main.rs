@@ -10,12 +10,12 @@ use tracing::{error, info};
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
-    let _log_guard = if cli.debug {
-        Some(logging::init_debug_tracing()?)
+    let _logger = if cli.debug {
+        Some(logging::init_logging())
     } else {
         None
     };
-    let startup = cli.to_startup_state();
+    let startup = cli.load_startup_sate();
     info!(
         has_input_file = startup.file_path.is_some(),
         initial_position = startup.initial_position,

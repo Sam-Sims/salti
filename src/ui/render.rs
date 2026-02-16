@@ -1,5 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::macros::vertical;
 use ratatui::style::Color::{Reset, Rgb};
 
 use crate::core::CoreState;
@@ -160,32 +161,21 @@ pub fn render(f: &mut Frame, core: &CoreState, ui: &UiState) {
         return;
     }
 
-    let content_area = Rect {
-        x: full_area.x,
-        y: full_area.y,
-        width: full_area.width,
-        height: full_area.height.saturating_sub(1),
-    };
-    let input_area = Rect {
-        x: full_area.x,
-        y: full_area
-            .y
-            .saturating_add(full_area.height.saturating_sub(1)),
-        width: full_area.width,
-        height: 1,
-    };
+    let [non_input_area, input_area] = full_area.layout(&vertical![*=1, ==1]);
+    let [top_status_area, overlay_area] = non_input_area.layout(&vertical![==1, *=1]);
+    let [content_area, bottom_status_area] = overlay_area.layout(&vertical![*=1, ==1]);
 
     let layout = AppLayout::new(content_area);
-    // outer frame with status bars
-    render_frame(f, content_area, core, ui);
     // render sequence ID pane (left pane).
     render_sequence_id_pane(f, &layout, core, ui);
     // render alignment pane (top-right pane).
     render_alignment_pane(f, &layout, core, ui);
     // render consensus pane (bottom pane).
     render_consensus_pane(f, &layout, core, ui);
-    // overlays (command palette and input line)
-    render_overlays(f, content_area, input_area, ui);
     // mouse selection shader (does nothing if no selection)
     render_mouse_selection(f, &layout, core, ui);
+    // status bars on transparent lines
+    render_frame(f, top_status_area, bottom_status_area, core, ui);
+    // overlays (command palette and input line)
+    render_overlays(f, overlay_area, input_area, ui);
 }

@@ -10,7 +10,11 @@ pub struct StartupState {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about = "A modern, fast, multiple sequence alignment browser - built for the terminal."
+)]
 pub struct Cli {
     /// Path to the FASTA alignment file
     #[arg(value_name = "FILE")]
@@ -20,14 +24,14 @@ pub struct Cli {
     #[arg(short, long, default_value_t = 1)]
     pub position: usize,
 
-    /// Enable debug logging to `salti.log` (or `salti.1.log` if it already exists)
+    /// Enable debug logging to `salti.log`
     #[arg(long)]
     pub debug: bool,
 }
 
 impl Cli {
     #[must_use]
-    pub fn to_startup_state(self) -> StartupState {
+    pub fn load_startup_sate(self) -> StartupState {
         StartupState {
             file_path: self.file,
             initial_position: self.position.saturating_sub(1),
