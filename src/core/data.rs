@@ -1,5 +1,4 @@
 use crate::core::parser::{Alignment, SequenceType};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Represents one alignment row plus metadata.
@@ -14,7 +13,7 @@ pub struct SequenceRecord {
 #[derive(Debug, Default)]
 pub struct AlignmentData {
     pub sequences: Arc<Vec<SequenceRecord>>,
-    pub file_path: Option<PathBuf>,
+    pub file_path: Option<String>,
     // assumes all sequences have the same length, (should be for alignments) so is taken
     // from the first seq when loading
     pub sequence_length: usize,

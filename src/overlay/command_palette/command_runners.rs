@@ -186,7 +186,9 @@ pub(super) fn run_load_alignment(
     run_command("load-alignment", arguments, || {
         let path = require_argument(arguments)?;
 
-        Ok(Action::LoadFile { path: path.into() })
+        Ok(Action::LoadFile {
+            input: path.to_owned(),
+        })
     })
 }
 

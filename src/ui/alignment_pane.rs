@@ -14,10 +14,10 @@ fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
     Line::from("─".repeat(width).set_style(style))
 }
 
-fn render_failed_alignment_message(ui: &UiState, area: Rect, f: &mut Frame) {
+fn render_failed_alignment_message(ui: &UiState, area: Rect, error: &str, f: &mut Frame) {
     let theme = &ui.theme_styles;
     let [_, message_area, _] = area.layout(&vertical![*=1, ==1, *=1]);
-    let message = Line::from("Failed to load alignments".set_style(theme.error));
+    let message = Line::from(format!("Failed to load alignment: {error}").set_style(theme.error));
     let paragraph = Paragraph::new(message)
         .alignment(ratatui::layout::HorizontalAlignment::Center)
         .style(theme.base_block);
@@ -226,8 +226,8 @@ pub fn render_alignment_pane(
     let inner_area = alignment_pane_block.inner(layout.alignment_pane_area);
     f.render_widget(alignment_pane_block, layout.alignment_pane_area);
 
-    if matches!(&core.loading_state, LoadingState::Failed(_)) {
-        render_failed_alignment_message(ui, inner_area, f);
+    if let LoadingState::Failed(error) = &core.loading_state {
+        render_failed_alignment_message(ui, inner_area, error, f);
         return;
     }
     if matches!(&core.loading_state, LoadingState::Idle) {

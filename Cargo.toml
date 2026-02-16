@@ -17,7 +17,7 @@ ratatui = "0.30.0"
 tokio-stream = "0.1.18"
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = "0.7"
-needletail = "0.6.3"
+paraseq = { version = "0.4.8", features = ["url", "ssh"] }
 clap = { version = "4.5.57", features = ["derive"] }
 nucleo-matcher = "0.3.1"
 rand = "0.10.0"
