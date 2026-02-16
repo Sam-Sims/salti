@@ -32,3 +32,8 @@ tempfile = "3.25.0"
 
 [profile.release]
 debug = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
