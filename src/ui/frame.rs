@@ -1,12 +1,12 @@
 use crate::core::{CoreState, LoadingState};
+use crate::ui::UiState;
 use crate::ui::selection::{display_index_by_sequence_id, selection_row_bounds};
 use crate::ui::utils::truncate_label;
-use crate::ui::UiState;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;

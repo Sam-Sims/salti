@@ -1,9 +1,9 @@
 use crate::app::Action;
 use crate::config::theme::ThemeId;
+use crate::core::VisibleSequence;
 use crate::core::column_stats::ConsensusMethod;
 use crate::core::command::CoreAction;
 use crate::core::parser::SequenceType;
-use crate::core::VisibleSequence;
 use crate::ui::UiAction;
 use tracing::{debug, trace};
 

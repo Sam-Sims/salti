@@ -426,19 +426,14 @@ impl App {
         debug!(path = ?file_path, "spawning alignment load task");
         let handle = tokio::task::spawn_blocking({
             let cancel = cancel.clone();
-            move || {
-                parser::parse_fasta_file(file_path, &cancel).map_err(|error| error.to_string())
-            }
+            move || parser::parse_fasta_file(file_path, &cancel).map_err(|error| error.to_string())
         });
 
         *active_job = Some(AsyncJob { handle, cancel });
     }
 
     /// Spawns an async task to compute column stats for the current viewport and cancels any previous stats task.
-    fn refresh_column_stats_job(
-        &mut self,
-        active_job: &mut Option<AsyncJob<ColumnStats>>,
-    ) {
+    fn refresh_column_stats_job(&mut self, active_job: &mut Option<AsyncJob<ColumnStats>>) {
         let Some(request) = self.core.build_column_stats_request() else {
             return;
         };
