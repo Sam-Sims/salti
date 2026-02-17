@@ -130,7 +130,12 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         help_text: "Set the active theme.",
         aliases: &[],
         completer: None,
-        static_candidates: &["everforest-dark", "solarized-light", "tokyo-night", "terminal-default"],
+        static_candidates: &[
+            "everforest-dark",
+            "solarized-light",
+            "tokyo-night",
+            "terminal-default",
+        ],
         run: run_theme,
     }),
     PaletteCommand::Typable(TypableCommand {

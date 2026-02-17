@@ -125,20 +125,20 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<A
     let mut alignments = Vec::new();
     let mut expected_length: Option<usize> = None;
 
-    while record_set.fill(&mut reader).map_err(|e| {
-        eyre!("Error reading records: {}", e)
-    })? {
+    while record_set
+        .fill(&mut reader)
+        .map_err(|e| eyre!("Error reading records: {}", e))?
+    {
         for record in record_set.iter() {
             if cancel.is_cancelled() {
                 return Err(eyre!("Cancelled fasta parse"));
             }
 
-            let record = record.map_err(|e| {
-                eyre!("Error reading record: {}", e)
-            })?;
-            let id = Arc::from(std::str::from_utf8(record.id()).map_err(|e| {
-                eyre!("Invalid sequence ID: {}", e)
-            })?);
+            let record = record.map_err(|e| eyre!("Error reading record: {}", e))?;
+            let id = Arc::from(
+                std::str::from_utf8(record.id())
+                    .map_err(|e| eyre!("Invalid sequence ID: {}", e))?,
+            );
 
             let sequence = Arc::from(record.seq().to_vec());
             let sequence_length = record.seq().len();
