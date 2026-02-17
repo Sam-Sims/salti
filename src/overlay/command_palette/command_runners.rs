@@ -255,6 +255,9 @@ pub(super) fn run_translation_frame(
 fn parse_theme(arg: &str) -> Option<ThemeId> {
     match arg {
         "everforest-dark" => Some(ThemeId::EverforestDark),
+        "solarized-light" => Some(ThemeId::SolarizedLight),
+        "tokyo-night" => Some(ThemeId::TokyoNight),
+        "terminal-default" => Some(ThemeId::TerminalDefault),
         _ => None,
     }
 }

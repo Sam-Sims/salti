@@ -126,7 +126,7 @@ Commands:
 - `load-alignment` (alias: `load`) - Load an alignment file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
-- `set-theme` - Set active theme (currently only 1 `everforest-dark`).
+- `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
 - `set-sequence-type` - Override auto-detection if it fails (`dna` or `aa`).
 - `quit` - Quit the app.
 
