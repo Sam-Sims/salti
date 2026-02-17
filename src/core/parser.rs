@@ -4,7 +4,7 @@ use rand::seq::IndexedRandom;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// minimum amino-acid character fraction required to classify input as amino acid.
 const AMINO_ACID_CLASSIFICATION_THRESHOLD: f32 = 0.5;
