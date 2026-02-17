@@ -20,7 +20,24 @@ https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
 
 ### Fast
 
-`salti` is built for speed while browsing and loading large alignments.
+`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for async processing. This is in part achieved by:
+- Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to complete dynamically without blocking the UI.
+- Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick, and caching consensus and conservation calculations in a window around the currently visible region.
+
+It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
+ 
+
+### Load files over HTTP/HTTPS/SSH
+
+Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load over HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g. `:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
+
+### Themes
+
+`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far are:
+- `everforest-dark` - the default theme, based on the everforest colorscheme.
+- `solarized-light` - a light theme based on the solarized palette.
+- `tokyo-night` - a dark theme based on the tokyo night palette.
+- `terminal-default` - uses terminal-provided ANSI colours and defaults.
 
 ### Command palette
 
@@ -122,12 +139,11 @@ Commands:
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
-- `toggle-reference-diff` - Renders reference mismatches as `.`
-- `toggle-consensus-diff` - Renders consensus mismatches as `.`
+- `set-diff-mode` - Set diff rendering mode (`off`, `reference`, or `consensus`).
 - `load-alignment` (alias: `load`) - Load an alignment file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
-- `set-theme` - Set active theme (currently only 1 `everforest-dark`).
+- `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
 - `set-sequence-type` - Override auto-detection if it fails (`dna` or `aa`).
 - `quit` - Quit the app.
 

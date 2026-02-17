@@ -43,6 +43,9 @@ pub struct ThemeStyles {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeId {
     EverforestDark,
+    SolarizedLight,
+    TokyoNight,
+    TerminalDefault,
 }
 
 impl ThemeId {
@@ -50,12 +53,20 @@ impl ThemeId {
     pub fn name(self) -> &'static str {
         match self {
             ThemeId::EverforestDark => "everforest-dark",
+            ThemeId::SolarizedLight => "solarized-light",
+            ThemeId::TokyoNight => "tokyo-night",
+            ThemeId::TerminalDefault => "terminal-default",
         }
     }
 
     #[must_use]
-    pub const fn all() -> [ThemeId; 1] {
-        [ThemeId::EverforestDark]
+    pub const fn all() -> [ThemeId; 4] {
+        [
+            ThemeId::EverforestDark,
+            ThemeId::SolarizedLight,
+            ThemeId::TokyoNight,
+            ThemeId::TerminalDefault,
+        ]
     }
 }
 
@@ -137,45 +148,174 @@ impl SequenceTheme {
 }
 
 pub const EVERFOREST_DARK: Theme = Theme {
-    base_bg: rgb(0x2d, 0x35, 0x3b),
-    surface_bg: rgb(0x34, 0x3f, 0x44),
-    panel_bg: rgb(0x3d, 0x48, 0x4d),
-    panel_bg_dim: rgb(0x32, 0x3b, 0x3f),
-    overlay_bg: rgb(0x3d, 0x48, 0x4d),
-    border: rgb(0x7a, 0x84, 0x78),
-    border_active: rgb(0x85, 0x92, 0x89),
-    text: rgb(0xd3, 0xc6, 0xaa),
-    text_muted: rgb(0x85, 0x92, 0x89),
-    text_dim: rgb(0x7a, 0x84, 0x78),
-    accent: rgb(0x83, 0xc0, 0x92),
-    accent_alt: rgb(0x7f, 0xbb, 0xb3),
-    success: rgb(0xa7, 0xc0, 0x80),
-    warning: rgb(0xdb, 0xbc, 0x7f),
-    error: rgb(0xe6, 0x7e, 0x80),
-    selection_bg: rgb(0x7f, 0xbb, 0xb3),
-    selection_fg: rgb(0x2d, 0x35, 0x3b),
+    base_bg: Color::from_u32(0x2d353b),
+    surface_bg: Color::from_u32(0x343f44),
+    panel_bg: Color::from_u32(0x3d484d),
+    panel_bg_dim: Color::from_u32(0x323b3f),
+    overlay_bg: Color::from_u32(0x3d484d),
+    border: Color::from_u32(0x7a8478),
+    border_active: Color::from_u32(0x859289),
+    text: Color::from_u32(0xd3c6aa),
+    text_muted: Color::from_u32(0x859289),
+    text_dim: Color::from_u32(0x7a8478),
+    accent: Color::from_u32(0x83c092),
+    accent_alt: Color::from_u32(0x7fbbb3),
+    success: Color::from_u32(0xa7c080),
+    warning: Color::from_u32(0xdbbc7f),
+    error: Color::from_u32(0xe67e80),
+    selection_bg: Color::from_u32(0x7fbbb3),
+    selection_fg: Color::from_u32(0x2d353b),
     sequence: SequenceTheme {
-        foreground: rgb(0x2d, 0x35, 0x3b),
+        foreground: Color::from_u32(0x2d353b),
         dna: DnaPalette {
-            a: rgb(0xa7, 0xc0, 0x80),
-            t: rgb(0xe6, 0x7e, 0x80),
-            c: rgb(0x7f, 0xbb, 0xb3),
-            g: rgb(0xdb, 0xbc, 0x7f),
-            n: rgb(0x85, 0x92, 0x89),
-            ambiguity: rgb(0xd6, 0x99, 0xb6),
-            gap: rgb(0x7a, 0x84, 0x78),
+            a: Color::from_u32(0xa7c080),
+            t: Color::from_u32(0xe67e80),
+            c: Color::from_u32(0x7fbbb3),
+            g: Color::from_u32(0xdbbc7f),
+            n: Color::from_u32(0x859289),
+            ambiguity: Color::from_u32(0xd699b6),
+            gap: Color::from_u32(0x7a8478),
         },
         amino_acid: AminoAcidPalette {
-            hydrophobic: rgb(0x7f, 0xbb, 0xb3),
-            positive: rgb(0xe6, 0x7e, 0x80),
-            negative: rgb(0xd6, 0x99, 0xb6),
-            polar: rgb(0xa7, 0xc0, 0x80),
-            glycine: rgb(0xe6, 0x98, 0x75),
-            proline: rgb(0xdb, 0xbc, 0x7f),
-            aromatic: rgb(0x83, 0xc0, 0x92),
-            special: rgb(0x9d, 0xa9, 0xa0),
+            hydrophobic: Color::from_u32(0x7fbbb3),
+            positive: Color::from_u32(0xe67e80),
+            negative: Color::from_u32(0xd699b6),
+            polar: Color::from_u32(0xa7c080),
+            glycine: Color::from_u32(0xe69875),
+            proline: Color::from_u32(0xdbbc7f),
+            aromatic: Color::from_u32(0x83c092),
+            special: Color::from_u32(0x9da9a0),
         },
-        diff_match: rgb(0x7a, 0x84, 0x78),
+        diff_match: Color::from_u32(0x7a8478),
+    },
+};
+
+pub const SOLARIZED_LIGHT: Theme = Theme {
+    base_bg: Color::from_u32(0xfdf6e3),
+    surface_bg: Color::from_u32(0xeee8d5),
+    panel_bg: Color::from_u32(0xeee8d5),
+    panel_bg_dim: Color::from_u32(0xdddbcc),
+    overlay_bg: Color::from_u32(0xeee8d5),
+    border: Color::from_u32(0x93a1a1),
+    border_active: Color::from_u32(0x268bd2),
+    text: Color::from_u32(0x586e75),
+    text_muted: Color::from_u32(0x93a1a1),
+    text_dim: Color::from_u32(0x657b83),
+    accent: Color::from_u32(0x268bd2),
+    accent_alt: Color::from_u32(0x6c71c4),
+    success: Color::from_u32(0x859900),
+    warning: Color::from_u32(0xcb4b16),
+    error: Color::from_u32(0xdc322f),
+    selection_bg: Color::from_u32(0xc5c8bd),
+    selection_fg: Color::from_u32(0x586e75),
+    sequence: SequenceTheme {
+        foreground: Color::from_u32(0x002b36),
+        dna: DnaPalette {
+            a: Color::from_u32(0x859900),
+            t: Color::from_u32(0xdc322f),
+            c: Color::from_u32(0x2aa198),
+            g: Color::from_u32(0xb58900),
+            n: Color::from_u32(0x93a1a1),
+            ambiguity: Color::from_u32(0x6c71c4),
+            gap: Color::from_u32(0x839496),
+        },
+        amino_acid: AminoAcidPalette {
+            hydrophobic: Color::from_u32(0x268bd2),
+            positive: Color::from_u32(0xdc322f),
+            negative: Color::from_u32(0xd33682),
+            polar: Color::from_u32(0x859900),
+            glycine: Color::from_u32(0xcb4b16),
+            proline: Color::from_u32(0xb58900),
+            aromatic: Color::from_u32(0x6c71c4),
+            special: Color::from_u32(0x93a1a1),
+        },
+        diff_match: Color::from_u32(0x93a1a1),
+    },
+};
+
+pub const TOKYO_NIGHT: Theme = Theme {
+    base_bg: Color::from_u32(0x1a1b26),
+    surface_bg: Color::from_u32(0x292e42),
+    panel_bg: Color::from_u32(0x16161e),
+    panel_bg_dim: Color::from_u32(0x343a55),
+    overlay_bg: Color::from_u32(0x16161e),
+    border: Color::from_u32(0x15161e),
+    border_active: Color::from_u32(0x27a1b9),
+    text: Color::from_u32(0xc0caf5),
+    text_muted: Color::from_u32(0x565f89),
+    text_dim: Color::from_u32(0x3b4261),
+    accent: Color::from_u32(0x7dcfff),
+    accent_alt: Color::from_u32(0x7aa2f7),
+    success: Color::from_u32(0x9ece6a),
+    warning: Color::from_u32(0xe0af68),
+    error: Color::from_u32(0xdb4b4b),
+    selection_bg: Color::from_u32(0x283457),
+    selection_fg: Color::from_u32(0xc0caf5),
+    sequence: SequenceTheme {
+        foreground: Color::from_u32(0x1a1b26),
+        dna: DnaPalette {
+            a: Color::from_u32(0x9ece6a),
+            t: Color::from_u32(0xf7768e),
+            c: Color::from_u32(0x7dcfff),
+            g: Color::from_u32(0xe0af68),
+            n: Color::from_u32(0x737aa2),
+            ambiguity: Color::from_u32(0xbb9af7),
+            gap: Color::from_u32(0x3b4261),
+        },
+        amino_acid: AminoAcidPalette {
+            hydrophobic: Color::from_u32(0x7aa2f7),
+            positive: Color::from_u32(0xf7768e),
+            negative: Color::from_u32(0xbb9af7),
+            polar: Color::from_u32(0x73daca),
+            glycine: Color::from_u32(0xff9e64),
+            proline: Color::from_u32(0xe0af68),
+            aromatic: Color::from_u32(0x2ac3de),
+            special: Color::from_u32(0x565f89),
+        },
+        diff_match: Color::from_u32(0x6183bb),
+    },
+};
+
+pub const TERMINAL_DEFAULT: Theme = Theme {
+    base_bg: Color::Reset,
+    surface_bg: Color::Black,
+    panel_bg: Color::Black,
+    panel_bg_dim: Color::DarkGray,
+    overlay_bg: Color::Black,
+    border: Color::DarkGray,
+    border_active: Color::Gray,
+    text: Color::Reset,
+    text_muted: Color::Gray,
+    text_dim: Color::DarkGray,
+    accent: Color::Cyan,
+    accent_alt: Color::Blue,
+    success: Color::Green,
+    warning: Color::Yellow,
+    error: Color::Red,
+    selection_bg: Color::Blue,
+    selection_fg: Color::Black,
+    sequence: SequenceTheme {
+        foreground: Color::Black,
+        dna: DnaPalette {
+            a: Color::Green,
+            t: Color::Red,
+            c: Color::Blue,
+            g: Color::Yellow,
+            n: Color::Gray,
+            ambiguity: Color::Magenta,
+            gap: Color::DarkGray,
+        },
+        amino_acid: AminoAcidPalette {
+            hydrophobic: Color::Blue,
+            positive: Color::Red,
+            negative: Color::Magenta,
+            polar: Color::Green,
+            glycine: Color::Cyan,
+            proline: Color::Yellow,
+            aromatic: Color::LightGreen,
+            special: Color::Gray,
+        },
+        diff_match: Color::DarkGray,
     },
 };
 
@@ -183,6 +323,9 @@ pub const EVERFOREST_DARK: Theme = Theme {
 pub fn theme_from_id(theme_id: ThemeId) -> Theme {
     match theme_id {
         ThemeId::EverforestDark => EVERFOREST_DARK,
+        ThemeId::SolarizedLight => SOLARIZED_LIGHT,
+        ThemeId::TokyoNight => TOKYO_NIGHT,
+        ThemeId::TerminalDefault => TERMINAL_DEFAULT,
     }
 }
 
@@ -207,8 +350,4 @@ pub fn build_theme_styles(theme: Theme) -> ThemeStyles {
             .fg(theme.selection_fg)
             .bold(),
     }
-}
-
-const fn rgb(red: u8, green: u8, blue: u8) -> Color {
-    Color::Rgb(red, green, blue)
 }

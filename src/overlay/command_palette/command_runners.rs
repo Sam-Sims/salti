@@ -2,7 +2,7 @@ use crate::app::Action;
 use crate::config::theme::ThemeId;
 use crate::core::VisibleSequence;
 use crate::core::column_stats::ConsensusMethod;
-use crate::core::command::CoreAction;
+use crate::core::command::{CoreAction, DiffMode};
 use crate::core::parser::SequenceType;
 use crate::ui::UiAction;
 use tracing::{debug, trace};
@@ -72,26 +72,6 @@ pub(super) fn run_toggle_translation(
     run_command("toggle-translate", arguments, || {
         ensure_no_argument(arguments)?;
         Ok(Action::Core(CoreAction::ToggleTranslationView))
-    })
-}
-
-pub(super) fn run_toggle_reference_diff(
-    _: &CommandPaletteState,
-    arguments: &str,
-) -> Result<Action, CommandError> {
-    run_command("toggle-reference-diff", arguments, || {
-        ensure_no_argument(arguments)?;
-        Ok(Action::Core(CoreAction::ToggleReferenceDiff))
-    })
-}
-
-pub(super) fn run_toggle_consensus_diff(
-    _: &CommandPaletteState,
-    arguments: &str,
-) -> Result<Action, CommandError> {
-    run_command("toggle-consensus-diff", arguments, || {
-        ensure_no_argument(arguments)?;
-        Ok(Action::Core(CoreAction::ToggleConsensusDiff))
     })
 }
 
@@ -206,7 +186,9 @@ pub(super) fn run_load_alignment(
     run_command("load-alignment", arguments, || {
         let path = require_argument(arguments)?;
 
-        Ok(Action::LoadFile { path: path.into() })
+        Ok(Action::LoadFile {
+            input: path.to_owned(),
+        })
     })
 }
 
@@ -216,6 +198,28 @@ fn parse_consensus_method(arg: &str) -> Option<ConsensusMethod> {
         "majority-non-gap" => Some(ConsensusMethod::MajorityNonGap),
         _ => None,
     }
+}
+
+fn parse_diff_mode(arg: &str) -> Option<DiffMode> {
+    match arg {
+        "off" => Some(DiffMode::Off),
+        "reference" => Some(DiffMode::Reference),
+        "consensus" => Some(DiffMode::Consensus),
+        _ => None,
+    }
+}
+
+pub(super) fn run_diff_mode(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-diff-mode", arguments, || {
+        let arg = require_argument(arguments)?;
+        let mode = parse_diff_mode(arg.as_str()).ok_or_else(|| {
+            CommandError::new(format!("Invalid argument for set-diff-mode: {arg}"))
+        })?;
+        Ok(Action::Core(CoreAction::SetDiffMode(mode)))
+    })
 }
 
 pub(super) fn run_consensus_method(
@@ -253,6 +257,9 @@ pub(super) fn run_translation_frame(
 fn parse_theme(arg: &str) -> Option<ThemeId> {
     match arg {
         "everforest-dark" => Some(ThemeId::EverforestDark),
+        "solarized-light" => Some(ThemeId::SolarizedLight),
+        "tokyo-night" => Some(ThemeId::TokyoNight),
+        "terminal-default" => Some(ThemeId::TerminalDefault),
         _ => None,
     }
 }

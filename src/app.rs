@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use color_eyre::Result;
@@ -35,7 +34,7 @@ const RENDER_FPS: f32 = 120.0;
 pub enum Action {
     Core(CoreAction),
     Ui(UiAction),
-    LoadFile { path: PathBuf },
+    LoadFile { input: String },
     Quit,
 }
 
@@ -53,7 +52,7 @@ pub struct App {
     terminal_size: Rect,
     box_selection_anchor: Option<(usize, usize)>,
     middle_pan_anchor: Option<(u16, u16)>,
-    pending_load_path: Option<PathBuf>,
+    pending_load_input: Option<String>,
 }
 
 impl App {
@@ -66,7 +65,7 @@ impl App {
             terminal_size: Rect::new(0, 0, 0, 0),
             box_selection_anchor: None,
             middle_pan_anchor: None,
-            pending_load_path: None,
+            pending_load_input: None,
         }
     }
 
@@ -91,7 +90,7 @@ impl App {
     ///
     /// [`Action::Quit`] sets `should_quit`, which causes the main event loop to exit on its next check.
     ///
-    /// [`Action::LoadFile`] sets `pending_load_path`, which the event loop polls to spawn an async
+    /// [`Action::LoadFile`] sets `pending_load_input`, which the event loop polls to spawn an async
     /// task
     fn apply_actions<I>(&mut self, actions: I)
     where
@@ -118,12 +117,12 @@ impl App {
                 Action::Ui(action) => {
                     self.ui.apply_action(action, &self.core);
                 }
-                Action::LoadFile { path } => {
-                    trace!(?path, "queuing file load");
+                Action::LoadFile { input } => {
+                    trace!(?input, "queuing file load");
                     self.clear_box_selection_anchor();
                     self.ui
                         .apply_action(UiAction::ClearMouseSelection, &self.core);
-                    self.pending_load_path = Some(path);
+                    self.pending_load_input = Some(input);
                 }
                 Action::Quit => {
                     self.should_quit = true;
@@ -227,16 +226,16 @@ impl App {
     /// Try and load an alignment file.
     ///
     /// If no file path is configured, loading is marked as [`LoadingState::Idle`] so the UI can
-    /// present an idle status. If a path exists, it is queued via `pending_load_path` for the
+    /// present an idle status. If a path exists, it is queued via `pending_load_input` for the
     /// event loop to spawn an async load job.
     fn try_file_load(&mut self) {
-        let Some(file_path) = self.core.data.file_path.clone() else {
+        let Some(input) = self.core.data.file_path.clone() else {
             info!("no startup file provided; entering idle loading state");
             self.core.loading_state = LoadingState::Idle;
             return;
         };
-        debug!(path = ?file_path, "queueing startup alignment load");
-        self.pending_load_path = Some(file_path);
+        debug!(input = %input, "queueing startup alignment load");
+        self.pending_load_input = Some(input);
     }
 
     /// Updates viewport after a terminal resize.
@@ -408,10 +407,10 @@ impl App {
         }
     }
 
-    /// Spawns an async task to load alignments from a file path and cancels any previous load task.
+    /// Spawns an async task to load alignments from an input source and cancels any previous load task.
     fn start_load_job(
         &mut self,
-        file_path: PathBuf,
+        input: String,
         active_job: &mut Option<AsyncJob<Result<Vec<Alignment>, String>>>,
     ) {
         if let Some(previous) = active_job.take() {
@@ -420,13 +419,13 @@ impl App {
             previous.handle.abort();
         }
 
-        self.core.data.file_path = Some(file_path.clone());
+        self.core.data.file_path = Some(input.clone());
 
         let cancel = CancellationToken::new();
-        debug!(path = ?file_path, "spawning alignment load task");
+        debug!(input = %input, "spawning alignment load task");
         let handle = tokio::task::spawn_blocking({
             let cancel = cancel.clone();
-            move || parser::parse_fasta_file(file_path, &cancel).map_err(|error| error.to_string())
+            move || parser::parse_fasta_file(&input, &cancel).map_err(|error| error.to_string())
         });
 
         *active_job = Some(AsyncJob { handle, cancel });
@@ -500,8 +499,8 @@ impl App {
             }
         }
 
-        if let Some(file_path) = self.pending_load_path.take() {
-            self.start_load_job(file_path, &mut load_job);
+        if let Some(input) = self.pending_load_input.take() {
+            self.start_load_job(input, &mut load_job);
         }
         self.refresh_column_stats_job(&mut stats_job);
 
@@ -539,8 +538,8 @@ impl App {
                         _ => {}
                     }
 
-                    if let Some(file_path) = self.pending_load_path.take() {
-                        self.start_load_job(file_path, &mut load_job);
+                    if let Some(input) = self.pending_load_input.take() {
+                        self.start_load_job(input, &mut load_job);
                     }
                     self.refresh_column_stats_job(&mut stats_job);
                     needs_redraw = true;

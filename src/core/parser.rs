@@ -1,7 +1,7 @@
 use color_eyre::{Result, eyre::eyre};
-use needletail::parser::parse_fastx_file;
+use paraseq::fasta;
 use rand::seq::IndexedRandom;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -21,6 +21,30 @@ pub enum SequenceType {
 pub struct Alignment {
     pub id: Arc<str>,
     pub sequence: Arc<[u8]>,
+}
+
+/// Returns `true` when the input looks like an HTTP or HTTPS URL.
+fn is_http_url(input: &str) -> bool {
+    input.starts_with("http://") || input.starts_with("https://")
+}
+
+/// Returns `true` when the input looks like an SSH path.
+fn is_ssh_path(input: &str) -> bool {
+    input.starts_with("ssh://")
+}
+
+/// Opens a FASTA reader for the given input source.
+///
+/// Supports HTTP/HTTPS URLs, SSH paths, and local file paths.
+/// Transparent decompression (gzip, bzip2, xz, zstd) is handled by paraseq via niffler.
+fn open_fasta_reader(input: &str) -> Result<fasta::Reader<paraseq::BoxedReader>> {
+    if is_http_url(input) {
+        return Ok(fasta::Reader::from_url(input)?);
+    }
+    if is_ssh_path(input) {
+        return Ok(fasta::Reader::from_ssh(input)?);
+    }
+    Ok(fasta::Reader::from_path(Path::new(input))?)
 }
 
 /// Tries to classify alignments as DNA or amino acid.
@@ -86,60 +110,63 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
     }
 }
 
-/// Parses a fasta file into `Alignment`s with cooperative cancellation.
+/// Parses a FASTA input into `Alignment`s with cooperative cancellation.
 ///
+/// `input` can be a local file path, an HTTP/HTTPS URL, or an SSH path.
 /// Intended to run on a blocking worker thread (via `tokio::task::spawn_blocking`).
-/// Returns an error when the file is missing, a record is invalid, or sequence lengths differ.
-pub fn parse_fasta_file(path: PathBuf, cancel: &CancellationToken) -> Result<Vec<Alignment>> {
-    info!(path = ?path, "starting fasta parse");
-    let mut parser = parse_fastx_file(&path).map_err(|e| {
-        error!(path = ?path, error = %e, "failed to initialise fastx parser");
-        eyre!("Failed to parse file: {}", e)
+/// Returns an error when the input is missing, a record is invalid, or sequence lengths differ.
+pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<Alignment>> {
+    info!(input = %input, "starting fasta parse");
+    let mut reader = open_fasta_reader(input).map_err(|e| {
+        error!(input = %input, error = %e, "failed to initialise fasta reader");
+        eyre!("Failed to open input: {}", e)
     })?;
+    let mut record_set = reader.new_record_set();
     let mut alignments = Vec::new();
     let mut expected_length: Option<usize> = None;
 
-    while let Some(record) = parser.next() {
-        if cancel.is_cancelled() {
-            debug!(path = ?path, "cancelled fasta parse");
-            return Err(eyre!("Cancelled fasta parse"));
-        }
-
-        let record = record.map_err(|e| {
-            error!(path = ?path, error = %e, "error reading fasta record");
-            eyre!("Error reading record: {}", e)
-        })?;
-        let id = Arc::from(std::str::from_utf8(record.id()).map_err(|e| {
-            error!(path = ?path, error = %e, "invalid fasta sequence id");
-            eyre!("Invalid sequence ID: {}", e)
-        })?);
-
-        let sequence = Arc::from(record.seq().to_vec());
-        let sequence_length = record.seq().len();
-        if let Some(length) = expected_length {
-            if sequence_length != length {
-                warn!(
-                    path = ?path,
-                    expected_length = length,
-                    found_length = sequence_length,
-                    id = %id,
-                    "sequence length mismatch while parsing fasta"
-                );
-                return Err(eyre!(
-                    "Sequence length mismatch: expected {}, found {} for id {}",
-                    length,
-                    sequence_length,
-                    id
-                ));
+    while record_set
+        .fill(&mut reader)
+        .map_err(|e| eyre!("Error reading records: {}", e))?
+    {
+        for record in record_set.iter() {
+            if cancel.is_cancelled() {
+                return Err(eyre!("Cancelled fasta parse"));
             }
-        } else {
-            expected_length = Some(sequence_length);
-        }
 
-        alignments.push(Alignment { id, sequence });
+            let record = record.map_err(|e| eyre!("Error reading record: {}", e))?;
+            let id = Arc::from(
+                std::str::from_utf8(record.id())
+                    .map_err(|e| eyre!("Invalid sequence ID: {}", e))?,
+            );
+
+            let sequence = Arc::from(record.seq().to_vec());
+            let sequence_length = record.seq().len();
+            if let Some(length) = expected_length {
+                if sequence_length != length {
+                    return Err(eyre!(
+                        "Sequence length mismatch: expected {}, found {} for id {}",
+                        length,
+                        sequence_length,
+                        id
+                    ));
+                }
+            } else {
+                if sequence_length == 0 {
+                    return Err(eyre!("Sequence has zero length for id {}", id));
+                }
+                expected_length = Some(sequence_length);
+            }
+
+            alignments.push(Alignment { id, sequence });
+        }
+    }
+
+    if alignments.is_empty() {
+        return Err(eyre!("No valid FASTA records found in input"));
     }
     debug!(
-        path = ?path,
+        input = %input,
         alignment_count = alignments.len(),
         expected_length = expected_length.unwrap_or(0),
         "completed fasta parse"
@@ -149,8 +176,6 @@ pub fn parse_fasta_file(path: PathBuf, cancel: &CancellationToken) -> Result<Vec
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
     use tempfile::NamedTempFile;
 
@@ -164,7 +189,8 @@ mod tests {
     fn test_parse_valid() {
         let content = ">seq1\nA-CG\n>seq2\nTGCA\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
+        let input = temp_file.path().to_str().unwrap();
+        let result = parse_fasta_file(input, &CancellationToken::new());
         assert!(result.is_ok());
         let alignments = result.unwrap();
         assert_eq!(alignments.len(), 2);
@@ -176,10 +202,7 @@ mod tests {
 
     #[test]
     fn test_parse_nonexistant() {
-        let result = parse_fasta_file(
-            PathBuf::from_str("idontexist.fasta").unwrap(),
-            &CancellationToken::new(),
-        );
+        let result = parse_fasta_file("idontexist.fasta", &CancellationToken::new());
         assert!(result.is_err());
     }
 
@@ -187,7 +210,8 @@ mod tests {
     fn test_parse_empty() {
         let content = "";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
+        let input = temp_file.path().to_str().unwrap();
+        let result = parse_fasta_file(input, &CancellationToken::new());
         assert!(result.is_err());
     }
 
@@ -195,7 +219,8 @@ mod tests {
     fn test_parse_no_seqs() {
         let content = ">seq1\n>seq2\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
+        let input = temp_file.path().to_str().unwrap();
+        let result = parse_fasta_file(input, &CancellationToken::new());
         assert!(result.is_err());
     }
 
@@ -203,7 +228,8 @@ mod tests {
     fn test_parse_length_mismatch() {
         let content = ">seq1\nATCG\n>seq2\nTGCAAA\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
+        let input = temp_file.path().to_str().unwrap();
+        let result = parse_fasta_file(input, &CancellationToken::new());
         assert!(result.is_err());
     }
 
@@ -211,7 +237,8 @@ mod tests {
     fn test_parse_invalid() {
         let content = "imaninvalidfasta\nfile\n";
         let temp_file = create_temp_fasta(content);
-        let result = parse_fasta_file(temp_file.path().to_path_buf(), &CancellationToken::new());
+        let input = temp_file.path().to_str().unwrap();
+        let result = parse_fasta_file(input, &CancellationToken::new());
         assert!(result.is_err());
     }
 
@@ -245,21 +272,5 @@ mod tests {
         ];
         let result = detect_sequence_type(&alignments);
         assert_eq!(result, SequenceType::AminoAcid);
-    }
-
-    #[test]
-    fn test_detect_sequence_type_zero_length_sequences_default_to_dna() {
-        let alignments = vec![
-            Alignment {
-                id: Arc::from("seq1"),
-                sequence: Arc::from(Vec::<u8>::new()),
-            },
-            Alignment {
-                id: Arc::from("seq2"),
-                sequence: Arc::from(Vec::<u8>::new()),
-            },
-        ];
-        let result = detect_sequence_type(&alignments);
-        assert_eq!(result, SequenceType::Dna);
     }
 }

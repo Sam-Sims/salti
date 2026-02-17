@@ -3,7 +3,7 @@ use crate::core::column_stats::{
     COLUMN_STATS_BUFFER_COLS, COLUMN_STATS_RECALC_MARGIN_COLS, ColumnStats, ColumnStatsRequest,
     apply_positional_updates,
 };
-use crate::core::command::CoreAction;
+use crate::core::command::{CoreAction, DiffMode};
 use crate::core::data::SequenceRecord;
 use crate::core::parser::{self, Alignment, SequenceType};
 use crate::core::{AlignmentData, Viewport};
@@ -227,27 +227,30 @@ impl CoreState {
             CoreAction::SetFilter { pattern, regex } => {
                 self.apply_filter(Some((pattern, regex)));
             }
-            CoreAction::ToggleReferenceDiff => {
-                self.show_reference_diff = !self.show_reference_diff;
-                if self.show_reference_diff {
-                    self.show_consensus_diff = false;
+            CoreAction::SetDiffMode(mode) => {
+                let (next_reference_diff, next_consensus_diff) = match mode {
+                    DiffMode::Off => (false, false),
+                    DiffMode::Reference => (true, false),
+                    DiffMode::Consensus => (false, true),
+                };
+
+                if self.show_reference_diff == next_reference_diff
+                    && self.show_consensus_diff == next_consensus_diff
+                {
+                    trace!(
+                        mode = ?mode,
+                        "ignored diff mode request with unchanged value"
+                    );
+                } else {
+                    self.show_reference_diff = next_reference_diff;
+                    self.show_consensus_diff = next_consensus_diff;
+                    debug!(
+                        mode = ?mode,
+                        show_reference_diff = self.show_reference_diff,
+                        show_consensus_diff = self.show_consensus_diff,
+                        "set diff mode"
+                    );
                 }
-                debug!(
-                    show_reference_diff = self.show_reference_diff,
-                    show_consensus_diff = self.show_consensus_diff,
-                    "toggled reference diff mode"
-                );
-            }
-            CoreAction::ToggleConsensusDiff => {
-                self.show_consensus_diff = !self.show_consensus_diff;
-                if self.show_consensus_diff {
-                    self.show_reference_diff = false;
-                }
-                debug!(
-                    show_consensus_diff = self.show_consensus_diff,
-                    show_reference_diff = self.show_reference_diff,
-                    "toggled consensus diff mode"
-                );
             }
             CoreAction::ToggleTranslationView => {
                 self.toggle_translation_view();
@@ -667,5 +670,22 @@ mod tests {
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![1]);
+    }
+
+    #[test]
+    fn set_diff_mode_keeps_modes_mutually_exclusive() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
+
+        core.apply_action(CoreAction::SetDiffMode(DiffMode::Reference));
+        assert!(core.show_reference_diff);
+        assert!(!core.show_consensus_diff);
+
+        core.apply_action(CoreAction::SetDiffMode(DiffMode::Consensus));
+        assert!(!core.show_reference_diff);
+        assert!(core.show_consensus_diff);
+
+        core.apply_action(CoreAction::SetDiffMode(DiffMode::Off));
+        assert!(!core.show_reference_diff);
+        assert!(!core.show_consensus_diff);
     }
 }

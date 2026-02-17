@@ -2,6 +2,13 @@ use crate::core::column_stats::ConsensusMethod;
 use crate::core::parser::SequenceType;
 use regex::Regex;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffMode {
+    Off,
+    Reference,
+    Consensus,
+}
+
 /// Represents an action that can be performed as part of the application.
 #[derive(Debug)]
 pub enum CoreAction {
@@ -22,7 +29,6 @@ pub enum CoreAction {
     SetConsensusMethod(ConsensusMethod),
     SetSequenceType(SequenceType),
     SetTranslationFrame(u8),
-    ToggleReferenceDiff,
-    ToggleConsensusDiff,
+    SetDiffMode(DiffMode),
     ToggleTranslationView,
 }

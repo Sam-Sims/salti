@@ -1,10 +1,9 @@
 use clap::Parser;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartupState {
-    /// Input file path
-    pub file_path: Option<PathBuf>,
+    /// Input source (file path, URL, or SSH path)
+    pub file_path: Option<String>,
     /// Initial position in the file to jump to
     pub initial_position: usize,
 }
@@ -16,9 +15,9 @@ pub struct StartupState {
     about = "A modern, fast, multiple sequence alignment browser - built for the terminal."
 )]
 pub struct Cli {
-    /// Path to the FASTA alignment file
-    #[arg(value_name = "FILE")]
-    pub file: Option<PathBuf>,
+    /// Input source: file path, URL (http/https), or SSH path (ssh://)
+    #[arg(value_name = "INPUT")]
+    pub file: Option<String>,
 
     /// Initial position in the alignment to jump to (1-based index)
     #[arg(short, long, default_value_t = 1)]

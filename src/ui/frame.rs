@@ -79,8 +79,13 @@ fn build_top_status_bar(
 
     let file_name = file_path
         .as_ref()
-        .and_then(|path| path.file_name())
-        .and_then(|name| name.to_str())
+        .map(|input| {
+            // For local paths, show just the file name; for URLs, show the full input.
+            std::path::Path::new(input.as_str())
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(input.as_str())
+        })
         .unwrap_or("Unknown");
 
     let loading_text = core.loading_state.to_string();
