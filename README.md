@@ -20,7 +20,22 @@ https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
 
 ### Fast
 
-`salti` is built for speed while browsing and loading large alignments.
+`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for async processing.
+Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to complete dynamically without blocking the UI.
+It can handle alignments with thousands of sequences and >200,000 positions without lag (tested on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
+This is achieved by rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick, and caching consensus and conservation calculations in a window around the currently visible region.
+
+### Load files over HTTP/HTTPS/SSH
+
+Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load over HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g. `:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
+
+### Themes
+
+`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far are:
+- `everforest-dark` - the default theme, based on the everforest colorscheme.
+- `solarized-light` - a light theme based on the solarized palette.
+- `tokyo-night` - a dark theme based on the tokyo night palette.
+- `terminal-default` - uses terminal-provided ANSI colours and defaults.
 
 ### Command palette
 
