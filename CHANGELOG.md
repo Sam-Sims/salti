@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-17
+
+### Added
+- `set-diff-mode` command that replaces the previous 2 commands `toggle-reference-diff` and `toggle-consensus-diff`. It supports the same 3 modes as before: `off`, `reference`, and `consensus`.
+- `tokyo-night` theme, available via `set-theme tokyo-night`.
+- `solarized-light` theme, available via `set-theme solarized-light`.
+- `terminal-default` theme, which uses terminal-provided ANSI colours and defaults, available via `set-theme terminal-default`.
+- Support loading alignments over HTTP/HTTPS, by providing a URL to the `load` command, e.g. `:load https://example.com/alignment.fasta`.
+- Support for compressed input files - just provide the gzipped file as input, e.g. `alignment.fasta.gz`.
+  - Supported compression formats are `gz`, `zstd`, `lzma`, `bz2` and `bgz`
+- Support for loading alignments via SSH e.g `:load ssh://user@host/path/to/alignment.fasta`
+
+### Changed
+- Switch from `needletail` to `paraseq` for fasta parsing. This enables a lot of great features such as compressed file support (thanks to niffler too!), and native HTTP/HTTPS and SSH loading.
+  - Although it supports parallel processing - salti uses the single threaded API at the moment, for the above features. 
+
+### Removed
+- `toggle-reference-diff` - see Added above
+- `toggle-consensus-diff` - see Added above
+
 ## [0.4.0] - 2026-02-16
 
 ### Added
