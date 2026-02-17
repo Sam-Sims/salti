@@ -20,10 +20,12 @@ https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
 
 ### Fast
 
-`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for async processing.
-Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to complete dynamically without blocking the UI.
-It can handle alignments with thousands of sequences and >200,000 positions without lag (tested on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
-This is achieved by rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick, and caching consensus and conservation calculations in a window around the currently visible region.
+`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for async processing. This is in part achieved by:
+- Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to complete dynamically without blocking the UI.
+- Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick, and caching consensus and conservation calculations in a window around the currently visible region.
+
+It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
+ 
 
 ### Load files over HTTP/HTTPS/SSH
 
