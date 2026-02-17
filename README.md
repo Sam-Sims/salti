@@ -122,8 +122,7 @@ Commands:
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
-- `toggle-reference-diff` - Renders reference mismatches as `.`
-- `toggle-consensus-diff` - Renders consensus mismatches as `.`
+- `set-diff-mode` - Set diff rendering mode (`off`, `reference`, or `consensus`).
 - `load-alignment` (alias: `load`) - Load an alignment file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).

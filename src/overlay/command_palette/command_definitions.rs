@@ -1,8 +1,8 @@
 use super::command_runners::{
-    run_clear_filter, run_clear_reference, run_consensus_method, run_filter, run_jump_position,
-    run_jump_sequence, run_load_alignment, run_pin_sequence, run_quit, run_sequence_type,
-    run_set_reference, run_theme, run_toggle_consensus_diff, run_toggle_reference_diff,
-    run_toggle_translation, run_translation_frame, run_unpin_sequence,
+    run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode, run_filter,
+    run_jump_position, run_jump_sequence, run_load_alignment, run_pin_sequence, run_quit,
+    run_sequence_type, run_set_reference, run_theme, run_toggle_translation, run_translation_frame,
+    run_unpin_sequence,
 };
 use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
 use super::completers;
@@ -88,22 +88,18 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         run: run_toggle_translation,
     }),
     PaletteCommand::Static(StaticCommand {
-        name: "toggle-reference-diff",
-        help_text: "Toggle reference diff highlighting.",
-        aliases: &[],
-        run: run_toggle_reference_diff,
-    }),
-    PaletteCommand::Static(StaticCommand {
         name: "quit",
         help_text: "Exit the application.",
         aliases: &["q"],
         run: run_quit,
     }),
-    PaletteCommand::Static(StaticCommand {
-        name: "toggle-consensus-diff",
-        help_text: "Toggle consensus diff highlighting.",
+    PaletteCommand::Typable(TypableCommand {
+        name: "set-diff-mode",
+        help_text: "Set diff highlighting mode.",
         aliases: &[],
-        run: run_toggle_consensus_diff,
+        completer: None,
+        static_candidates: &["off", "reference", "consensus"],
+        run: run_diff_mode,
     }),
     PaletteCommand::Typable(TypableCommand {
         name: "load-alignment",
