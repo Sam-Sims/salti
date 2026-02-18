@@ -9,6 +9,32 @@ const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 6;
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
 
+#[derive(Debug, Clone, Copy)]
+pub struct FrameLayout {
+    pub top_status_area: Rect,
+    pub overlay_area: Rect,
+    pub content_area: Rect,
+    pub bottom_status_area: Rect,
+    pub input_area: Rect,
+}
+
+impl FrameLayout {
+    #[must_use]
+    pub fn new(terminal_area: Rect) -> Self {
+        let [non_input_area, input_area] = terminal_area.layout(&vertical![*=1, ==1]);
+        let [top_status_area, overlay_area] = non_input_area.layout(&vertical![==1, *=1]);
+        let [content_area, bottom_status_area] = overlay_area.layout(&vertical![*=1, ==1]);
+
+        Self {
+            top_status_area,
+            overlay_area,
+            content_area,
+            bottom_status_area,
+            input_area,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AppLayout {
     pub sequence_id_pane_area: Rect,

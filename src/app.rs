@@ -18,7 +18,7 @@ use crate::core::column_stats::{ColumnStats, ColumnStatsRequest, compute_column_
 use crate::core::command::CoreAction;
 use crate::core::parser::{self, Alignment};
 use crate::core::{CoreState, LoadingState};
-use crate::ui::layout::AppLayout;
+use crate::ui::layout::{AppLayout, FrameLayout};
 use crate::ui::render;
 use crate::ui::selection::visible_sequence_rows;
 use crate::ui::{MouseSelection, UiAction, UiState};
@@ -49,7 +49,7 @@ pub struct App {
     core: CoreState,
     ui: UiState,
     should_quit: bool,
-    terminal_size: Rect,
+    frame_layout: FrameLayout,
     box_selection_anchor: Option<(usize, usize)>,
     middle_pan_anchor: Option<(u16, u16)>,
     pending_load_input: Option<String>,
@@ -62,21 +62,11 @@ impl App {
             core: CoreState::new(startup),
             ui: UiState::default(),
             should_quit: false,
-            terminal_size: Rect::new(0, 0, 0, 0),
+            frame_layout: FrameLayout::new(Rect::new(0, 0, 0, 0)),
             box_selection_anchor: None,
             middle_pan_anchor: None,
             pending_load_input: None,
         }
-    }
-
-    #[must_use]
-    fn content_area(&self) -> Rect {
-        Rect::new(
-            0,
-            1,
-            self.terminal_size.width,
-            self.terminal_size.height.saturating_sub(3),
-        )
     }
 
     /// Applies a sequence of [`Action`] values in order and performs their side effects immediately.
@@ -243,8 +233,8 @@ impl App {
     /// A viewport update can trigger consensus/conservation recalculation if the visible
     /// alignment pane width changes enough to alter the current windowing.
     fn handle_resize(&mut self, width: u16, height: u16) {
-        self.terminal_size = Rect::new(0, 0, width, height);
-        let layout = AppLayout::new(self.content_area());
+        self.frame_layout = FrameLayout::new(Rect::new(0, 0, width, height));
+        let layout = AppLayout::new(self.frame_layout.content_area);
 
         let visible_width = layout.alignment_pane_area.width.saturating_sub(2) as usize;
         let visible_height = layout.alignment_pane_area.height.saturating_sub(4) as usize;
@@ -272,7 +262,7 @@ impl App {
     #[must_use]
     fn selection_point_crosshair(&self, mouse_x: u16, mouse_y: u16) -> Option<(usize, usize)> {
         let sequence_rows_area =
-            AppLayout::new(self.content_area()).alignment_pane_sequence_rows_area();
+            AppLayout::new(self.frame_layout.content_area).alignment_pane_sequence_rows_area();
 
         // stops panic in debug mode when clicking outside the alignment pane sequence rows area.
         if !sequence_rows_area.contains((mouse_x, mouse_y).into()) {
