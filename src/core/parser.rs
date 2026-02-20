@@ -4,7 +4,7 @@ use rand::seq::IndexedRandom;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// minimum amino-acid character fraction required to classify input as amino acid.
 const AMINO_ACID_CLASSIFICATION_THRESHOLD: f32 = 0.5;
@@ -75,17 +75,6 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
             },
         );
 
-    if total_count == 0 {
-        debug!(
-            sampled_alignment_count,
-            amino_acid_count,
-            total_count,
-            sequence_type = ?SequenceType::Dna,
-            "defaulted sequence type to DNA because sampled sequences had zero total length"
-        );
-        return SequenceType::Dna;
-    }
-
     let amino_acid_fraction = amino_acid_count as f32 / total_count as f32;
     if amino_acid_fraction >= AMINO_ACID_CLASSIFICATION_THRESHOLD {
         debug!(
@@ -94,7 +83,7 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
             total_count,
             amino_acid_fraction,
             sequence_type = ?SequenceType::AminoAcid,
-            "detected sequence type"
+            "Detected sequence type"
         );
         SequenceType::AminoAcid
     } else {
@@ -104,7 +93,7 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
             total_count,
             amino_acid_fraction,
             sequence_type = ?SequenceType::Dna,
-            "detected sequence type"
+            "Detected sequence type"
         );
         SequenceType::Dna
     }
@@ -116,11 +105,8 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
 /// Intended to run on a blocking worker thread (via `tokio::task::spawn_blocking`).
 /// Returns an error when the input is missing, a record is invalid, or sequence lengths differ.
 pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<Alignment>> {
-    info!(input = %input, "starting fasta parse");
-    let mut reader = open_fasta_reader(input).map_err(|e| {
-        error!(input = %input, error = %e, "failed to initialise fasta reader");
-        eyre!("Failed to open input: {}", e)
-    })?;
+    info!(input = %input, "Starting fasta parse");
+    let mut reader = open_fasta_reader(input).map_err(|e| eyre!("Failed to open input: {}", e))?;
     let mut record_set = reader.new_record_set();
     let mut alignments = Vec::new();
     let mut expected_length: Option<usize> = None;
@@ -169,7 +155,7 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<A
         input = %input,
         alignment_count = alignments.len(),
         expected_length = expected_length.unwrap_or(0),
-        "completed fasta parse"
+        "Completed fasta parse"
     );
     Ok(alignments)
 }

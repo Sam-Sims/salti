@@ -115,7 +115,8 @@ impl SequenceTheme {
             None => Style::new(),
         }
     }
-    fn dna_colour(&self, byte: u8) -> Option<Color> {
+    #[must_use]
+    pub fn dna_colour(&self, byte: u8) -> Option<Color> {
         match byte {
             b'A' | b'a' => Some(self.dna.a),
             b'T' | b't' => Some(self.dna.t),
@@ -131,7 +132,8 @@ impl SequenceTheme {
 
     // colours from clustal default
     // http://www.jalview.org/help/html/colourSchemes/clustal.html
-    fn amino_acid_colour(&self, byte: u8) -> Option<Color> {
+    #[must_use]
+    pub fn amino_acid_colour(&self, byte: u8) -> Option<Color> {
         match byte {
             b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f'
             | b'W' | b'w' | b'C' | b'c' => Some(self.amino_acid.hydrophobic),

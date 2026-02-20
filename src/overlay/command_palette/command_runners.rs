@@ -5,7 +5,7 @@ use crate::core::column_stats::ConsensusMethod;
 use crate::core::command::{CoreAction, DiffMode};
 use crate::core::parser::SequenceType;
 use crate::ui::UiAction;
-use tracing::{debug, trace};
+use tracing::warn;
 
 use super::command_error::CommandError;
 use super::input::CommandPaletteState;
@@ -24,23 +24,13 @@ fn run_command(
     run: impl FnOnce() -> Result<Action, CommandError>,
 ) -> Result<Action, CommandError> {
     let result = run();
-    match &result {
-        Ok(action) => {
-            trace!(
-                command,
-                arguments = %arguments,
-                action = ?action,
-                "command runner produced action"
-            );
-        }
-        Err(error) => {
-            debug!(
-                command,
-                arguments = %arguments,
-                error = %error.message,
-                "command runner rejected command input"
-            );
-        }
+    if let Err(error) = &result {
+        warn!(
+            command,
+            arguments = %arguments,
+            error = %error.message,
+            "Command runner rejected command input"
+        );
     }
     result
 }

@@ -22,10 +22,10 @@ async fn main() -> Result<()> {
         "startup state: "
     );
 
-    info!("initialising terminal");
+    info!("Initialising terminal");
     let terminal = ratatui::init();
     if let Err(error_value) = execute!(stdout(), EnableMouseCapture) {
-        error!(error = ?error_value, "failed to enable mouse capture");
+        error!(error = ?error_value, "Failed to enable mouse capture");
         ratatui::restore();
         return Err(error_value.into());
     }
@@ -37,9 +37,9 @@ async fn main() -> Result<()> {
     }
 
     if let Err(error_value) = execute!(stdout(), DisableMouseCapture) {
-        error!(error = ?error_value, "failed to disable mouse capture");
+        error!(error = ?error_value, "Failed to disable mouse capture");
     }
-    info!("restoring terminal");
+    info!("Restoring terminal");
     ratatui::restore();
     app_result
 }

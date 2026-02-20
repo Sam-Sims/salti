@@ -1,7 +1,7 @@
+use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, LoadingState};
 use crate::ui::UiState;
 use crate::ui::rows::{format_row_spans, select_row_render_mode};
-use crate::ui::utils::split_pinned_rows;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::macros::vertical;
@@ -9,10 +9,6 @@ use ratatui::style::{Style, Styled, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
-
-fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
-    Line::from("─".repeat(width).set_style(style))
-}
 
 fn render_failed_alignment_message(ui: &UiState, area: Rect, error: &str, f: &mut Frame) {
     let theme = &ui.theme_styles;
@@ -47,43 +43,29 @@ fn render_idle_alignment_message(ui: &UiState, area: Rect, f: &mut Frame) {
 
 fn render_sequence_rows(
     core: &CoreState,
+    window: &ViewportWindow,
     ui: &UiState,
     area: Rect,
     theme: &crate::config::theme::ThemeStyles,
     f: &mut Frame,
     consensus: Option<&[u8]>,
+    row_ids: &[Option<usize>],
 ) {
-    let window = core.viewport.window();
-    let horizontal_range = window.col_range;
-    let max_rows = area.height as usize;
-    let pinned_visible: Vec<_> = core.visible_pinned_sequences().take(max_rows).collect();
-    let (pinned_rows, has_pins, unpinned_rows) = split_pinned_rows(max_rows, pinned_visible.len());
-    let unpinned_start = window.row_range.start;
-    let mut alignment_lines = Vec::with_capacity(max_rows);
+    let horizontal_range = window.col_range.clone();
+    let mut alignment_lines = Vec::with_capacity(row_ids.len());
     let render_mode = select_row_render_mode(core, consensus);
 
-    for sequence in pinned_visible.into_iter().take(pinned_rows) {
+    for row_id in row_ids.iter().copied() {
+        let Some(sequence_id) = row_id else {
+            alignment_lines.push(Line::from(
+                "─".repeat(area.width as usize).set_style(theme.border),
+            ));
+            continue;
+        };
+        let sequence = &core.data.sequences[sequence_id];
         let spans = format_row_spans(
             sequence.alignment.sequence.as_ref(),
-            horizontal_range.clone(),
-            &ui.theme.sequence,
-            render_mode,
-        );
-        alignment_lines.push(Line::from(spans));
-    }
-
-    if has_pins {
-        alignment_lines.push(build_pinned_divider_line(area.width as usize, theme.border));
-    }
-
-    for sequence in core
-        .visible_unpinned_sequences()
-        .skip(unpinned_start)
-        .take(unpinned_rows)
-    {
-        let spans = format_row_spans(
-            sequence.alignment.sequence.as_ref(),
-            horizontal_range.clone(),
+            &horizontal_range,
             &ui.theme.sequence,
             render_mode,
         );
@@ -94,7 +76,13 @@ fn render_sequence_rows(
     f.render_widget(paragraph, area);
 }
 
-fn render_scrollbar(core: &CoreState, ui: &UiState, area: Rect, f: &mut Frame) {
+fn render_scrollbar(
+    core: &CoreState,
+    window: &ViewportWindow,
+    ui: &UiState,
+    area: Rect,
+    f: &mut Frame,
+) {
     if area.width < 2 || area.height == 0 {
         return;
     }
@@ -103,7 +91,6 @@ fn render_scrollbar(core: &CoreState, ui: &UiState, area: Rect, f: &mut Frame) {
         return;
     }
 
-    let window = core.viewport.window();
     let width = area.width.saturating_sub(2) as usize;
     let max_index = core.viewport.max_size.cols.saturating_sub(1);
     let col_offset = window.col_range.start;
@@ -163,9 +150,9 @@ fn add_number_to_ruler(
 }
 fn build_ruler(
     core: &CoreState,
+    window: &ViewportWindow,
     theme: &crate::config::theme::ThemeStyles,
 ) -> (Line<'static>, Line<'static>) {
-    let window = core.viewport.window();
     let start_pos = window.col_range.start;
     let width = window.col_range.end.saturating_sub(window.col_range.start);
     let total_cols = core.viewport.max_size.cols;
@@ -199,11 +186,12 @@ fn build_ruler(
 
 fn render_ruler(
     core: &CoreState,
+    window: &ViewportWindow,
     area: Rect,
     theme: &crate::config::theme::ThemeStyles,
     f: &mut Frame,
 ) {
-    let (number_line, marker_line) = build_ruler(core, theme);
+    let (number_line, marker_line) = build_ruler(core, window, theme);
     let ruler_paragraph = Paragraph::new(vec![number_line, marker_line]).style(theme.base_block);
     f.render_widget(ruler_paragraph, area);
 }
@@ -212,7 +200,9 @@ pub fn render_alignment_pane(
     f: &mut Frame,
     layout: &crate::ui::layout::AppLayout,
     core: &CoreState,
+    window: &ViewportWindow,
     ui: &UiState,
+    row_ids: &[Option<usize>],
 ) {
     let consensus = core.consensus.as_deref();
     let theme = &ui.theme_styles;
@@ -223,8 +213,8 @@ pub fn render_alignment_pane(
         .style(theme.base_block)
         .merge_borders(MergeStrategy::Exact);
 
-    let inner_area = alignment_pane_block.inner(layout.alignment_pane_area);
-    f.render_widget(alignment_pane_block, layout.alignment_pane_area);
+    let inner_area = alignment_pane_block.inner(layout.alignment_pane);
+    f.render_widget(alignment_pane_block, layout.alignment_pane);
 
     if let LoadingState::Failed(error) = &core.loading_state {
         render_failed_alignment_message(ui, inner_area, error, f);
@@ -237,7 +227,16 @@ pub fn render_alignment_pane(
 
     let [ruler_area, sequence_content_area] = inner_area.layout(&vertical![==2, *=1]);
 
-    render_ruler(core, ruler_area, theme, f);
-    render_sequence_rows(core, ui, sequence_content_area, theme, f, consensus);
-    render_scrollbar(core, ui, layout.alignment_pane_area, f);
+    render_ruler(core, window, ruler_area, theme, f);
+    render_sequence_rows(
+        core,
+        window,
+        ui,
+        sequence_content_area,
+        theme,
+        f,
+        consensus,
+        row_ids,
+    );
+    render_scrollbar(core, window, ui, layout.alignment_pane, f);
 }
