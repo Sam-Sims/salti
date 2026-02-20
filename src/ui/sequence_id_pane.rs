@@ -1,6 +1,6 @@
 use crate::core::CoreState;
+use crate::core::viewport::ViewportWindow;
 use crate::ui::UiState;
-use crate::ui::utils::split_pinned_rows;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Style, Styled};
@@ -33,24 +33,28 @@ fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
     Line::from("─".repeat(width).set_style(style))
 }
 
-fn render_sequence_id_rows(core: &CoreState, ui: &UiState, area: Rect, f: &mut Frame) {
-    let window = core.viewport.window();
-    let ruler_height = 2;
-    let row_capacity = area.height.saturating_sub(ruler_height) as usize;
-    let pinned_visible: Vec<_> = core.visible_pinned_sequences().take(row_capacity).collect();
-    let (pinned_rows, has_pins, unpinned_rows) =
-        split_pinned_rows(row_capacity, pinned_visible.len());
-    let unpinned_start = window.row_range.start;
-    let mut id_lines = Vec::with_capacity(row_capacity + ruler_height as usize);
+fn render_sequence_id_rows(
+    core: &CoreState,
+    window: &ViewportWindow,
+    ui: &UiState,
+    area: Rect,
+    f: &mut Frame,
+    visible_rows: &[Option<usize>],
+) {
+    let ruler_height: usize = 2;
+    let mut id_lines = Vec::with_capacity(visible_rows.len() + ruler_height);
+    let has_pins = visible_rows.first().is_some_and(|r| {
+        r.is_some_and(|id| core.is_sequence_pinned(id))
+    });
 
     // create blank lines where the alignment pane ruler sits, so sequence ID pane rows stay aligned.
     id_lines.push(Line::from(" "));
-    if pinned_visible.is_empty() {
-        id_lines.push(Line::from(" "));
-    } else {
+    if has_pins {
         id_lines.push(Line::from(
             "Pinned sequences:".set_style(ui.theme_styles.text_muted),
         ));
+    } else {
+        id_lines.push(Line::from(" "));
     }
 
     let name_width = window
@@ -58,37 +62,27 @@ fn render_sequence_id_rows(core: &CoreState, ui: &UiState, area: Rect, f: &mut F
         .end
         .saturating_sub(window.name_range.start);
 
-    for sequence in pinned_visible.into_iter().take(pinned_rows) {
-        id_lines.push(build_sequence_id_line(
-            ui,
-            sequence.sequence_id,
-            sequence.alignment.id.as_ref(),
-            window.name_range.start,
-            name_width,
-            true,
-        ));
-    }
-
-    if has_pins {
-        id_lines.push(build_pinned_divider_line(
-            area.width as usize,
-            ui.theme_styles.border,
-        ));
-    }
-
-    for sequence in core
-        .visible_unpinned_sequences()
-        .skip(unpinned_start)
-        .take(unpinned_rows)
-    {
-        id_lines.push(build_sequence_id_line(
-            ui,
-            sequence.sequence_id,
-            sequence.alignment.id.as_ref(),
-            window.name_range.start,
-            name_width,
-            false,
-        ));
+    for row_id in visible_rows {
+        match row_id {
+            Some(sequence_id) => {
+                let sequence = &core.data.sequences[*sequence_id];
+                let is_pinned = core.is_sequence_pinned(*sequence_id);
+                id_lines.push(build_sequence_id_line(
+                    ui,
+                    *sequence_id,
+                    sequence.alignment.id.as_ref(),
+                    window.name_range.start,
+                    name_width,
+                    is_pinned,
+                ));
+            }
+            None => {
+                id_lines.push(build_pinned_divider_line(
+                    area.width as usize,
+                    ui.theme_styles.border,
+                ));
+            }
+        }
     }
 
     let id_paragraph = Paragraph::new(id_lines)
@@ -101,7 +95,9 @@ pub fn render_sequence_id_pane(
     f: &mut Frame,
     layout: &crate::ui::layout::AppLayout,
     core: &CoreState,
+    window: &ViewportWindow,
     ui: &UiState,
+    visible_rows: &[Option<usize>],
 ) {
     let theme = &ui.theme_styles;
     let block = ratatui::widgets::Block::bordered()
@@ -109,8 +105,8 @@ pub fn render_sequence_id_pane(
         .border_style(theme.border)
         .style(theme.base_block)
         .merge_borders(MergeStrategy::Exact);
-    let inner_area = block.inner(layout.sequence_id_pane_area);
-    f.render_widget(block, layout.sequence_id_pane_area);
+    let inner_area = block.inner(layout.sequence_id_pane);
+    f.render_widget(block, layout.sequence_id_pane);
 
-    render_sequence_id_rows(core, ui, inner_area, f);
+    render_sequence_id_rows(core, window, ui, inner_area, f, visible_rows);
 }

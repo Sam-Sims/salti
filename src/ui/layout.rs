@@ -1,10 +1,9 @@
 use ratatui::layout::{Rect, Spacing};
 use ratatui::macros::{horizontal, vertical};
-use ratatui::widgets::Block;
 
 /// fixed height (rows) for the bottom consensus pane.
 /// the remaining vertical space is used for the alignment pane.
-const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 6;
+const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
 /// width percentage for the left sequence ID pane (used in alignment and consensus panes).
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
@@ -35,12 +34,13 @@ impl FrameLayout {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AppLayout {
-    pub sequence_id_pane_area: Rect,
-    pub alignment_pane_area: Rect,
-    pub consensus_sequence_id_pane_area: Rect,
-    pub consensus_alignment_pane_area: Rect,
+    pub sequence_id_pane: Rect,
+    pub alignment_pane: Rect,
+    pub alignment_pane_sequence_rows: Rect,
+    pub consensus_sequence_id_pane: Rect,
+    pub consensus_alignment_pane: Rect,
 }
 
 impl AppLayout {
@@ -60,25 +60,16 @@ impl AppLayout {
         ] = consensus_area.layout(
             &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
         );
+        let [_, sequence_rows_area] = ratatui::widgets::Block::bordered()
+            .inner(alignment_pane_area)
+            .layout(&vertical![==2, *=1]);
 
         Self {
-            sequence_id_pane_area,
-            alignment_pane_area,
-            consensus_sequence_id_pane_area,
-            consensus_alignment_pane_area,
+            sequence_id_pane: sequence_id_pane_area,
+            alignment_pane: alignment_pane_area,
+            alignment_pane_sequence_rows: sequence_rows_area,
+            consensus_sequence_id_pane: consensus_sequence_id_pane_area,
+            consensus_alignment_pane: consensus_alignment_pane_area,
         }
-    }
-
-    #[must_use]
-    pub fn sequence_id_pane_inner_area(&self) -> Rect {
-        Block::bordered().inner(self.sequence_id_pane_area)
-    }
-
-    #[must_use]
-    pub fn alignment_pane_sequence_rows_area(&self) -> Rect {
-        let [_, sequence_rows_area] = Block::bordered()
-            .inner(self.alignment_pane_area)
-            .layout(&vertical![==2, *=1]);
-        sequence_rows_area
     }
 }
