@@ -1,4 +1,5 @@
 use crate::config::theme::SequenceTheme;
+use crate::core::command::DiffMode;
 use crate::core::lookups::{BYTE_TO_CHAR, translate_codon};
 use crate::core::parser::SequenceType;
 use crate::core::{COLUMN_STATS_BUFFER_COLS, CoreState};
@@ -70,7 +71,7 @@ fn format_sequence_bytes_with_reference(
 fn build_translated_state(
     sequence: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
 ) -> (Vec<Option<u8>>, Vec<bool>) {
     if window.end <= window.start {
@@ -111,7 +112,7 @@ fn build_translated_state(
 fn build_translated_spans(
     sequence: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
@@ -136,12 +137,12 @@ fn render_translated_row_with_diff(
     sequence: &[u8],
     diff_against: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
     let (amino_acid_for_position, is_centre) =
-        build_translated_state(sequence, frame, window.clone(), buffer);
+        build_translated_state(sequence, frame, window, buffer);
     let (diff_amino_acid_for_position, _) =
         build_translated_state(diff_against, frame, window, buffer);
 
@@ -180,7 +181,7 @@ fn render_raw_row(
     diff_against: Option<&[u8]>,
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
-    window: Range<usize>,
+    window: &Range<usize>,
 ) -> Vec<Span<'static>> {
     let end = window.end.min(sequence.len());
     let sequence_slice = &sequence[window.start..end];
@@ -204,7 +205,7 @@ fn render_raw_row(
 #[must_use]
 pub fn format_row_spans(
     sequence: &[u8],
-    window: Range<usize>,
+    window: &Range<usize>,
     sequence_theme: &SequenceTheme,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
@@ -255,12 +256,10 @@ pub fn select_row_render_mode<'a>(
 
     let translate_nucleotide_to_amino_acid =
         core.translate_nucleotide_to_amino_acid && resolved_sequence_type == SequenceType::Dna;
-    let diff_against = if core.show_reference_diff {
-        reference_sequence
-    } else if core.show_consensus_diff {
-        consensus
-    } else {
-        None
+    let diff_against = match core.diff_mode {
+        DiffMode::Off => None,
+        DiffMode::Reference => reference_sequence,
+        DiffMode::Consensus => consensus,
     };
 
     if translate_nucleotide_to_amino_acid {
