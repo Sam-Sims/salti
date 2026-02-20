@@ -9,7 +9,7 @@ use crate::core::parser::{self, Alignment, SequenceType};
 use crate::core::{AlignmentData, Viewport};
 use regex::Regex;
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn};
+use tracing::debug;
 
 /// Represents the current loading status of the application, including any error messages if
 /// loading has failed.
@@ -50,13 +50,14 @@ pub struct CoreState {
     pub reference_sequence_id: Option<usize>,
     pub pinned_sequence_ids: Vec<usize>,
     pub display_sequence_ids: Vec<usize>,
-    pub show_reference_diff: bool,
-    pub show_consensus_diff: bool,
+    pub display_pinned_count: usize,
+    pub diff_mode: DiffMode,
     pub translate_nucleotide_to_amino_acid: bool,
     pub translation_frame: u8,
     pub consensus_method: crate::core::column_stats::ConsensusMethod,
     pub consensus: Option<Vec<u8>>,
     pub conservation: Option<Vec<f32>>,
+    // will contain the current window + a buffer either side, or None if no window is currently cached
     pub column_stats_window: Option<(usize, usize)>,
 }
 
@@ -78,8 +79,8 @@ impl CoreState {
             reference_sequence_id: None,
             pinned_sequence_ids: Vec::new(),
             display_sequence_ids: Vec::new(),
-            show_reference_diff: false,
-            show_consensus_diff: false,
+            display_pinned_count: 0,
+            diff_mode: DiffMode::Off,
             translate_nucleotide_to_amino_acid: false,
             translation_frame: 0,
             consensus_method: crate::core::column_stats::ConsensusMethod::MajorityNonGap,
@@ -130,25 +131,14 @@ impl CoreState {
                 self.viewport.jump_to_position(position);
             }
             CoreAction::ClearReference => {
-                debug!(
-                    previous_reference_sequence_id = ?self.reference_sequence_id,
-                    "clearing reference sequence"
-                );
                 self.reference_sequence_id = None;
                 self.refresh_viewport();
-                self.reset_column_stats();
             }
             CoreAction::SetReference(sequence_id) => {
                 self.remove_pin(sequence_id);
                 self.reference_sequence_id =
                     self.data.sequences.get(sequence_id).map(|_| sequence_id);
-                if self.reference_sequence_id.is_some() {
-                    debug!(sequence_id, "set reference sequence");
-                } else {
-                    warn!(sequence_id, "ignored set reference for unknown sequence id");
-                }
                 self.refresh_viewport();
-                self.reset_column_stats();
             }
             CoreAction::PinSequence(sequence_id) => {
                 if self.data.sequences.get(sequence_id).is_some()
@@ -156,41 +146,16 @@ impl CoreState {
                     && self.reference_sequence_id != Some(sequence_id)
                 {
                     self.pinned_sequence_ids.push(sequence_id);
-                    debug!(
-                        sequence_id,
-                        pinned_count = self.pinned_sequence_ids.len(),
-                        "pinned sequence"
-                    );
                     self.refresh_viewport();
-                    self.reset_column_stats();
-                } else {
-                    trace!(
-                        sequence_id,
-                        "ignored pin request due to existing pin, missing sequence, or reference match"
-                    );
                 }
             }
             CoreAction::UnpinSequence(sequence_id) => {
                 self.remove_pin(sequence_id);
-                debug!(
-                    sequence_id,
-                    pinned_count = self.pinned_sequence_ids.len(),
-                    "processed unpin sequence request"
-                );
                 self.refresh_viewport();
-                self.reset_column_stats();
             }
             CoreAction::SetConsensusMethod(method) => {
-                if self.consensus_method == method {
-                    trace!(method = ?method, "ignored consensus method request with unchanged value");
-                } else {
-                    debug!(
-                        previous_method = ?self.consensus_method,
-                        next_method = ?method,
-                        "changed consensus method"
-                    );
+                if self.consensus_method != method {
                     self.consensus_method = method;
-                    self.reset_column_stats();
                 }
             }
             CoreAction::SetSequenceType(sequence_type) => {
@@ -199,26 +164,14 @@ impl CoreState {
                     if sequence_type == SequenceType::AminoAcid {
                         self.translate_nucleotide_to_amino_acid = false;
                     }
-                    self.reset_column_stats();
-                    debug!(sequence_type = ?sequence_type, "set sequence type");
-                } else {
-                    trace!(sequence_type = ?sequence_type, "sequence type already set");
                 }
             }
             CoreAction::SetTranslationFrame(frame) => {
                 if self.is_dna_sequence_type() {
                     let next_frame = frame - 1;
-                    if self.translation_frame == next_frame {
-                        trace!(
-                            frame = self.translation_frame,
-                            "translation frame already set"
-                        );
-                    } else {
+                    if self.translation_frame != next_frame {
                         self.translation_frame = next_frame;
-                        debug!(frame = self.translation_frame, "set translation frame");
                     }
-                } else {
-                    trace!("ignored translation frame update because sequence type is not DNA");
                 }
             }
             CoreAction::ClearFilter => {
@@ -228,29 +181,7 @@ impl CoreState {
                 self.apply_filter(Some((pattern, regex)));
             }
             CoreAction::SetDiffMode(mode) => {
-                let (next_reference_diff, next_consensus_diff) = match mode {
-                    DiffMode::Off => (false, false),
-                    DiffMode::Reference => (true, false),
-                    DiffMode::Consensus => (false, true),
-                };
-
-                if self.show_reference_diff == next_reference_diff
-                    && self.show_consensus_diff == next_consensus_diff
-                {
-                    trace!(
-                        mode = ?mode,
-                        "ignored diff mode request with unchanged value"
-                    );
-                } else {
-                    self.show_reference_diff = next_reference_diff;
-                    self.show_consensus_diff = next_consensus_diff;
-                    debug!(
-                        mode = ?mode,
-                        show_reference_diff = self.show_reference_diff,
-                        show_consensus_diff = self.show_consensus_diff,
-                        "set diff mode"
-                    );
-                }
+                self.diff_mode = mode;
             }
             CoreAction::ToggleTranslationView => {
                 self.toggle_translation_view();
@@ -274,30 +205,15 @@ impl CoreState {
                 if detected_sequence_type == SequenceType::AminoAcid {
                     self.translate_nucleotide_to_amino_acid = false;
                 }
-                info!(
-                    sequence_count = self.data.sequences.len(),
-                    sequence_length = self.data.sequence_length,
-                    sequence_type = ?detected_sequence_type,
-                    initial_position = self.initial_position,
-                    "alignment data loaded into core state"
-                );
-
-                self.reset_column_stats();
             }
             Err(error) => {
-                debug!(error = %error, "alignment load failed in core state");
                 self.loading_state = LoadingState::Failed(error);
             }
         }
     }
 
-    /// Applies newly computed column stats to the cache vectors.
+    /// Applies column stats to the cache.
     pub fn apply_column_stats(&mut self, stats: ColumnStats) {
-        trace!(
-            consensus_positions = stats.consensus.len(),
-            conservation_positions = stats.conservation.len(),
-            "applying column stats updates"
-        );
         apply_positional_updates(
             &mut self.consensus,
             self.data.sequence_length,
@@ -408,15 +324,17 @@ impl CoreState {
 
     /// Applies or clears the ID filter pattern and refreshes derived viewport state.
     fn apply_filter(&mut self, filter: Option<(String, Regex)>) {
+        // none = clear filter
         let Some((pattern, regex)) = filter else {
             self.filter_text.clear();
             self.filter_regex = None;
             self.refresh_viewport();
-            self.reset_column_stats();
-            debug!("cleared sequence filter");
             return;
         };
 
+        // pattern is empty = also clear filter
+        // this is for UX reasons, so users can clear the filter by deleting the pattern as well
+        // as using `clear-filter` command
         if pattern.is_empty() {
             self.filter_text.clear();
             self.filter_regex = None;
@@ -426,100 +344,70 @@ impl CoreState {
         }
 
         self.refresh_viewport();
-        self.reset_column_stats();
-        debug!(
-            has_filter = self.filter_regex.is_some(),
-            filter = %self.filter_text,
-            visible_sequence_count = self.display_sequence_ids.len(),
-            "applied sequence filter"
-        );
     }
 
-    /// Returns a column stats recomputation request when the current viewport
-    /// requires updates beyond the cached window.
-    pub fn build_column_stats_request(&mut self) -> Option<ColumnStatsRequest> {
-        let Some(positions) = self.get_column_stats_positions() else {
-            trace!("no positions needed for column stats");
-            return None;
+    /// Returns true if the viewport is close enough to a cached window edge that new positions
+    /// should be computed.
+    #[must_use]
+    pub fn viewport_crossed_margin(&self) -> bool {
+        let Some((current_start, current_end)) = self.column_stats_window else {
+            return true;
         };
+        let sequence_length = self.data.sequence_length;
+        let margin = COLUMN_STATS_RECALC_MARGIN_COLS;
+        let viewport_range = self.viewport.window().col_range;
+
+        if current_start > 0 && viewport_range.start < current_start.saturating_add(margin) {
+            return true;
+        }
+
+        current_end < sequence_length && viewport_range.end > current_end.saturating_sub(margin)
+    }
+
+    /// Clears cached consensus and conservation stats.
+    ///
+    /// On next pass, new stats will be calculated for the whole window.
+    pub fn invalidate_column_stats(&mut self) {
+        self.consensus = None;
+        self.conservation = None;
+        self.column_stats_window = None;
+    }
+
+    /// Builds a column stats request for all uncached positions in the
+    /// current viewport window.
+    ///
+    /// Returns a request with empty positions if all positions are already
+    /// cached.
+    pub fn build_column_stats_request(&mut self) -> ColumnStatsRequest {
+        let sequence_length = self.data.sequence_length;
+        let viewport_range = self.viewport.window().col_range;
+        let window_start = viewport_range
+            .start
+            .saturating_sub(COLUMN_STATS_BUFFER_COLS);
+        let window_end = (viewport_range.end + COLUMN_STATS_BUFFER_COLS).min(sequence_length);
+
+        self.column_stats_window = Some((window_start, window_end));
+
+        let positions = (window_start..window_end)
+            .filter(|&position| self.position_needs_calculation(position))
+            .collect::<Vec<_>>();
 
         debug!(
             position_count = positions.len(),
             method = ?self.consensus_method,
             sequence_type = ?self.data.sequence_type.unwrap_or(SequenceType::Dna),
             column_stats_window = ?self.column_stats_window,
-            "queued column stats update request"
+            "Built column stats request"
         );
 
         let visible_sequences: Vec<SequenceRecord> = self.visible_sequences().cloned().collect();
 
-        let request = ColumnStatsRequest {
+        ColumnStatsRequest {
             sequences: Arc::new(visible_sequences),
             positions,
             method: self.consensus_method,
             sequence_type: self.data.sequence_type.unwrap_or(SequenceType::Dna),
-        };
-        Some(request)
-    }
-
-    /// Determines which column positions require calculation.
-    fn get_column_stats_positions(&mut self) -> Option<Vec<usize>> {
-        let sequence_length = self.data.sequence_length;
-        if sequence_length == 0 || self.data.sequences.is_empty() {
-            trace!(
-                sequence_length,
-                sequence_count = self.data.sequences.len(),
-                "skipping column stats update because no sequence data is loaded"
-            );
-            return None;
         }
-
-        let viewport_range = self.viewport.window().col_range;
-        let window_start = viewport_range
-            .start
-            .saturating_sub(COLUMN_STATS_BUFFER_COLS);
-        let window_end = (viewport_range.end + COLUMN_STATS_BUFFER_COLS).min(sequence_length);
-        let needed_window = (window_start, window_end);
-
-        let should_update = match self.column_stats_window {
-            None => true,
-            Some((current_start, current_end)) => {
-                let viewport_start = viewport_range.start;
-                let viewport_end = viewport_range.end;
-                viewport_start < (current_start + COLUMN_STATS_RECALC_MARGIN_COLS)
-                    || viewport_end > (current_end.saturating_sub(COLUMN_STATS_RECALC_MARGIN_COLS))
-            }
-        };
-
-        if !should_update {
-            trace!(
-                column_stats_window = ?self.column_stats_window,
-                viewport_start = viewport_range.start,
-                viewport_end = viewport_range.end,
-                "skipping column stats update because window still covers viewport"
-            );
-            return None;
-        }
-
-        self.column_stats_window = Some(needed_window);
-        let positions_to_calculate = (needed_window.0..needed_window.1)
-            .filter(|&position| self.position_needs_calculation(position))
-            .collect::<Vec<_>>();
-
-        if positions_to_calculate.is_empty() {
-            trace!(
-                column_stats_window = ?self.column_stats_window,
-                "skipping column stats update because all positions are already cached"
-            );
-            return None;
-        }
-
-        trace!(
-            column_stats_window = ?self.column_stats_window,
-            position_count = positions_to_calculate.len(),
-            "column stats update required"
-        );
-        Some(positions_to_calculate)
     }
 
     /// Returns true if the given position is not currently cached in consensus or conservation
@@ -532,13 +420,6 @@ impl CoreState {
             .is_none_or(|&byte| byte == b' ')
     }
 
-    /// Drops all cached column stats state.
-    fn reset_column_stats(&mut self) {
-        self.consensus = None;
-        self.conservation = None;
-        self.column_stats_window = None;
-    }
-
     /// Returns whether the loaded data is currently classified as DNA.
     fn is_dna_sequence_type(&self) -> bool {
         self.data.sequence_type == Some(SequenceType::Dna)
@@ -548,12 +429,6 @@ impl CoreState {
     fn toggle_translation_view(&mut self) {
         if self.is_dna_sequence_type() {
             self.translate_nucleotide_to_amino_acid = !self.translate_nucleotide_to_amino_acid;
-            debug!(
-                translate_nucleotide_to_amino_acid = self.translate_nucleotide_to_amino_acid,
-                "toggled nucleotide translation view"
-            );
-        } else {
-            trace!("ignored translation view toggle because sequence type is not DNA");
         }
     }
 
@@ -571,6 +446,8 @@ impl CoreState {
                 self.display_sequence_ids.push(sequence_id);
             }
         }
+
+        self.display_pinned_count = self.display_sequence_ids.len();
 
         for sequence in self.data.sequences.iter() {
             if !sequence.hidden && !self.is_sequence_pinned(sequence.sequence_id) {
@@ -609,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn pinned_sequence_stays_visible_when_filter_excludes_it() {
+    fn pinned_sequence_stays_visible_wtih_filter() {
         let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
 
         core.apply_action(CoreAction::PinSequence(0));
@@ -670,22 +547,5 @@ mod tests {
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![1]);
-    }
-
-    #[test]
-    fn set_diff_mode_keeps_modes_mutually_exclusive() {
-        let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
-
-        core.apply_action(CoreAction::SetDiffMode(DiffMode::Reference));
-        assert!(core.show_reference_diff);
-        assert!(!core.show_consensus_diff);
-
-        core.apply_action(CoreAction::SetDiffMode(DiffMode::Consensus));
-        assert!(!core.show_reference_diff);
-        assert!(core.show_consensus_diff);
-
-        core.apply_action(CoreAction::SetDiffMode(DiffMode::Off));
-        assert!(!core.show_reference_diff);
-        assert!(!core.show_consensus_diff);
     }
 }
