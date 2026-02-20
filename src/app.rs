@@ -111,12 +111,14 @@ impl App {
         self.rebuild_visible_rows();
     }
 
+    /// Rebuilds the list of visible rows in the UI state
     fn rebuild_visible_rows(&mut self) {
         let row_capacity = self.app_layout.alignment_pane_sequence_rows.height as usize;
         let window = self.core.viewport.window();
         self.ui
             .rebuild_visible_rows(&self.core, &window, row_capacity);
     }
+
     /// Event handler for mouse events when the minimap is open.
     ///
     /// Minimap has own handler which will return the action to run

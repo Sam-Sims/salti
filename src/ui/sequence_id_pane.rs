@@ -43,9 +43,9 @@ fn render_sequence_id_rows(
 ) {
     let ruler_height: usize = 2;
     let mut id_lines = Vec::with_capacity(visible_rows.len() + ruler_height);
-    let has_pins = visible_rows.first().is_some_and(|r| {
-        r.is_some_and(|id| core.is_sequence_pinned(id))
-    });
+    let has_pins = visible_rows
+        .first()
+        .is_some_and(|r| r.is_some_and(|id| core.is_sequence_pinned(id)));
 
     // create blank lines where the alignment pane ruler sits, so sequence ID pane rows stay aligned.
     id_lines.push(Line::from(" "));

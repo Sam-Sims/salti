@@ -30,10 +30,7 @@ pub fn selection_point_crosshair(
 /// pre-computed inverse map. Independent of which rows are currently visible
 /// on screen, so the selection persists across scrolling.
 #[must_use]
-pub fn selection_row_bounds(
-    selection: MouseSelection,
-    display_index: &[usize],
-) -> (usize, usize) {
+pub fn selection_row_bounds(selection: MouseSelection, display_index: &[usize]) -> (usize, usize) {
     let start = display_index[selection.sequence_id];
     let end = display_index[selection.end_sequence_id];
     (start.min(end), start.max(end))

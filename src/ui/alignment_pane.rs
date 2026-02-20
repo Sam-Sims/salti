@@ -5,7 +5,7 @@ use crate::ui::rows::{format_row_spans, select_row_render_mode};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::macros::vertical;
-use ratatui::style::{Style, Styled, Stylize};
+use ratatui::style::{Styled, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
