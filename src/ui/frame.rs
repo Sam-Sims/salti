@@ -1,5 +1,5 @@
-use crate::core::{CoreState, LoadingState};
 use crate::core::viewport::ViewportWindow;
+use crate::core::{CoreState, LoadingState};
 use crate::ui::UiState;
 use crate::ui::selection::selection_row_bounds;
 use crate::ui::utils::truncate_label;
