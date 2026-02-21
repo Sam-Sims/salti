@@ -4,7 +4,7 @@ use crate::config::theme::{
 use crate::core::command::CoreAction;
 use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, VisibleSequence};
-use crate::overlay::{CommandPaletteState, MinimapState, OverlayState};
+use crate::overlay::{CommandPaletteState, MinimapState, Notification, OverlayState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseSelection {
@@ -75,8 +75,8 @@ pub enum UiAction {
     OpenCommandPalette,
     CloseCommandPalette,
     ToggleMinimap,
-    ShowCommandError(String),
-    ClearCommandError,
+    ShowNotification(Notification),
+    ClearNotification,
     SetTheme(ThemeId),
 }
 
@@ -154,7 +154,7 @@ impl UiState {
     pub fn apply_action(&mut self, action: UiAction, core: &CoreState) {
         match action {
             UiAction::OpenCommandPalette => {
-                self.overlay.command_error = None;
+                self.overlay.notification = None;
                 self.overlay.minimap = None;
                 let selectable_sequences: Vec<VisibleSequence> = core
                     .visible_sequences()
@@ -180,18 +180,18 @@ impl UiState {
                 self.overlay.palette = None;
             }
             UiAction::ToggleMinimap => {
-                self.overlay.command_error = None;
+                self.overlay.notification = None;
                 self.overlay.palette = None;
                 self.overlay.minimap = match self.overlay.minimap {
                     Some(_) => None,
                     None => Some(MinimapState::default()),
                 };
             }
-            UiAction::ShowCommandError(message) => {
-                self.overlay.command_error = Some(message);
+            UiAction::ShowNotification(notification) => {
+                self.overlay.notification = Some(notification);
             }
-            UiAction::ClearCommandError => {
-                self.overlay.command_error = None;
+            UiAction::ClearNotification => {
+                self.overlay.notification = None;
             }
             UiAction::SetTheme(theme_id) => {
                 if self.theme_id != theme_id {

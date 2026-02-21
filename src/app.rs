@@ -453,7 +453,7 @@ impl App {
     /// Otherwise, the key is resolved through configured keybindings. Unbound keys are ignored.
     fn handle_key_event(&mut self, key: KeyEvent) {
         self.ui
-            .apply_action(UiAction::ClearCommandError, &self.core);
+            .apply_action(UiAction::ClearNotification, &self.core);
 
         // if a palette is open, all key events go to it until it's closed
         if let Some(palette) = self.ui.overlay.palette.as_mut() {
