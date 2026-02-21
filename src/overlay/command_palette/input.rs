@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::Action;
 use crate::core::VisibleSequence;
+use crate::core::parser::SequenceType;
 use crate::core::search::{FilterMode, SearchableList};
 use crate::ui::UiAction;
 
@@ -25,6 +26,7 @@ pub struct CommandPaletteState {
     pub(super) completion_list: SearchableList,
     pub(super) selectable_sequences: Vec<VisibleSequence>,
     pub(super) pinned_sequences: Vec<VisibleSequence>,
+    pub(super) sequence_type: SequenceType,
 }
 
 impl CommandPaletteState {
@@ -32,6 +34,7 @@ impl CommandPaletteState {
     pub fn new(
         selectable_sequences: Vec<VisibleSequence>,
         pinned_sequences: Vec<VisibleSequence>,
+        sequence_type: SequenceType,
     ) -> Self {
         let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
         command_list.set_items(display_command_names());
@@ -45,6 +48,7 @@ impl CommandPaletteState {
             completion_list,
             selectable_sequences,
             pinned_sequences,
+            sequence_type,
         }
     }
 

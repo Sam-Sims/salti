@@ -28,7 +28,7 @@ const SCROLL_STEP: usize = 1;
 /// step size (rows) for fast scroll commands
 const FAST_SCROLL_STEP: usize = 10;
 /// fps of render loop
-const RENDER_FPS: f32 = 60.0;
+const RENDER_FPS: f32 = 120.0;
 
 #[derive(Debug)]
 pub enum Action {

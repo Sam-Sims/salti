@@ -161,7 +161,7 @@ impl CoreState {
             CoreAction::SetSequenceType(sequence_type) => {
                 if self.data.sequence_type != Some(sequence_type) {
                     self.data.sequence_type = Some(sequence_type);
-                    if sequence_type == SequenceType::AminoAcid {
+                    if sequence_type != SequenceType::Dna {
                         self.translate_nucleotide_to_amino_acid = false;
                     }
                 }
@@ -202,7 +202,7 @@ impl CoreState {
                 self.viewport.jump_to_position(self.initial_position);
 
                 self.data.sequence_type = Some(detected_sequence_type);
-                if detected_sequence_type == SequenceType::AminoAcid {
+                if detected_sequence_type != SequenceType::Dna {
                     self.translate_nucleotide_to_amino_acid = false;
                 }
             }
@@ -373,6 +373,11 @@ impl CoreState {
         self.column_stats_window = None;
     }
 
+    #[must_use]
+    pub fn sequence_type(&self) -> SequenceType {
+        self.data.sequence_type.unwrap_or(SequenceType::Dna)
+    }
+
     /// Builds a column stats request for all uncached positions in the
     /// current viewport window.
     ///
@@ -395,18 +400,19 @@ impl CoreState {
         debug!(
             position_count = positions.len(),
             method = ?self.consensus_method,
-            sequence_type = ?self.data.sequence_type.unwrap_or(SequenceType::Dna),
+            sequence_type = ?self.sequence_type(),
             column_stats_window = ?self.column_stats_window,
             "Built column stats request"
         );
 
         let visible_sequences: Vec<SequenceRecord> = self.visible_sequences().cloned().collect();
+        let sequence_type = self.sequence_type();
 
         ColumnStatsRequest {
             sequences: Arc::new(visible_sequences),
             positions,
             method: self.consensus_method,
-            sequence_type: self.data.sequence_type.unwrap_or(SequenceType::Dna),
+            sequence_type,
         }
     }
 

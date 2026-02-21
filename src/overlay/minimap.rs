@@ -10,7 +10,6 @@ use ratatui::widgets::{Block, Clear, Paragraph, Widget};
 use crate::config::theme::{Theme, ThemeStyles};
 use crate::core::CoreState;
 use crate::core::command::CoreAction;
-use crate::core::parser::SequenceType;
 
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
@@ -123,7 +122,7 @@ fn sample_alignments(core: &CoreState, column_start: usize, column_end: usize) -
             let sequence_id = core.display_sequence_ids[row_index];
             let sequence = &core.data.sequences[sequence_id].alignment.sequence;
             if let Some(&byte) = sequence.get(column) {
-                counts[byte as usize] += 1;
+                counts[usize::from(byte)] += 1;
             }
         }
     }
@@ -141,12 +140,9 @@ fn calculate_block_colour(
     column_start: usize,
     column_end: usize,
 ) -> Color {
-    let sequence_type = core.data.sequence_type.unwrap_or(SequenceType::Dna);
+    let sequence_type = core.sequence_type();
     sample_alignments(core, column_start, column_end)
-        .and_then(|byte| match sequence_type {
-            SequenceType::Dna => theme.sequence.dna_colour(byte),
-            SequenceType::AminoAcid => theme.sequence.amino_acid_colour(byte),
-        })
+        .and_then(|byte| theme.sequence.colour_for(byte, sequence_type))
         .unwrap_or(theme.panel_bg_dim)
 }
 
