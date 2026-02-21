@@ -36,27 +36,25 @@ Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `s
 HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g.
 `:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
 
-### Themes
-
-`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far
-are:
-
-- `everforest-dark` - the default theme, based on the everforest colorscheme.
-- `solarized-light` - a light theme based on the solarized palette.
-- `tokyo-night` - a dark theme based on the tokyo night palette.
-- `terminal-default` - uses terminal-provided ANSI colours and defaults.
-
 ### Command palette
 
 Press `:` to open a command palette for most actions. See [Usage](#command-palette-1) for details.
 
 ![cmdpal](assets/command_palette.png)
 
-### Minimap
+### Mouse support
+
+`Left click` to select a sequence/position, `ctrl+left click` to select a region.
+
+Hold middle mouse to pan around the alignment.
+
+#### Minimap
 
 Easy navigation with a minimap
 
 ![minimap](assets/minimap.png)
+
+Press `m` to open the minimap and drag to quickly pan around.
 
 ### Nucleotide and Amino acid support
 
@@ -73,6 +71,16 @@ dedicated translation tool.
 - Collapse positions that match the reference or consensus to `.` for easier visualisation of differences.
 - Mouse selection to highlight regions or sequences
 - Pin important sequences fixed at the top while browsing.
+
+### Themes
+
+`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far
+are:
+
+- `everforest-dark` - the default theme, based on the everforest colorscheme.
+- `solarized-light` - a light theme based on the solarized palette.
+- `tokyo-night` - a dark theme based on the tokyo night palette.
+- `terminal-default` - uses terminal-provided ANSI colours and defaults.
 
 ## Installation
 
@@ -135,6 +143,7 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
 - `Left cick` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
+- `m` - Open the minimap
 
 ### Command palette
 
