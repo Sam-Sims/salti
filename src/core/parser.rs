@@ -2,18 +2,43 @@ use color_eyre::{Result, eyre::eyre};
 use paraseq::fasta;
 use rand::seq::IndexedRandom;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
-/// minimum amino-acid character fraction required to classify input as amino acid.
-const AMINO_ACID_CLASSIFICATION_THRESHOLD: f32 = 0.5;
+/// minimum character fraction required to classify sampled input as a specific sequence type.
+const CLASSIFICATION_THRESHOLD: f32 = 0.5;
 
-/// Type of sequences in the alignment: either DNA or amino acid.
+/// Type of sequences in the alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SequenceType {
     Dna,
     AminoAcid,
+    Full,
+}
+
+impl std::fmt::Display for SequenceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dna => f.write_str("dna"),
+            Self::AminoAcid => f.write_str("aa"),
+            Self::Full => f.write_str("full"),
+        }
+    }
+}
+
+impl FromStr for SequenceType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "dna" => Ok(Self::Dna),
+            "aa" => Ok(Self::AminoAcid),
+            "full" => Ok(Self::Full),
+            _ => Err(()),
+        }
+    }
 }
 
 /// One parsed fasta record.
@@ -47,67 +72,73 @@ fn open_fasta_reader(input: &str) -> Result<fasta::Reader<paraseq::BoxedReader>>
     Ok(fasta::Reader::from_path(Path::new(input))?)
 }
 
-/// Tries to classify alignments as DNA or amino acid.
+/// Tries to classify alignments as DNA, amino acid, or full/custom alphabet.
 ///
-/// Samples up to 100 random alignments, counts suspected amino acid chars, and returns `AminoAcid`
-/// when their fraction is at least `AMINO_ACID_CLASSIFICATION_THRESHOLD`, otherwise falls back to `Dna`.
-/// Should work well enough, unless its a tiny input or lots of ambiguity
+/// Samples up to 100 random alignments and calculates the sampled fractions that match the NT and
+/// AA alphabets respectively. If neither alphabet reaches the classification threshold, detection
+/// falls back to `Full`.
 #[must_use]
 pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
-    let amino_acid_chars = b"DEFHIKLMNPQRSVWY";
+    let nt_chars = b"ACGTURYSWKMBDHVNX";
+    let aa_chars = b"DEFHIKLMNPQRSVWY";
     let mut rng = rand::rng();
-    let (sampled_alignment_count, amino_acid_count, total_count) =
-        alignments.sample(&mut rng, 100).fold(
-            (0, 0, 0),
-            |(sampled_alignment_count, amino_acid_count, total_count), alignment| {
-                let sequence = alignment.sequence.as_ref();
-                let amino_acid_in_sequence = sequence
-                    .iter()
-                    .filter(|&&byte| amino_acid_chars.contains(&byte))
-                    .count();
-                let total_in_sequence = sequence.len();
+    let mut sampled_alignment_count = 0usize;
+    let mut aa_count = 0usize;
+    let mut nt_count = 0usize;
+    let mut total_count = 0usize;
 
-                (
-                    sampled_alignment_count + 1,
-                    amino_acid_count + amino_acid_in_sequence,
-                    total_count + total_in_sequence,
-                )
-            },
-        );
+    for alignment in alignments.sample(&mut rng, 100) {
+        sampled_alignment_count += 1;
+        for &byte in alignment.sequence.iter() {
+            if matches!(byte, b'-' | b'.') {
+                continue;
+            }
+
+            let upper = byte.to_ascii_uppercase();
+            total_count += 1;
+            aa_count += usize::from(aa_chars.contains(&upper));
+            nt_count += usize::from(nt_chars.contains(&upper));
+        }
+    }
 
     if total_count == 0 {
         debug!(
             sampled_alignment_count,
-            amino_acid_count,
             total_count,
-            sequence_type = ?SequenceType::Dna,
-            "defaulted sequence type to DNA because sampled sequences had zero total length"
+            sequence_type = ?SequenceType::Full,
+            "Detected sequence type from empty sampled alphabet"
         );
-        return SequenceType::Dna;
+        return SequenceType::Full;
     }
 
-    let amino_acid_fraction = amino_acid_count as f32 / total_count as f32;
-    if amino_acid_fraction >= AMINO_ACID_CLASSIFICATION_THRESHOLD {
-        debug!(
-            sampled_alignment_count,
-            amino_acid_count,
-            total_count,
-            amino_acid_fraction,
-            sequence_type = ?SequenceType::AminoAcid,
-            "detected sequence type"
-        );
-        SequenceType::AminoAcid
-    } else {
-        debug!(
-            sampled_alignment_count,
-            amino_acid_count,
-            total_count,
-            amino_acid_fraction,
-            sequence_type = ?SequenceType::Dna,
-            "detected sequence type"
-        );
-        SequenceType::Dna
-    }
+    let aa_fraction = aa_count as f32 / total_count as f32;
+    let nt_fraction = nt_count as f32 / total_count as f32;
+    let aa_matches = aa_fraction >= CLASSIFICATION_THRESHOLD;
+    let nt_matches = nt_fraction >= CLASSIFICATION_THRESHOLD;
+
+    let detected = match (aa_matches, nt_matches) {
+        (true, false) => SequenceType::AminoAcid,
+        (false, true) => SequenceType::Dna,
+        (false, false) => SequenceType::Full,
+        (true, true) => match aa_fraction.total_cmp(&nt_fraction) {
+            std::cmp::Ordering::Greater => SequenceType::AminoAcid,
+            std::cmp::Ordering::Less => SequenceType::Dna,
+            std::cmp::Ordering::Equal => SequenceType::Full,
+        },
+    };
+
+    debug!(
+        sampled_alignment_count,
+        aa_count,
+        nt_count,
+        total_count,
+        aa_fraction,
+        nt_fraction,
+        sequence_type = ?detected,
+        "Detected sequence type"
+    );
+
+    detected
 }
 
 /// Parses a FASTA input into `Alignment`s with cooperative cancellation.
@@ -116,11 +147,8 @@ pub fn detect_sequence_type(alignments: &[Alignment]) -> SequenceType {
 /// Intended to run on a blocking worker thread (via `tokio::task::spawn_blocking`).
 /// Returns an error when the input is missing, a record is invalid, or sequence lengths differ.
 pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<Alignment>> {
-    info!(input = %input, "starting fasta parse");
-    let mut reader = open_fasta_reader(input).map_err(|e| {
-        error!(input = %input, error = %e, "failed to initialise fasta reader");
-        eyre!("Failed to open input: {}", e)
-    })?;
+    info!(input = %input, "Starting fasta parse");
+    let mut reader = open_fasta_reader(input).map_err(|e| eyre!("Failed to open input: {}", e))?;
     let mut record_set = reader.new_record_set();
     let mut alignments = Vec::new();
     let mut expected_length: Option<usize> = None;
@@ -151,10 +179,9 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<A
                         id
                     ));
                 }
+            } else if sequence_length == 0 {
+                return Err(eyre!("Sequence has zero length for id {}", id));
             } else {
-                if sequence_length == 0 {
-                    return Err(eyre!("Sequence has zero length for id {}", id));
-                }
                 expected_length = Some(sequence_length);
             }
 
@@ -169,7 +196,7 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<A
         input = %input,
         alignment_count = alignments.len(),
         expected_length = expected_length.unwrap_or(0),
-        "completed fasta parse"
+        "Completed fasta parse"
     );
     Ok(alignments)
 }
@@ -272,5 +299,21 @@ mod tests {
         ];
         let result = detect_sequence_type(&alignments);
         assert_eq!(result, SequenceType::AminoAcid);
+    }
+
+    #[test]
+    fn test_detect_sequence_type_full() {
+        let alignments = vec![
+            Alignment {
+                id: Arc::from("seq1"),
+                sequence: Arc::from(b"AB12!?xy".to_vec()),
+            },
+            Alignment {
+                id: Arc::from("seq2"),
+                sequence: Arc::from(b"++==zz99".to_vec()),
+            },
+        ];
+        let result = detect_sequence_type(&alignments);
+        assert_eq!(result, SequenceType::Full);
     }
 }

@@ -1,6 +1,7 @@
+use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, LoadingState};
 use crate::ui::UiState;
-use crate::ui::selection::{display_index_by_sequence_id, selection_row_bounds};
+use crate::ui::selection::selection_row_bounds;
 use crate::ui::utils::truncate_label;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -13,13 +14,14 @@ const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
 
 fn build_bottom_status_bar(
     core: &CoreState,
+    window: &ViewportWindow,
     ui: &UiState,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
     let sequence_length = core.data.sequence_length;
 
     let position_range = if sequence_length > 0 {
-        let range = core.viewport.window().col_range;
+        let range = &window.col_range;
         let start = range.start + 1;
         let end = range.end;
         format!("Positions: {start}-{end}")
@@ -32,7 +34,7 @@ fn build_bottom_status_bar(
 
     // optional filter text building
     if !core.filter_text.is_empty() {
-        let visible_count = core.visible_sequences().count();
+        let visible_count = core.display_sequence_ids.len();
         let filter_text = &core.filter_text;
         parts.push(Span::raw(" | "));
         parts.push(
@@ -42,9 +44,8 @@ fn build_bottom_status_bar(
     }
 
     // optional selection info building
-    let display_indices = display_index_by_sequence_id(core);
-    if let Some(selection) = ui.mouse_selection {
-        let (row_min, row_max) = selection_row_bounds(selection, &display_indices);
+    if let Some(selection) = ui.mouse.selection {
+        let (row_min, row_max) = selection_row_bounds(selection, &ui.display_index);
         let selected_sequence_count = row_max - row_min + 1;
         let col_start = selection.column.min(selection.end_column) + 1;
         let col_end = selection.column.max(selection.end_column) + 1;
@@ -108,11 +109,12 @@ pub fn render_frame(
     top_status_area: Rect,
     bottom_status_area: Rect,
     core: &CoreState,
+    window: &ViewportWindow,
     ui: &UiState,
 ) {
     let theme = &ui.theme_styles;
     let top_status_bar = build_top_status_bar(core, ui, theme);
-    let bottom_status_bar = build_bottom_status_bar(core, ui, theme);
+    let bottom_status_bar = build_bottom_status_bar(core, window, ui, theme);
 
     if top_status_area.height > 0 {
         let top_line = Line::from(top_status_bar).right_aligned();

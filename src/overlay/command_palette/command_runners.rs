@@ -5,7 +5,7 @@ use crate::core::column_stats::ConsensusMethod;
 use crate::core::command::{CoreAction, DiffMode};
 use crate::core::parser::SequenceType;
 use crate::ui::UiAction;
-use tracing::{debug, trace};
+use tracing::warn;
 
 use super::command_error::CommandError;
 use super::input::CommandPaletteState;
@@ -24,23 +24,13 @@ fn run_command(
     run: impl FnOnce() -> Result<Action, CommandError>,
 ) -> Result<Action, CommandError> {
     let result = run();
-    match &result {
-        Ok(action) => {
-            trace!(
-                command,
-                arguments = %arguments,
-                action = ?action,
-                "command runner produced action"
-            );
-        }
-        Err(error) => {
-            debug!(
-                command,
-                arguments = %arguments,
-                error = %error.message,
-                "command runner rejected command input"
-            );
-        }
+    if let Err(error) = &result {
+        warn!(
+            command,
+            arguments = %arguments,
+            error = %error.message,
+            "Command runner rejected command input"
+        );
     }
     result
 }
@@ -66,11 +56,16 @@ pub(super) fn run_clear_reference(
 }
 
 pub(super) fn run_toggle_translation(
-    _: &CommandPaletteState,
+    state: &CommandPaletteState,
     arguments: &str,
 ) -> Result<Action, CommandError> {
     run_command("toggle-translate", arguments, || {
         ensure_no_argument(arguments)?;
+        if state.sequence_type != SequenceType::Dna {
+            return Err(CommandError::new(
+                "toggle-translate is only available for DNA sequences",
+            ));
+        }
         Ok(Action::Core(CoreAction::ToggleTranslationView))
     })
 }
@@ -273,21 +268,13 @@ pub(super) fn run_theme(_: &CommandPaletteState, arguments: &str) -> Result<Acti
     })
 }
 
-fn parse_sequence_type(arg: &str) -> Option<SequenceType> {
-    match arg {
-        "dna" => Some(SequenceType::Dna),
-        "aa" => Some(SequenceType::AminoAcid),
-        _ => None,
-    }
-}
-
 pub(super) fn run_sequence_type(
     _: &CommandPaletteState,
     arguments: &str,
 ) -> Result<Action, CommandError> {
     run_command("set-sequence-type", arguments, || {
         let arg = require_argument(arguments)?;
-        let sequence_type = parse_sequence_type(arg.as_str()).ok_or_else(|| {
+        let sequence_type = arg.parse::<SequenceType>().map_err(|()| {
             CommandError::new(format!("Invalid argument for set-sequence-type: {arg}"))
         })?;
         Ok(Action::Core(CoreAction::SetSequenceType(sequence_type)))

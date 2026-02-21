@@ -5,10 +5,9 @@
 
 # salti
 
-
-
 `salti` is a terminal based multiple sequence alignment (MSA) viewer for FASTA files.
-It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want to leave the terminal.
+It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want
+to leave the terminal.
 <br>
 <p align="center">
   <img src="assets/splash_img.png" />
@@ -20,42 +19,68 @@ https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
 
 ### Fast
 
-`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for async processing. This is in part achieved by:
-- Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to complete dynamically without blocking the UI.
-- Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick, and caching consensus and conservation calculations in a window around the currently visible region.
+`salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for
+async processing. This is in part achieved by:
 
-It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
- 
+- Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to
+  complete dynamically without blocking the UI.
+- Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick,
+  and caching consensus and conservation calculations in a window around the currently visible region.
+
+It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments
+on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
 
 ### Load files over HTTP/HTTPS/SSH
 
-Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load over HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g. `:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
-
-### Themes
-
-`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far are:
-- `everforest-dark` - the default theme, based on the everforest colorscheme.
-- `solarized-light` - a light theme based on the solarized palette.
-- `tokyo-night` - a dark theme based on the tokyo night palette.
-- `terminal-default` - uses terminal-provided ANSI colours and defaults.
+Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load over
+HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g.
+`:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
 
 ### Command palette
 
 Press `:` to open a command palette for most actions. See [Usage](#command-palette-1) for details.
 
+![cmdpal](assets/command_palette.png)
+
+### Mouse support
+
+`Left click` to select a sequence/position, `ctrl+left click` to select a region.
+
+Hold middle mouse to pan around the alignment.
+
+#### Minimap
+
+Easy navigation with a minimap
+
+![minimap](assets/minimap.png)
+
+Press `m` to open the minimap and drag to quickly pan around.
+
 ### Nucleotide and Amino acid support
 
-`salti` automatically detects whether your alignment is nucleotide (NT) or amino acid (AA), then applies the correct rendering mode.
+`salti` automatically detects whether your alignment is nucleotide (NT) or amino acid (AA), then applies the correct
+rendering mode.
 
 ### Translation
 
-Can translate NT codons to AA on the fly, with support for all 3 frames, although designed for browsing, rather than a dedicated translation tool.
+Can translate NT codons to AA on the fly, with support for all 3 frames, although designed for browsing, rather than a
+dedicated translation tool.
 
 ### Useful viz tools
 
 - Collapse positions that match the reference or consensus to `.` for easier visualisation of differences.
 - Mouse selection to highlight regions or sequences
 - Pin important sequences fixed at the top while browsing.
+
+### Themes
+
+`salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far
+are:
+
+- `everforest-dark` - the default theme, based on the everforest colorscheme.
+- `solarized-light` - a light theme based on the solarized palette.
+- `tokyo-night` - a dark theme based on the tokyo night palette.
+- `terminal-default` - uses terminal-provided ANSI colours and defaults.
 
 ## Installation
 
@@ -94,7 +119,6 @@ export PATH=$PATH:$(pwd)/target/release
 
 All executables will be in the directory `salti/target/release`.
 
-
 ## Usage
 
 Tested on my setup (Arch linux + ghostty) - but should work on any modern terminal.
@@ -102,6 +126,7 @@ Tested on my setup (Arch linux + ghostty) - but should work on any modern termin
 ```bash
 salti <alignment.fasta>
 ```
+
 If no file is passed, the app starts and waits for you to load one via the command palette.
 
 ## Quick start keybinds
@@ -118,10 +143,12 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
 - `Left cick` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
+- `m` - Open the minimap
 
 ### Command palette
 
-Most features can be accessed through the command palette (this is heavily inspired by the helix editors implementation!).
+Most features can be accessed through the command palette (this is heavily inspired by the helix editors
+implementation!).
 
 Open with `:`, then type a command.
 
@@ -144,17 +171,21 @@ Commands:
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
-- `set-sequence-type` - Override auto-detection if it fails (`dna` or `aa`).
+- `set-sequence-type` - Override auto-detection if it fails (`dna`, `aa`, or `full`).
 - `quit` - Quit the app.
 
 ## Some notes on features
 
 ### Fuzzy matching
-All commands that take string input support fuzzy matching. For example, `jump-sequence` will match any sequence name that contains the input string.
+
+All commands that take string input support fuzzy matching. For example, `jump-sequence` will match any sequence name
+that contains the input string.
 If multiple candidates match, you can cycle through them with `Tab` / `Shift+Tab`.
 
 ### Consensus method
+
 Two methods are available for consensus calculation:
+
 - `majority` - The most common character at each position, including gaps.
 - `majority-non-gap` - The most common character at each position, excluding gaps
 
@@ -163,6 +194,7 @@ If there is a tie for most common character, one is chosen at random.
 Consensus is calculated in the background
 
 ### Pinned behaviour
+
 - Pinned sequences stay visible and remain at the top, even when they do not match the active filter.
 - Setting a sequence as reference removes it from pinned state and hides it as the reference row.
 
@@ -170,4 +202,5 @@ Consensus is calculated in the background
 
 - Input must be FASTA with equal sequence lengths across records.
 - Sequence type is auto-detected on load; you can override it if its wrong.
-    - It tries to work this out by picking 100 random alignments and checking if over 50% of characters are valid amino acid characters. If so, it assumes its an AA alignment, otherwise NT.
+    - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it
+      falls back to `full` mode.

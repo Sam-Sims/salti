@@ -143,7 +143,7 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         help_text: "Override sequence type detection for rendering.",
         aliases: &[],
         completer: None,
-        static_candidates: &["dna", "aa"],
+        static_candidates: &["dna", "aa", "full"],
         run: run_sequence_type,
     }),
 ];

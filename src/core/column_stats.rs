@@ -2,7 +2,7 @@ use crate::core::data::SequenceRecord;
 use crate::core::parser::SequenceType;
 use rand::seq::IteratorRandom;
 use std::sync::Arc;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// extra columns on each side of the viewport used as precomputed context.
 pub(crate) const COLUMN_STATS_BUFFER_COLS: usize = 500;
@@ -30,7 +30,7 @@ pub struct ColumnStats {
 }
 
 /// Request for update
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ColumnStatsRequest {
     pub sequences: Arc<Vec<SequenceRecord>>,
     pub positions: Vec<usize>,
@@ -48,22 +48,16 @@ pub(crate) fn apply_positional_updates<T: Copy>(
     if updates.is_empty() {
         return;
     }
-
+    // creates a vec with default values if cache is empty so that we can apply updates by index later
     let cache = cache.get_or_insert_with(|| vec![default_value; sequence_length]);
 
     for &(position, value) in updates {
-        if position < cache.len() {
-            cache[position] = value;
-        }
+        cache[position] = value;
     }
 }
 
 /// Computes consensus bytes and conservation scores for the requested alignment
 /// positions.
-///
-/// For each position, counts observed bytes across all sequences once, then
-/// derives the consensus byte via `method` and conservation score via
-/// `sequence_type`.
 ///
 /// Can be cancelled via `cancel` token to stop processing.
 pub(crate) fn compute_column_stats(
@@ -74,34 +68,24 @@ pub(crate) fn compute_column_stats(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ColumnStats {
     if positions.is_empty() || cancel.is_cancelled() {
-        trace!(
-            position_count = positions.len(),
-            cancelled = cancel.is_cancelled(),
-            "skipping column stats compute"
-        );
         return ColumnStats::default();
     }
 
     let max_entropy = match sequence_type {
-        SequenceType::AminoAcid => 20f64.log2(),
-        SequenceType::Dna => 4f64.log2(),
+        // 20 valid AA chars (ignore gaps - they are treated separately in the conservation calculation)
+        SequenceType::AminoAcid => Some(20f64.log2()),
+        // 4 valid NT chars (again ignoring gaps)
+        // this doesnt account for ambiguity codes, but good enough
+        SequenceType::Dna => Some(4f64.log2()),
+        SequenceType::Full => None,
     };
-
-    trace!(
-        sequence_count = sequences.len(),
-        position_count = positions.len(),
-        method = ?method,
-        sequence_type = ?sequence_type,
-        "starting column stats compute"
-    );
-
     let mut stats = ColumnStats {
         consensus: Vec::with_capacity(positions.len()),
         conservation: Vec::with_capacity(positions.len()),
     };
     let mut rng = rand::rng();
 
-    for position in positions.iter().copied() {
+    for &position in positions {
         if cancel.is_cancelled() {
             break;
         }
@@ -109,15 +93,18 @@ pub(crate) fn compute_column_stats(
         let mut counts = [0u32; 256];
         for sequence in sequences {
             if let Some(&nucleotide) = sequence.alignment.sequence.get(position) {
-                counts[nucleotide as usize] += 1;
+                counts[usize::from(nucleotide)] += 1;
             }
         }
 
-        let consensus_nucleotide = select_consensus_char(&counts, method, &mut rng);
-        stats.consensus.push((position, consensus_nucleotide));
         stats
-            .conservation
-            .push((position, conservation_from_counts(&counts, max_entropy)));
+            .consensus
+            .push((position, select_consensus_char(&counts, method, &mut rng)));
+        if let Some(max_entropy) = max_entropy {
+            stats
+                .conservation
+                .push((position, conservation_from_counts(&counts, max_entropy)));
+        }
     }
 
     debug!(
@@ -128,7 +115,7 @@ pub(crate) fn compute_column_stats(
         method = ?method,
         sequence_type = ?sequence_type,
         cancelled = cancel.is_cancelled(),
-        "completed column stats compute"
+        "Completed column stats calculations"
     );
 
     stats
@@ -145,27 +132,34 @@ fn select_consensus_char<R: rand::Rng>(
     rng: &mut R,
 ) -> u8 {
     let mut max_count = 0u32;
-    let mut candidates = Vec::new();
+    let mut candidates = [0u8; 256];
+    let mut candidate_count = 0usize;
     let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
 
     for (nucleotide_index, &count) in counts.iter().enumerate() {
         if count == 0 {
             continue;
         }
-        if exclude_gap && nucleotide_index == b'-' as usize {
+        if exclude_gap && nucleotide_index == usize::from(b'-') {
             continue;
         }
 
         if count > max_count {
             max_count = count;
-            candidates.clear();
-            candidates.push(nucleotide_index as u8);
+            candidate_count = 0;
+            candidates[candidate_count] = nucleotide_index as u8;
+            candidate_count += 1;
         } else if count == max_count {
-            candidates.push(nucleotide_index as u8);
+            candidates[candidate_count] = nucleotide_index as u8;
+            candidate_count += 1;
         }
     }
 
-    candidates.into_iter().choose(rng).unwrap_or(b'?')
+    candidates[..candidate_count]
+        .iter()
+        .copied()
+        .choose(rng)
+        .unwrap_or(b'?')
 }
 
 /// Calculates a conservation score between 0 and 1 for an alignment column
@@ -185,12 +179,13 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
         }
         total += count;
 
-        if symbol == b'-' as usize || symbol == b'.' as usize {
+        if symbol == usize::from(b'-') || symbol == usize::from(b'.') {
             gap_count += count;
             continue;
         }
 
-        let upper = (symbol as u8).to_ascii_uppercase() as usize;
+        let upper = (symbol as u8).to_ascii_uppercase();
+        let upper = usize::from(upper);
         merged_non_gap_counts[upper] += count;
     }
 
@@ -221,11 +216,13 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::parser::Alignment;
+    use std::sync::Arc;
 
     fn counts_for_symbols(symbols: &[u8]) -> [u32; 256] {
         let mut counts = [0u32; 256];
         for &symbol in symbols {
-            counts[symbol as usize] += 1;
+            counts[usize::from(symbol)] += 1;
         }
         counts
     }
@@ -256,5 +253,29 @@ mod tests {
         let counts = counts_for_symbols(b"AaAa");
         let conservation = conservation_from_counts(&counts, 4f64.log2());
         assert_eq!(conservation, 1.0);
+    }
+
+    #[test]
+    fn full_skips_conservation() {
+        let sequences = vec![SequenceRecord {
+            sequence_id: 0,
+            hidden: false,
+            alignment: Alignment {
+                id: Arc::from("seq1"),
+                sequence: Arc::from(b"ABCD".to_vec()),
+            },
+        }];
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let stats = compute_column_stats(
+            &sequences,
+            &[0, 1, 2, 3],
+            ConsensusMethod::MajorityNonGap,
+            SequenceType::Full,
+            &cancel,
+        );
+
+        assert_eq!(stats.consensus.len(), 4);
+        assert!(stats.conservation.is_empty());
     }
 }

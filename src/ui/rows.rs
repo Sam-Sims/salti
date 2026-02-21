@@ -1,4 +1,5 @@
 use crate::config::theme::SequenceTheme;
+use crate::core::command::DiffMode;
 use crate::core::lookups::{BYTE_TO_CHAR, translate_codon};
 use crate::core::parser::SequenceType;
 use crate::core::{COLUMN_STATS_BUFFER_COLS, CoreState};
@@ -24,22 +25,14 @@ fn format_sequence_bytes(
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
 ) -> Vec<Span<'static>> {
-    match sequence_type {
-        SequenceType::Dna => sequence
-            .iter()
-            .map(|&sequence_byte| {
-                let character = BYTE_TO_CHAR[sequence_byte as usize];
-                Span::styled(character, sequence_theme.nucleotide_style(sequence_byte))
-            })
-            .collect(),
-        SequenceType::AminoAcid => sequence
-            .iter()
-            .map(|&sequence_byte| {
-                let character = BYTE_TO_CHAR[sequence_byte as usize];
-                Span::styled(character, sequence_theme.amino_acid_style(sequence_byte))
-            })
-            .collect(),
-    }
+    sequence
+        .iter()
+        .map(|&sequence_byte| {
+            let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
+            let style = sequence_theme.style_for(sequence_byte, sequence_type);
+            Span::styled(character, style)
+        })
+        .collect()
 }
 
 #[inline]
@@ -55,11 +48,8 @@ fn format_sequence_bytes_with_reference(
         if reference_byte == sequence_byte {
             spans.push(".".fg(sequence_theme.diff_match));
         } else {
-            let character = BYTE_TO_CHAR[sequence_byte as usize];
-            let style = match sequence_type {
-                SequenceType::Dna => sequence_theme.nucleotide_style(sequence_byte),
-                SequenceType::AminoAcid => sequence_theme.amino_acid_style(sequence_byte),
-            };
+            let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
+            let style = sequence_theme.style_for(sequence_byte, sequence_type);
             spans.push(character.set_style(style));
         }
     }
@@ -70,14 +60,14 @@ fn format_sequence_bytes_with_reference(
 fn build_translated_state(
     sequence: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
 ) -> (Vec<Option<u8>>, Vec<bool>) {
     if window.end <= window.start {
         return (Vec::new(), Vec::new());
     }
 
-    let frame = (frame % 3) as usize;
+    let frame = usize::from(frame % 3);
     let sequence_length = sequence.len();
     let window_start = window.start;
     let window_end = window.end.min(sequence_length);
@@ -111,7 +101,7 @@ fn build_translated_state(
 fn build_translated_spans(
     sequence: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
@@ -125,7 +115,7 @@ fn build_translated_spans(
             let Some(amino_acid) = amino_acid else {
                 return Span::raw(" ");
             };
-            let style = sequence_theme.amino_acid_style(amino_acid);
+            let style = sequence_theme.style_for(amino_acid, SequenceType::AminoAcid);
             let character = if is_centre { amino_acid as char } else { ' ' };
             character.to_string().set_style(style)
         })
@@ -136,12 +126,12 @@ fn render_translated_row_with_diff(
     sequence: &[u8],
     diff_against: &[u8],
     frame: u8,
-    window: Range<usize>,
+    window: &Range<usize>,
     buffer: usize,
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
     let (amino_acid_for_position, is_centre) =
-        build_translated_state(sequence, frame, window.clone(), buffer);
+        build_translated_state(sequence, frame, window, buffer);
     let (diff_amino_acid_for_position, _) =
         build_translated_state(diff_against, frame, window, buffer);
 
@@ -161,14 +151,14 @@ fn render_translated_row_with_diff(
                     return ".".fg(sequence_theme.diff_match);
                 }
 
-                let style = sequence_theme.amino_acid_style(amino_acid);
+                let style = sequence_theme.style_for(amino_acid, SequenceType::AminoAcid);
                 return (amino_acid as char).to_string().set_style(style);
             }
 
             if matches {
                 Span::raw(" ")
             } else {
-                let style = sequence_theme.amino_acid_style(amino_acid);
+                let style = sequence_theme.style_for(amino_acid, SequenceType::AminoAcid);
                 " ".set_style(style)
             }
         })
@@ -180,7 +170,7 @@ fn render_raw_row(
     diff_against: Option<&[u8]>,
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
-    window: Range<usize>,
+    window: &Range<usize>,
 ) -> Vec<Span<'static>> {
     let end = window.end.min(sequence.len());
     let sequence_slice = &sequence[window.start..end];
@@ -204,7 +194,7 @@ fn render_raw_row(
 #[must_use]
 pub fn format_row_spans(
     sequence: &[u8],
-    window: Range<usize>,
+    window: &Range<usize>,
     sequence_theme: &SequenceTheme,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
@@ -251,16 +241,14 @@ pub fn select_row_render_mode<'a>(
         .reference_alignment()
         .map(|alignment| alignment.sequence.as_ref());
 
-    let resolved_sequence_type = core.data.sequence_type.unwrap_or(SequenceType::Dna);
+    let resolved_sequence_type = core.sequence_type();
 
     let translate_nucleotide_to_amino_acid =
         core.translate_nucleotide_to_amino_acid && resolved_sequence_type == SequenceType::Dna;
-    let diff_against = if core.show_reference_diff {
-        reference_sequence
-    } else if core.show_consensus_diff {
-        consensus
-    } else {
-        None
+    let diff_against = match core.diff_mode {
+        DiffMode::Off => None,
+        DiffMode::Reference => reference_sequence,
+        DiffMode::Consensus => consensus,
     };
 
     if translate_nucleotide_to_amino_acid {

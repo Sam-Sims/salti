@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 pub enum KeyAction {
     Quit,
     OpenCommandPalette,
+    ToggleMinimap,
     ScrollDown,
     SkipDown,
     ScrollUp,
@@ -45,6 +46,12 @@ const KEY_BINDINGS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         action: KeyAction::ToggleTranslationView,
         help: "Toggle NT to AA translation view",
+    },
+    Binding {
+        code: KeyCode::Char('m'),
+        modifiers: KeyModifiers::NONE,
+        action: KeyAction::ToggleMinimap,
+        help: "Toggle minimap overlay",
     },
     Binding {
         code: KeyCode::Down,
