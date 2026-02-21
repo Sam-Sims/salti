@@ -22,7 +22,7 @@ fn notification_prefix(level: NotificationLevel, theme: &ThemeStyles) -> (&'stat
     match level {
         NotificationLevel::Error => ("Error: ", theme.error),
         NotificationLevel::Warning => ("Warning: ", theme.warning),
-        NotificationLevel::Info => ("Info: ", theme.accent),
+        NotificationLevel::Info => ("", theme.success),
     }
 }
 

@@ -281,6 +281,18 @@ pub(super) fn run_sequence_type(
     })
 }
 
+pub(super) fn run_check_update(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("check-update", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Action::CheckForUpdate {
+            show_success_message: true,
+        })
+    })
+}
+
 pub(super) fn run_quit(_: &CommandPaletteState, arguments: &str) -> Result<Action, CommandError> {
     run_command("quit", arguments, || {
         ensure_no_argument(arguments)?;

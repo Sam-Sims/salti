@@ -1,6 +1,6 @@
 [package]
 name = "salti"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 authors = ["Samuel Sims"]
 description = "A modern, fast, multiple sequence alignment browser - built for the terminal. "
@@ -22,6 +22,9 @@ clap = { version = "4.5.57", features = ["derive"] }
 nucleo-matcher = "0.3.1"
 rand = "0.10.0"
 regex = "1.12.3"
+reqwest = { version = "0.12.24", features = ["json"] }
+semver = "1.0.27"
+serde = { version = "1.0.228", features = ["derive"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
