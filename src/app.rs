@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use color_eyre::Result;
 use crossterm::event::{
@@ -7,6 +7,7 @@ use crossterm::event::{
 };
 use ratatui::DefaultTerminal;
 use ratatui::layout::Rect;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +23,7 @@ use crate::ui::layout::{AppLayout, FrameLayout};
 use crate::ui::render;
 use crate::ui::selection::selection_point_crosshair;
 use crate::ui::{MouseSelection, UiAction, UiState};
+use crate::update::UpdateResult;
 
 /// step size (rows) for single scroll commands
 const SCROLL_STEP: usize = 1;
@@ -29,21 +31,74 @@ const SCROLL_STEP: usize = 1;
 const FAST_SCROLL_STEP: usize = 10;
 /// fps of render loop
 const RENDER_FPS: f32 = 120.0;
+const INSTALLED_VERSION: &str = env!("CARGO_PKG_VERSION");
+const UPDATE_CHECK_ENV_VAR: &str = "SALTI_SKIP_UPDATE_CHECK";
 
+/// App level actions
+///
+/// Actions are the primary way that state changes in the application. They originate from keybindings,
+/// mouse interactions, command palette commands, or inbuilt mechanisms (e.g run on startup).
 #[derive(Debug)]
 pub enum Action {
+    /// Actions that modify the core state (e.g viewport, filtering etc). These are handeled by [`CoreState::apply_action`].
     Core(CoreAction),
+    /// Actions that modify the UI state (e.g overlays, notifications etc). These are handeled by [`UiState::apply_action`].
     Ui(UiAction),
+    /// Spawns an async task to check for new versions. `show_success_message` controls whether an "up to date" notification is shown when no update is found.
+    CheckForUpdate { show_success_message: bool },
+    /// Loads an alignment file from the given input source (e.g file path) by spawning an async task. Cancels any previous load task if it exists.
     LoadFile { input: String },
+    /// Signals the main event loop to exit and the app to quit.
     Quit,
 }
 
+/// An async app event.
+///
+/// `AppEvent`s events represent notifications from spawned async tasks. Unlike [`AsyncJob`],
+/// they cannot be cancelled and are delivered via the `event_tx` channel. They primarily represent
+/// UX-related state changes rather than computation results.
+#[derive(Debug)]
+enum AppEvent {
+    UpdateAvailable { latest: String },
+    UpToDate,
+}
+
+/// A cancellable async task.
+///
+/// Tasks can be cancelled via the token, which will propagate a cancellation
+/// signal to the task if it's checking the token.
 #[derive(Debug)]
 struct AsyncJob<T> {
     handle: JoinHandle<T>,
     cancel: CancellationToken,
 }
 
+/// The main application state.
+///
+/// `App` orchestrates all aspects of the application including rendering, input
+/// handling, async task management, and state.
+///
+/// # State
+///
+/// - Core State: Maintains the loaded alignment data, viewport position, filtering,
+///   reference sequences, and computed column statistics.
+/// - UI State: Tracks visible rows, overlay widgets (minimap, command palette),
+///   notifications, and mouse selection state.
+///
+/// # Async Tasks
+///
+/// `App` manages three types of background tasks:
+/// - `load_job`: Parses and loads alignment files. Only one may be active;
+///   starting a new load cancels the current load task.
+/// - `stats_job`: Computes column statistics (consensus, conservation) for visible
+///   columns. Automatically spawned when scrolling or state changes.
+/// - `AppEvent` tasks: Non-cancellable notifications from async operations (e.g update checks)
+///   delivered via the `event_tx` channel.
+///
+/// # Layout
+///
+/// Layout is calculated from terminal dimensions and stored in `frame_layout`
+/// (outer frame including status bars) and `app_layout` (pane divisions).
 #[derive(Debug)]
 pub struct App {
     core: CoreState,
@@ -54,6 +109,7 @@ pub struct App {
     app_layout: AppLayout,
     load_job: Option<AsyncJob<Result<Vec<Alignment>, String>>>,
     stats_job: Option<AsyncJob<ColumnStats>>,
+    event_tx: Option<UnboundedSender<AppEvent>>,
 }
 
 impl App {
@@ -71,7 +127,36 @@ impl App {
             app_layout,
             load_job: None,
             stats_job: None,
+            event_tx: None,
         }
+    }
+
+    /// Checks if the startup update check is enabled via the `SALTI_SKIP_UPDATE_CHECK` env var
+    fn startup_update_check_enabled() -> bool {
+        !matches!(env::var(UPDATE_CHECK_ENV_VAR), Ok(value) if value.eq_ignore_ascii_case("true"))
+    }
+
+    /// Spawns an async task to check for app updates
+    fn spawn_update_check(&self, show_up_to_date: bool) {
+        let Some(event_tx) = self.event_tx.clone() else {
+            return;
+        };
+
+        tokio::spawn(async move {
+            let Some(result) = crate::update::check_for_update().await else {
+                return;
+            };
+            match result {
+                UpdateResult::UpdateAvailable(latest) => {
+                    let _ = event_tx.send(AppEvent::UpdateAvailable { latest });
+                }
+                UpdateResult::UpToDate => {
+                    if show_up_to_date {
+                        let _ = event_tx.send(AppEvent::UpToDate);
+                    }
+                }
+            }
+        });
     }
 
     /// Updates cached layouts and viewport dimensions from a terminal area.
@@ -228,6 +313,23 @@ impl App {
         self.spawn_stats_job(request);
     }
 
+    /// Event handler for app events delivered via the `event_tx` channel.
+    fn handle_app_event(&mut self, event: AppEvent) {
+        let notification = match event {
+            AppEvent::UpdateAvailable { latest } => crate::overlay::Notification {
+                level: crate::overlay::NotificationLevel::Info,
+                message: format!(
+                    "A new version of salti is available: {latest} (installed: {INSTALLED_VERSION})"
+                ),
+            },
+            AppEvent::UpToDate => crate::overlay::Notification {
+                level: crate::overlay::NotificationLevel::Info,
+                message: "salti is up to date".to_string(),
+            },
+        };
+        self.apply_actions([Action::Ui(UiAction::ShowNotification(notification))]);
+    }
+
     /// Maps a keybinding action to an app action and applies it.
     fn handle_key_action(&mut self, action: KeyAction) {
         let action = match action {
@@ -351,6 +453,11 @@ impl App {
                 Action::Ui(action) => {
                     self.ui.apply_action(action, &self.core);
                 }
+                Action::CheckForUpdate {
+                    show_success_message,
+                } => {
+                    self.spawn_update_check(show_success_message);
+                }
                 Action::LoadFile { input } => {
                     self.ui.mouse.clear_all();
                     self.start_load_job(input);
@@ -453,7 +560,7 @@ impl App {
     /// Otherwise, the key is resolved through configured keybindings. Unbound keys are ignored.
     fn handle_key_event(&mut self, key: KeyEvent) {
         self.ui
-            .apply_action(UiAction::ClearCommandError, &self.core);
+            .apply_action(UiAction::ClearNotification, &self.core);
 
         // if a palette is open, all key events go to it until it's closed
         if let Some(palette) = self.ui.overlay.palette.as_mut() {
@@ -501,7 +608,19 @@ impl App {
         let period = Duration::from_secs_f32(1.0 / RENDER_FPS);
         let mut interval = tokio::time::interval(period);
         let mut events = EventStream::new();
+        let (event_tx, mut event_rx) = unbounded_channel::<AppEvent>();
+        self.event_tx = Some(event_tx);
         let mut needs_redraw = true;
+        if Self::startup_update_check_enabled() {
+            self.apply_actions([Action::CheckForUpdate {
+                show_success_message: false,
+            }]);
+        } else {
+            debug!(
+                env_var = UPDATE_CHECK_ENV_VAR,
+                "Startup update check disabled via environment variable"
+            );
+        }
 
         // main event loop
         // TODO: maybe let ctrl+c break the loop
@@ -543,6 +662,10 @@ impl App {
                         _ => {}
                     }
 
+                    needs_redraw = true;
+                }
+                Some(event) = event_rx.recv() => {
+                    self.handle_app_event(event);
                     needs_redraw = true;
                 }
 

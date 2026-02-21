@@ -9,7 +9,6 @@ pub enum DiffMode {
     Consensus,
 }
 
-/// Represents an action that can be performed as part of the application.
 #[derive(Debug)]
 pub enum CoreAction {
     ScrollDown { amount: usize },

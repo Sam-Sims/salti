@@ -30,10 +30,11 @@ async processing. This is in part achieved by:
 It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments
 on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
 
-### Load files over HTTP/HTTPS/SSH
+### Transparent support for HTTP/HTTPS/SSH/Compressed files
 
-Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load over
-HTTP/HTTPS and SSH, in addition to local files. Just provide the URL or SSH path to the `load` command, e.g.
+Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load compressed
+fasta files, as well as files over
+HTTP/HTTPS or SSH. Just provide the URL or SSH path to the `load` command, e.g.
 `:load https://example.com/alignment.fasta` or `:load ssh://user@host/path/to/alignment.fasta`.
 
 ### Command palette
@@ -172,6 +173,7 @@ Commands:
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
 - `set-sequence-type` - Override auto-detection if it fails (`dna`, `aa`, or `full`).
+- `check-update` - Check for updates and show the latest version.
 - `quit` - Quit the app.
 
 ## Some notes on features
@@ -204,3 +206,12 @@ Consensus is calculated in the background
 - Sequence type is auto-detected on load; you can override it if its wrong.
     - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it
       falls back to `full` mode.
+
+### Update check:
+
+`salti` will check for updates on startup and notify you if a new version is available. It does this by
+querying the crates api: https://crates.io/api/v1/crates. However, no network connection is required, and will not cause
+any issues if the check fails.
+
+This behaviour can be disabled entirely by setting `SALTI_SKIP_UPDATE_CHECK=true`. You can still check for updates
+manually with the `check-update` command.

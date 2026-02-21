@@ -4,6 +4,7 @@ use crate::app::Action;
 use crate::core::VisibleSequence;
 use crate::core::parser::SequenceType;
 use crate::core::search::{FilterMode, SearchableList};
+use crate::overlay::{Notification, NotificationLevel};
 use crate::ui::UiAction;
 
 use super::command_definitions::COMMAND_SPECS;
@@ -136,7 +137,10 @@ impl CommandPaletteState {
         self.reset_palette();
         vec![
             Action::Ui(UiAction::CloseCommandPalette),
-            Action::Ui(UiAction::ShowCommandError(error.message.clone())),
+            Action::Ui(UiAction::ShowNotification(Notification {
+                level: NotificationLevel::Error,
+                message: error.message.clone(),
+            })),
         ]
     }
 

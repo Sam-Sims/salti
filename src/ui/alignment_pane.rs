@@ -41,6 +41,7 @@ fn render_idle_alignment_message(ui: &UiState, area: Rect, f: &mut Frame) {
     f.render_widget(paragraph, message_area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_sequence_rows(
     core: &CoreState,
     window: &ViewportWindow,

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-21
+
+### Added
+
+- Self update check on startup, with a notification in the status bar if an update is available. This checks the latest
+  release on crates.io and compares it to the current version. It does not automatically download or install updates.
+- `check-update` command to manually trigger an update check.
+- Under the hood a more general notification system, which can be used for other types of notifications in the future.
+  Currently it is only used for update notifications and command palette errors.
+
+### Changed
+
+- Command errors use the new notification system for display errors.
+
+### Fixed
+
+- `cargo clippy` errors.
+
 ## [0.6.0] - 2026-02-21
 
 ### Added

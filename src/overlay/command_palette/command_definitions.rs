@@ -1,8 +1,8 @@
 use super::command_runners::{
-    run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode, run_filter,
-    run_jump_position, run_jump_sequence, run_load_alignment, run_pin_sequence, run_quit,
-    run_sequence_type, run_set_reference, run_theme, run_toggle_translation, run_translation_frame,
-    run_unpin_sequence,
+    run_check_update, run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode,
+    run_filter, run_jump_position, run_jump_sequence, run_load_alignment, run_pin_sequence,
+    run_quit, run_sequence_type, run_set_reference, run_theme, run_toggle_translation,
+    run_translation_frame, run_unpin_sequence,
 };
 use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
 use super::completers;
@@ -86,6 +86,12 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         help_text: "Toggle the translation view.",
         aliases: &[],
         run: run_toggle_translation,
+    }),
+    PaletteCommand::Static(StaticCommand {
+        name: "check-update",
+        help_text: "Check crates.io for a newer salti version.",
+        aliases: &[],
+        run: run_check_update,
     }),
     PaletteCommand::Static(StaticCommand {
         name: "quit",
