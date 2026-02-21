@@ -37,7 +37,7 @@ fn render_consensus_alignment_pane(
     let consensus = &core.consensus;
     let conservation = &core.conservation;
     let horizontal_range = window.col_range.clone();
-    let resolved_sequence_type = core.data.sequence_type.unwrap_or(SequenceType::Dna);
+    let resolved_sequence_type = core.sequence_type();
     let translate_nucleotide_to_amino_acid =
         core.translate_nucleotide_to_amino_acid && resolved_sequence_type == SequenceType::Dna;
     let render_mode = if translate_nucleotide_to_amino_acid {
@@ -77,28 +77,32 @@ fn render_consensus_alignment_pane(
         },
     );
 
-    let conservation_line = if let Some(conservation_data) = conservation {
-        let sparkline: String = (horizontal_range.start..horizontal_range.end)
-            .map(|position| {
-                conservation_data
-                    .get(position)
-                    .copied()
-                    .filter(|value| value.is_finite())
-                    .map_or(' ', conservation_to_spark)
-            })
-            .collect();
-        Line::from(sparkline).set_style(theme.accent_alt)
+    let lines = if resolved_sequence_type == SequenceType::Full {
+        vec![reference_line, consensus_line]
     } else {
-        Line::from("Calculating conservation...".fg(ui.theme.text_dim).italic())
-    };
+        let conservation_line = if let Some(conservation_data) = conservation {
+            let sparkline: String = (horizontal_range.start..horizontal_range.end)
+                .map(|position| {
+                    conservation_data
+                        .get(position)
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .map_or(' ', conservation_to_spark)
+                })
+                .collect();
+            Line::from(sparkline).set_style(theme.accent_alt)
+        } else {
+            Line::from("Calculating conservation...".fg(ui.theme.text_dim).italic())
+        };
 
-    let lines = vec![reference_line, consensus_line, conservation_line];
+        vec![reference_line, consensus_line, conservation_line]
+    };
     let consensus_paragraph = Paragraph::new(lines).style(theme.base_block);
 
     f.render_widget(consensus_paragraph, inner_area);
 }
 
-fn render_consensus_sequence_id_pane(area: Rect, _core: &CoreState, ui: &UiState, f: &mut Frame) {
+fn render_consensus_sequence_id_pane(area: Rect, core: &CoreState, ui: &UiState, f: &mut Frame) {
     let theme = &ui.theme_styles;
     let block = Block::bordered()
         .border_style(theme.border)
@@ -107,11 +111,19 @@ fn render_consensus_sequence_id_pane(area: Rect, _core: &CoreState, ui: &UiState
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    let lines = vec![
-        Line::from("Reference Sequence:".set_style(theme.accent)),
-        Line::from("Consensus Sequence:".set_style(theme.accent)),
-        Line::from("Conservation:".set_style(theme.accent)),
-    ];
+    let resolved_sequence_type = core.sequence_type();
+    let lines = if resolved_sequence_type == SequenceType::Full {
+        vec![
+            Line::from("Reference Sequence:".set_style(theme.accent)),
+            Line::from("Consensus Sequence:".set_style(theme.accent)),
+        ]
+    } else {
+        vec![
+            Line::from("Reference Sequence:".set_style(theme.accent)),
+            Line::from("Consensus Sequence:".set_style(theme.accent)),
+            Line::from("Conservation:".set_style(theme.accent)),
+        ]
+    };
 
     let consensus_id_paragraph = Paragraph::new(lines).style(theme.base_block);
     f.render_widget(consensus_id_paragraph, inner_area);

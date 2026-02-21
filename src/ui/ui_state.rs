@@ -173,6 +173,7 @@ impl UiState {
                 self.overlay.palette = Some(CommandPaletteState::new(
                     selectable_sequences,
                     pinned_sequences,
+                    core.sequence_type(),
                 ));
             }
             UiAction::CloseCommandPalette => {
