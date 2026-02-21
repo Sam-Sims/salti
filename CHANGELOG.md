@@ -17,8 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toggleable.
     - This introduced a new colour palette for full, which is hard-set across every theme. In full mode only the UI
       elements will change with the theme.
-
-### Changed
+    - Note in `Full` mode conservation + translation is disabled.
 
 ### Fixed
 
