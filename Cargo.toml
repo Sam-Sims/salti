@@ -35,7 +35,10 @@ insta = "1.46.3"
 tempfile = "3.25.0"
 
 [profile.release]
-debug = true
+codegen-units = 1 # Allows compiler to perform better optimization.
+lto = true # Enables Link-time Optimization.
+opt-level = "s" # Prioritizes small binary size. Use `3` if you prefer speed.
+strip = true # Ensures debug symbols are removed.
 
 # The profile that 'dist' will build with
 [profile.dist]
