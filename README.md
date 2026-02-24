@@ -1,4 +1,6 @@
 ![GitHub release (with filter)](https://img.shields.io/github/v/release/Sam-Sims/salti)
+![](https://anaconda.org/bioconda/salti/badges/version.svg)
+![crates.io](https://img.shields.io/crates/v/salti)
 [![test](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml)
 [![check](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml)
 ![MSRV](https://img.shields.io/badge/MSRV-1.89.0-blue)
@@ -84,6 +86,14 @@ are:
 - `terminal-default` - uses terminal-provided ANSI colours and defaults.
 
 ## Installation
+
+### Conda:
+
+![](https://anaconda.org/bioconda/salti/badges/platforms.svg)
+
+```
+conda install -c bioconda salti
+```
 
 ### Binaries:
 
