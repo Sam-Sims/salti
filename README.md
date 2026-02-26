@@ -15,6 +15,13 @@ to leave the terminal.
   <img src="assets/splash_img.png" />
 </p>
 
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Some notes on features](#some-notes-on-features)
+
 ## Features
 
 ### Fast
