@@ -1,9 +1,9 @@
-![GitHub release (with filter)](https://img.shields.io/github/v/release/Sam-Sims/salti)
+![GitHub Release](https://img.shields.io/github/v/release/sam-sims/salti?sort=date)
 ![](https://anaconda.org/bioconda/salti/badges/version.svg)
 ![crates.io](https://img.shields.io/crates/v/salti)
+
 [![test](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml)
 [![check](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml)
-![MSRV](https://img.shields.io/badge/MSRV-1.89.0-blue)
 
 # salti
 
@@ -17,8 +17,6 @@ to leave the terminal.
 
 ## Features
 
-https://github.com/user-attachments/assets/2592a9ac-43ba-42bc-8a29-e4d1d42d904a
-
 ### Fast
 
 `salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for
@@ -29,10 +27,10 @@ async processing. This is in part achieved by:
 - Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick,
   and caching consensus and conservation calculations in a window around the currently visible region.
 
-It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox alignments
-on Ghostty and Kitty, which both support GPU acceleration, the performance may vary on other terminals).
+It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox
+alignments)
 
-### Transparent support for HTTP/HTTPS/SSH/Compressed files
+### Transparent support for HTTP/SSH/Compressed files
 
 Thanks to the cool [Paraseq](https://github.com/noamteyssier/paraseq) library `salti` can transparently load compressed
 fasta files, as well as files over
@@ -43,37 +41,43 @@ HTTP/HTTPS or SSH. Just provide the URL or SSH path to the `load` command, e.g.
 
 Press `:` to open a command palette for most actions. See [Usage](#command-palette-1) for details.
 
-![cmdpal](assets/command_palette.png)
+![command_palette](assets/command_palette.gif)
 
 ### Mouse support
 
-`Left click` to select a sequence/position, `ctrl+left click` to select a region.
+`Left click` to select a sequence/position, `Ctrl+left click` to select a region.
 
 Hold middle mouse to pan around the alignment.
 
-#### Minimap
+![mouse](assets/mouse.gif)
 
-Easy navigation with a minimap
-
-![minimap](assets/minimap.png)
+### Minimap
 
 Press `m` to open the minimap and drag to quickly pan around.
+
+![minimap](assets/minimap.gif)
 
 ### Nucleotide and Amino acid support
 
 `salti` automatically detects whether your alignment is nucleotide (NT) or amino acid (AA), then applies the correct
 rendering mode.
 
+![nt/aa](assets/aant.png)
+
 ### Translation
 
 Can translate NT codons to AA on the fly, with support for all 3 frames, although designed for browsing, rather than a
 dedicated translation tool.
+
+![translate](assets/translate.gif)
 
 ### Useful viz tools
 
 - Collapse positions that match the reference or consensus to `.` for easier visualisation of differences.
 - Mouse selection to highlight regions or sequences
 - Pin important sequences fixed at the top while browsing.
+
+![viz](assets/viz.gif)
 
 ### Themes
 
@@ -84,6 +88,8 @@ are:
 - `solarized-light` - a light theme based on the solarized palette.
 - `tokyo-night` - a dark theme based on the tokyo night palette.
 - `terminal-default` - uses terminal-provided ANSI colours and defaults.
+
+![themes](assets/theme.gif)
 
 ## Installation
 
@@ -132,7 +138,16 @@ All executables will be in the directory `salti/target/release`.
 
 ## Usage
 
-Tested on my setup (Arch linux + ghostty) - but should work on any modern terminal.
+I would recommend a modern terminal, with GPU acceleration and 24-bit colour (true colour) support for the best
+experience.
+Additionally, a font with Unicode support is required to render all characters correctly.
+
+I would also recommend a large terminal window for the best experience, but the app is designed to be usable
+even in smaller windows.
+
+`salti` is primarily developed and benchmarked in [Ghostty](https://ghostty.org/). I have tested it on several other
+terminals and it works well in most cases, though performance may vary. If you have responsiveness issues, please open
+an issue and include your terminal emulator and font information.
 
 ```bash
 salti <alignment.fasta>
@@ -148,12 +163,13 @@ I plan to add a help screen in the future for reference in app, but for now here
 
 - `q` - Quit.
 - `:` - Opens the command palette.
-- `Up` / `Down` - Scroll vertically
-- `Left` / `Right` - Scroll horizontally.
-- `Shift` + A navigation key scrolls faster in that direction.
+- `Up` / `Down` - Scroll vertically 1 row
+- `Left` / `Right` - Scroll horizontally 1 column.
+- `Shift` + `Left`/`Right`/`Up`/`Down` scrolls 10 columns/rows in that direction.
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
 - `Left cick` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
+- `Middle click + drag` - Pan.
 - `m` - Open the minimap
 
 ### Command palette

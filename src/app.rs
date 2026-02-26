@@ -160,9 +160,6 @@ impl App {
     }
 
     /// Updates cached layouts and viewport dimensions from a terminal area.
-    ///
-    /// Draw-time `Frame::area()` is the authoritative source. Backend resize events and
-    /// `terminal.size()` values are only bootstrap hints before the first draw.
     fn update_layout(&mut self, area: Rect) {
         if area == self.layout_area {
             return;
