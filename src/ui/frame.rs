@@ -46,11 +46,11 @@ fn build_bottom_status_bar(
                 sequence.alignment.id.as_ref(),
                 STATUS_BAR_SELECTED_NAME_MAX_CHARS,
             );
-            parts.push(format!("Selected: {sequence_name} @ {col_start}").set_style(theme.accent));
+            parts.push(format!("Selected: {sequence_name} @ {col_start}").set_style(theme.text));
         } else {
             parts.push(
                 format!("{selected_sequence_count} sequence(s) selected @ {col_start}-{col_end}")
-                    .set_style(theme.accent),
+                    .set_style(theme.text),
             );
         }
     }
@@ -68,7 +68,7 @@ fn build_top_status_bar(
     let file_name = file_path
         .as_ref()
         .map(|input| {
-            // For local paths, show just the file name; for URLs, show the full input.
+            // for local paths, show just the file name for URLs makes more sense to show the full input.
             std::path::Path::new(input.as_str())
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -99,9 +99,9 @@ fn build_top_status_bar(
         Span::raw(" | "),
         loading_status,
         Span::raw(" | "),
-        format!("{alignment_count} alignments").set_style(theme.text_dim),
+        format!("{alignment_count} alignments").set_style(theme.text),
         Span::raw(" | "),
-        position_range.set_style(theme.text_dim),
+        position_range.set_style(theme.text),
     ]
 }
 
@@ -119,7 +119,10 @@ pub fn render_frame(
 
     if top_status_area.height > 0 {
         let top_line = Line::from(top_status_bar).right_aligned();
-        f.render_widget(Paragraph::new(top_line), top_status_area);
+        f.render_widget(
+            Paragraph::new(top_line).style(theme.panel_block),
+            top_status_area,
+        );
     }
     if bottom_status_area.height > 0 {
         let contextual_line = Line::from(bottom_status_bar).right_aligned();
