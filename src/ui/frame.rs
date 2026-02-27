@@ -14,29 +14,15 @@ const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
 
 fn build_bottom_status_bar(
     core: &CoreState,
-    window: &ViewportWindow,
     ui: &UiState,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
-    let sequence_length = core.data.sequence_length;
-
-    let position_range = if sequence_length > 0 {
-        let range = &window.col_range;
-        let start = range.start + 1;
-        let end = range.end;
-        format!("Positions: {start}-{end}")
-    } else {
-        "Positions: 0-0".to_string()
-    };
-
-    let alignment_count = core.data.sequences.len();
-    let mut parts = vec![format!("{alignment_count} alignments").set_style(theme.text_dim)];
+    let mut parts = Vec::new();
 
     // optional filter text building
     if !core.filter_text.is_empty() {
         let visible_count = core.display_sequence_ids.len();
         let filter_text = &core.filter_text;
-        parts.push(Span::raw(" | "));
         parts.push(
             format!("Filtered to {visible_count} alignments with filter: {filter_text}")
                 .set_style(theme.warning),
@@ -50,7 +36,10 @@ fn build_bottom_status_bar(
         let col_start = selection.column.min(selection.end_column) + 1;
         let col_end = selection.column.max(selection.end_column) + 1;
 
-        parts.push(Span::raw(" | "));
+        if !parts.is_empty() {
+            parts.push(Span::raw(" | "));
+        }
+
         if selected_sequence_count == 1 && col_start == col_end {
             let sequence = &core.data.sequences[selection.sequence_id];
             let sequence_name = truncate_label(
@@ -66,14 +55,12 @@ fn build_bottom_status_bar(
         }
     }
 
-    parts.push(Span::raw(" | "));
-    parts.push(position_range.set_style(theme.text_dim));
     parts
 }
 
 fn build_top_status_bar(
     core: &CoreState,
-    _ui: &UiState,
+    window: &ViewportWindow,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
     let file_path = &core.data.file_path;
@@ -97,10 +84,24 @@ fn build_top_status_bar(
     };
     let loading_status = loading_text.set_style(loading_style);
 
+    let alignment_count = core.data.sequences.len();
+    let position_range = if core.data.sequence_length > 0 {
+        let range = &window.col_range;
+        let start = range.start + 1;
+        let end = range.end;
+        format!("Positions: {start}-{end}")
+    } else {
+        "Positions: 0-0".to_string()
+    };
+
     vec![
         format!("File: {file_name}").set_style(theme.text_dim),
         Span::raw(" | "),
         loading_status,
+        Span::raw(" | "),
+        format!("{alignment_count} alignments").set_style(theme.text_dim),
+        Span::raw(" | "),
+        position_range.set_style(theme.text_dim),
     ]
 }
 
@@ -113,22 +114,17 @@ pub fn render_frame(
     ui: &UiState,
 ) {
     let theme = &ui.theme_styles;
-    let top_status_bar = build_top_status_bar(core, ui, theme);
-    let bottom_status_bar = build_bottom_status_bar(core, window, ui, theme);
+    let top_status_bar = build_top_status_bar(core, window, theme);
+    let bottom_status_bar = build_bottom_status_bar(core, ui, theme);
 
     if top_status_area.height > 0 {
         let top_line = Line::from(top_status_bar).right_aligned();
         f.render_widget(Paragraph::new(top_line), top_status_area);
     }
     if bottom_status_area.height > 0 {
-        let left_line = Line::from(bottom_status_bar).left_aligned();
-        let right_line = Line::from("Press 'q' to quit".set_style(theme.text_dim)).right_aligned();
+        let contextual_line = Line::from(bottom_status_bar).right_aligned();
         f.render_widget(
-            Paragraph::new(left_line).style(theme.panel_block),
-            bottom_status_area,
-        );
-        f.render_widget(
-            Paragraph::new(right_line).style(theme.panel_block),
+            Paragraph::new(contextual_line).style(theme.panel_block),
             bottom_status_area,
         );
     }
