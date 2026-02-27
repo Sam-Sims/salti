@@ -65,7 +65,7 @@ fn render_sequence_id_rows(
     for row_id in visible_rows {
         match row_id {
             Some(sequence_id) => {
-                let sequence = &core.data.sequences[*sequence_id];
+                let sequence = &core.data().sequences[*sequence_id];
                 let is_pinned = core.is_sequence_pinned(*sequence_id);
                 id_lines.push(build_sequence_id_line(
                     ui,

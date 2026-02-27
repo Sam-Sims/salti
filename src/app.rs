@@ -170,7 +170,7 @@ impl App {
 
         let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
         let visible_height = self.app_layout.alignment_pane.height.saturating_sub(4) as usize;
-        let number_width = self.core.data.sequences.len().max(1).to_string().len();
+        let number_width = self.core.data().sequences.len().max(1).to_string().len();
         let number_prefix_width = number_width + 1;
         let name_visible_width = self
             .app_layout
@@ -214,7 +214,7 @@ impl App {
             mouse,
             self.frame_layout.overlay_area,
             &window.col_range,
-            self.core.data.sequence_length,
+            self.core.data().sequence_length,
         ) {
             self.apply_actions([Action::Core(action)]);
         }
@@ -335,14 +335,14 @@ impl App {
             KeyAction::ToggleMinimap => Action::Ui(UiAction::ToggleMinimap),
             KeyAction::ToggleTranslationView => Action::Core(CoreAction::ToggleTranslationView),
             KeyAction::JumpToStart => {
-                if self.core.data.sequence_length > 0 {
+                if self.core.data().sequence_length > 0 {
                     Action::Core(CoreAction::JumpToPosition(0))
                 } else {
                     return;
                 }
             }
             KeyAction::JumpToEnd => {
-                let Some(position) = self.core.data.sequence_length.checked_sub(1) else {
+                let Some(position) = self.core.data().sequence_length.checked_sub(1) else {
                     return;
                 };
                 Action::Core(CoreAction::JumpToPosition(position))

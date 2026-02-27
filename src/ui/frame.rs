@@ -41,7 +41,7 @@ fn build_bottom_status_bar(
         }
 
         if selected_sequence_count == 1 && col_start == col_end {
-            let sequence = &core.data.sequences[selection.sequence_id];
+            let sequence = &core.data().sequences[selection.sequence_id];
             let sequence_name = truncate_label(
                 sequence.alignment.id.as_ref(),
                 STATUS_BAR_SELECTED_NAME_MAX_CHARS,
@@ -84,8 +84,8 @@ fn build_top_status_bar(
     };
     let loading_status = loading_text.set_style(loading_style);
 
-    let alignment_count = core.data.sequences.len();
-    let position_range = if core.data.sequence_length > 0 {
+    let alignment_count = core.data().sequences.len();
+    let position_range = if core.data().sequence_length > 0 {
         let range = &window.col_range;
         let start = range.start + 1;
         let end = range.end;

@@ -90,6 +90,11 @@ impl CoreState {
         }
     }
 
+    #[must_use]
+    pub fn data(&self) -> &AlignmentData {
+        &self.data
+    }
+
     /// Applies a single [`CoreAction`] command, where a core action is something that manipulates
     /// the application state.
     pub fn apply_action(&mut self, action: CoreAction) {

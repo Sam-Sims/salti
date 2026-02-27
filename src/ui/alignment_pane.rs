@@ -63,7 +63,7 @@ fn render_sequence_rows(
             ));
             continue;
         };
-        let sequence = &core.data.sequences[sequence_id];
+        let sequence = &core.data().sequences[sequence_id];
         let spans = format_row_spans(
             sequence.alignment.sequence.as_ref(),
             &horizontal_range,
