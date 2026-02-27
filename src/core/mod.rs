@@ -6,8 +6,9 @@ pub mod lookups;
 pub mod parser;
 pub mod search;
 pub mod viewport;
+pub mod visibility;
 
-pub use core_state::{CoreState, LoadingState, VisibleSequence};
+pub use core_state::{ColumnStatsCache, CoreState, FilterState, LoadingState};
 pub use data::AlignmentData;
 pub use viewport::Viewport;
 

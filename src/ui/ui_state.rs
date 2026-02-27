@@ -1,10 +1,11 @@
 use crate::config::theme::{
     EVERFOREST_DARK, Theme, ThemeId, ThemeStyles, build_theme_styles, theme_from_id,
 };
+use crate::core::CoreState;
 use crate::core::command::CoreAction;
 use crate::core::viewport::ViewportWindow;
-use crate::core::{CoreState, VisibleSequence};
 use crate::overlay::{CommandPaletteState, MinimapState, Notification, OverlayState};
+use crate::ui::VisibleSequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseSelection {

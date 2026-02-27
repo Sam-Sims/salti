@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::input::CommandPaletteState;
 
-fn sequence_names_from(sequences: &[crate::core::VisibleSequence]) -> Vec<String> {
+fn sequence_names_from(sequences: &[crate::ui::VisibleSequence]) -> Vec<String> {
     sequences
         .iter()
         .map(|sequence| sequence.sequence_name.to_string())
