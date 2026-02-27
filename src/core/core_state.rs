@@ -46,6 +46,7 @@ pub struct CoreState {
     pub filter_text: String,
     pub filter_regex: Option<Regex>,
     pub loading_state: LoadingState,
+    pub input_path: Option<String>,
     pub initial_position: usize,
     pub reference_sequence_id: Option<usize>,
     pub pinned_sequence_ids: Vec<usize>,
@@ -64,10 +65,8 @@ pub struct CoreState {
 impl CoreState {
     #[must_use]
     pub fn new(startup: StartupState) -> Self {
-        let data = AlignmentData {
-            file_path: startup.file_path,
-            ..AlignmentData::default()
-        };
+        let input_path = startup.file_path.clone();
+        let data = AlignmentData::default();
 
         Self {
             data,
@@ -75,6 +74,7 @@ impl CoreState {
             filter_text: String::new(),
             filter_regex: None,
             loading_state: LoadingState::default(),
+            input_path,
             initial_position: startup.initial_position,
             reference_sequence_id: None,
             pinned_sequence_ids: Vec::new(),

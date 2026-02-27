@@ -228,7 +228,7 @@ impl App {
             previous.handle.abort();
         }
 
-        self.core.data.file_path = Some(input.clone());
+        self.core.input_path = Some(input.clone());
 
         let cancel = CancellationToken::new();
         debug!(input = %input, "Spawning new load job for input");
@@ -245,7 +245,7 @@ impl App {
     /// If no file path is configured, loading is marked as [`LoadingState::Idle`] so the UI can
     /// present an idle status. If a path exists, a load job is spawned immediately.
     fn try_file_load(&mut self) {
-        let Some(input) = self.core.data.file_path.clone() else {
+        let Some(input) = self.core.input_path.clone() else {
             info!("No startup file provided; entering idle loading state");
             self.core.loading_state = LoadingState::Idle;
             return;

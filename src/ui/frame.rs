@@ -63,7 +63,7 @@ fn build_top_status_bar(
     window: &ViewportWindow,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
-    let file_path = &core.data.file_path;
+    let file_path = &core.input_path;
 
     let file_name = file_path
         .as_ref()
