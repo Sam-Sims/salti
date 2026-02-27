@@ -11,15 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Installer bash script for easy installation on Linux.
 
+### Changed
+
+- Each status bar has separation of concerns for a more consistent UI. The top bar is for "global" concerns, i.e number
+  of alignments, visible region etc
+    - The bottom bar is for "local" concerns, i.e the current selected position and sequence
+
+### Removed
+
+- Removed musl builds due to the complexity of supporting OpenSSL
+
 ### Fixed
 
 - Further omptimised dist build profile
 - Removed the need for vendored OpenSSL
     - Together with the previous optimisations, this reduces the dist binary size from 13mb to 6.9mb
-
-### Removed
-
-- Removed musl builds due to the complexity of supporting OpenSSL
 
 ## [0.7.1] - 2026-02-21
 
