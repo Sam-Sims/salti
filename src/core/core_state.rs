@@ -260,30 +260,23 @@ impl CoreState {
             .map(|&sequence_id| &self.data.sequences[sequence_id])
     }
 
-    /// Yields visible pinned sequences in pin order.
-    pub fn pinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
+    /// Returns visible pinned sequence IDs in pin order.
+    fn visible_pinned_ids(&self) -> impl Iterator<Item = usize> + '_ {
         self.pinned_sequence_ids
             .iter()
             .copied()
             .filter(|&sequence_id| !self.row_visibility.is_hidden(sequence_id))
+    }
+
+    /// Yields full SequenceRecords for visible pinned sequences in pin order.
+    pub fn pinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
+        self.visible_pinned_ids()
             .map(|sequence_id| &self.data.sequences[sequence_id])
     }
 
     #[must_use]
     pub fn visible_pinned_count(&self) -> usize {
-        self.pinned_sequence_ids
-            .iter()
-            .copied()
-            .filter(|&sequence_id| !self.row_visibility.is_hidden(sequence_id))
-            .count()
-    }
-    /// Yields visible unpinned sequences in original alignment order.
-    pub fn visible_unpinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
-        self.row_visibility
-            .visible_to_absolute()
-            .iter()
-            .skip(self.visible_pinned_count())
-            .map(|&sequence_id| &self.data.sequences[sequence_id])
+        self.visible_pinned_ids().count()
     }
 
     #[must_use]
@@ -319,22 +312,14 @@ impl CoreState {
         });
     }
 
+
     /// Rebuilds row visibility in display order.
     ///
     /// Pinned rows are first in pin order, then visible remaining rows.
     fn rebuild_row_visibility(&mut self) {
-        let visible_pinned: Vec<usize> = self
-            .pinned_sequence_ids
-            .iter()
-            .copied()
-            .filter(|&id| !self.row_visibility.is_hidden(id))
-            .collect();
+        let visible_pinned: Vec<usize> = self.visible_pinned_ids().collect();
 
-        let visible_unpinned = self
-            .data
-            .sequences
-            .iter()
-            .map(|s| s.sequence_id)
+        let visible_unpinned = (0..self.data.sequences.len())
             .filter(|&id| !self.row_visibility.is_hidden(id) && !self.is_sequence_pinned(id));
 
         let ordered: Vec<usize> = visible_pinned
@@ -350,8 +335,9 @@ impl CoreState {
     fn refresh_viewport(&mut self) {
         self.apply_hide_flags();
         self.rebuild_row_visibility();
+        self.column_visibility.rebuild_projection();
         self.viewport.max_size.rows = self.row_visibility.visible_count();
-        self.viewport.max_size.cols = self.data.sequence_length;
+        self.viewport.max_size.cols = self.column_visibility.visible_count();
         self.viewport.max_size.name_width = self.data.max_sequence_id_len;
         self.viewport.clamp_offsets();
     }
@@ -606,5 +592,32 @@ mod tests {
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![1]);
+    }
+    #[test]
+    fn column_visibility_defaults_all_visible_after_load() {
+        let core = test_core_with_ids(&["seq-a", "seq-b"]);
+        let expected_visible_to_absolute: Vec<usize> = (0..core.data.sequence_length).collect();
+
+        assert_eq!(
+            core.column_visibility.visible_count(),
+            core.data.sequence_length
+        );
+        assert_eq!(
+            core.column_visibility.visible_to_absolute(),
+            expected_visible_to_absolute.as_slice()
+        );
+        assert!((0..core.data.sequence_length).all(|index| !core.column_visibility.is_hidden(index)));
+    }
+
+    #[test]
+    fn viewport_cols_uses_column_visibility_count() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b"]);
+
+        core.column_visibility
+            .set_hidden(|absolute_index| absolute_index == 1 || absolute_index == 3);
+        core.refresh_viewport();
+
+        assert_eq!(core.column_visibility.visible_to_absolute(), &[0, 2]);
+        assert_eq!(core.viewport.max_size.cols, 2);
     }
 }

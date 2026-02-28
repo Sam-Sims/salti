@@ -46,7 +46,8 @@ impl Visibility {
         self.hidden[absolute_index]
     }
 
-    /// Updates hidden flags only; caller must rebuild mappings with `set_visible_order` before lookups.
+    /// Updates hidden flags only; caller must rebuild mappings with `set_visible_order` or
+    /// `rebuild_projection` before lookups.
     pub fn set_hidden<F>(&mut self, mut is_hidden: F)
     where
         F: FnMut(usize) -> bool,
@@ -56,6 +57,22 @@ impl Visibility {
         }
     }
 
+    /// Rebuilds maps in absolute index order, and hides any indices marked as hidden.
+    pub fn rebuild_projection(&mut self) {
+        self.reset_absolute_to_visible();
+        self.visible_to_absolute.clear();
+        self.visible_to_absolute.reserve(self.hidden.len());
+
+        for (absolute_index, &is_hidden) in self.hidden.iter().enumerate() {
+            if is_hidden {
+                continue;
+            }
+
+            let visible_index = self.visible_to_absolute.len();
+            self.visible_to_absolute.push(absolute_index);
+            self.absolute_to_visible[absolute_index] = Some(visible_index);
+        }
+    }
     /// Resets absolute to visible mapping
     fn reset_absolute_to_visible(&mut self) {
         self.absolute_to_visible.clear();
@@ -73,5 +90,36 @@ impl Visibility {
             self.visible_to_absolute.push(absolute_index);
             self.absolute_to_visible[absolute_index] = Some(visible_index);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Visibility;
+
+    #[test]
+    fn rebuild_projection_keeps_identity_order_when_all_visible() {
+        let mut visibility = Visibility::default();
+        visibility.reset_all(5);
+
+        visibility.rebuild_projection();
+
+        assert_eq!(visibility.visible_count(), 5);
+        assert_eq!(visibility.visible_to_absolute(), &[0, 1, 2, 3, 4]);
+        assert!((0..5).all(|index| !visibility.is_hidden(index)));
+    }
+
+    #[test]
+    fn rebuild_projection_skips_hidden_indices_in_absolute_order() {
+        let mut visibility = Visibility::default();
+        visibility.reset_all(6);
+        visibility.set_hidden(|index| index == 1 || index == 4);
+
+        visibility.rebuild_projection();
+
+        assert_eq!(visibility.visible_count(), 4);
+        assert_eq!(visibility.visible_to_absolute(), &[0, 2, 3, 5]);
+        assert!(visibility.is_hidden(1));
+        assert!(visibility.is_hidden(4));
     }
 }
