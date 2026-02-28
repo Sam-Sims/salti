@@ -565,9 +565,10 @@ mod tests {
         let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
 
         core.apply_action(CoreAction::SetReference(1));
-        assert!(core
-            .all_visible_sequences()
-            .all(|sequence| sequence.sequence_id != 1));
+        assert!(
+            core.all_visible_sequences()
+                .all(|sequence| sequence.sequence_id != 1)
+        );
 
         core.viewport.offsets.rows = 1;
         core.apply_action(CoreAction::JumpToSequence(1));
