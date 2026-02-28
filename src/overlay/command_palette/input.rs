@@ -1,17 +1,16 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::Action;
-use crate::core::VisibleSequence;
 use crate::core::parser::SequenceType;
 use crate::core::search::{FilterMode, SearchableList};
 use crate::overlay::{Notification, NotificationLevel};
 use crate::ui::UiAction;
+pub use crate::ui::VisibleSequence;
 
 use super::command_definitions::COMMAND_SPECS;
 use super::command_error::CommandError;
 use super::command_spec::{PaletteCommand, TypableCommand};
 use super::utils::parse_argument;
-
 #[derive(Debug, Clone, Copy)]
 pub(super) enum PaletteState {
     Command,

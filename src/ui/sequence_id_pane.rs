@@ -1,6 +1,7 @@
 use crate::core::CoreState;
 use crate::core::viewport::ViewportWindow;
 use crate::ui::UiState;
+use crate::ui::layout::RULER_HEIGHT_ROWS;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Style, Styled};
@@ -41,20 +42,21 @@ fn render_sequence_id_rows(
     f: &mut Frame,
     visible_rows: &[Option<usize>],
 ) {
-    let ruler_height: usize = 2;
+    let ruler_height = usize::from(RULER_HEIGHT_ROWS);
     let mut id_lines = Vec::with_capacity(visible_rows.len() + ruler_height);
     let has_pins = visible_rows
         .first()
         .is_some_and(|r| r.is_some_and(|id| core.is_sequence_pinned(id)));
 
-    // create blank lines where the alignment pane ruler sits, so sequence ID pane rows stay aligned.
-    id_lines.push(Line::from(" "));
-    if has_pins {
-        id_lines.push(Line::from(
-            "Pinned sequences:".set_style(ui.theme_styles.text_muted),
-        ));
-    } else {
-        id_lines.push(Line::from(" "));
+    // reserve rows where the alignment pane ruler sits, so sequence ID pane rows stay aligned.
+    for ruler_row in 0..ruler_height {
+        if ruler_row == 1 && has_pins {
+            id_lines.push(Line::from(
+                "Pinned sequences:".set_style(ui.theme_styles.text_muted),
+            ));
+        } else {
+            id_lines.push(Line::from(" "));
+        }
     }
 
     let name_width = window

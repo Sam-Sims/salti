@@ -28,19 +28,15 @@ serde = { version = "1.0.228", features = ["derive"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
-native-tls = { version = "0.2", features = ["vendored"] }
 
 [dev-dependencies]
 insta = "1.46.3"
 tempfile = "3.25.0"
 
-[profile.release]
-codegen-units = 1 # Allows compiler to perform better optimization.
-lto = true # Enables Link-time Optimization.
-opt-level = "s" # Prioritizes small binary size. Use `3` if you prefer speed.
-strip = true # Ensures debug symbols are removed.
-
 # The profile that 'dist' will build with
 [profile.dist]
-inherits = "release"
-lto = "thin"
+inherits = 'release'
+incremental = false
+codegen-units = 1
+lto = true
+debug = false

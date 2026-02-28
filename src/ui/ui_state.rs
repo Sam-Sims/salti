@@ -1,10 +1,11 @@
 use crate::config::theme::{
     EVERFOREST_DARK, Theme, ThemeId, ThemeStyles, build_theme_styles, theme_from_id,
 };
+use crate::core::CoreState;
 use crate::core::command::CoreAction;
 use crate::core::viewport::ViewportWindow;
-use crate::core::{CoreState, VisibleSequence};
 use crate::overlay::{CommandPaletteState, MinimapState, Notification, OverlayState};
+use crate::ui::VisibleSequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseSelection {
@@ -115,7 +116,8 @@ impl UiState {
         window: &ViewportWindow,
         row_capacity: usize,
     ) {
-        let pinned_count = core.display_pinned_count;
+        let row_ids = core.row_visibility.visible_to_absolute();
+        let pinned_count = core.visible_pinned_count();
         let has_pins = pinned_count > 0 && row_capacity > 0;
         let pinned_rows = if has_pins {
             pinned_count.min(row_capacity.saturating_sub(1))
@@ -126,19 +128,15 @@ impl UiState {
         let scroll_offset = window.row_range.start;
 
         self.visible_rows.clear();
-        self.visible_rows.extend(
-            core.display_sequence_ids[..pinned_rows]
-                .iter()
-                .copied()
-                .map(Some),
-        );
+        self.visible_rows
+            .extend(row_ids[..pinned_rows].iter().copied().map(Some));
         if has_pins {
             self.visible_rows.push(None);
         }
         let unpinned_start = pinned_count + scroll_offset;
-        let unpinned_end = (unpinned_start + unpinned_rows).min(core.display_sequence_ids.len());
+        let unpinned_end = (unpinned_start + unpinned_rows).min(row_ids.len());
         self.visible_rows.extend(
-            core.display_sequence_ids[unpinned_start..unpinned_end]
+            row_ids[unpinned_start..unpinned_end]
                 .iter()
                 .copied()
                 .map(Some),
@@ -146,7 +144,7 @@ impl UiState {
 
         self.display_index.clear();
         self.display_index.resize(core.data.sequences.len(), 0);
-        for (display_index, &sequence_id) in core.display_sequence_ids.iter().enumerate() {
+        for (display_index, &sequence_id) in row_ids.iter().enumerate() {
             self.display_index[sequence_id] = display_index;
         }
     }
@@ -157,7 +155,7 @@ impl UiState {
                 self.overlay.notification = None;
                 self.overlay.minimap = None;
                 let selectable_sequences: Vec<VisibleSequence> = core
-                    .visible_sequences()
+                    .all_visible_sequences()
                     .map(|sequence| VisibleSequence {
                         sequence_id: sequence.sequence_id,
                         sequence_name: sequence.alignment.id.clone(),

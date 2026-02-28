@@ -1,6 +1,5 @@
 use crate::app::Action;
 use crate::config::theme::ThemeId;
-use crate::core::VisibleSequence;
 use crate::core::column_stats::ConsensusMethod;
 use crate::core::command::{CoreAction, DiffMode};
 use crate::core::parser::SequenceType;
@@ -10,6 +9,7 @@ use tracing::warn;
 use super::command_error::CommandError;
 use super::input::CommandPaletteState;
 use super::utils::parse_argument;
+use crate::ui::VisibleSequence;
 
 fn ensure_no_argument(arguments: &str) -> Result<(), CommandError> {
     if parse_argument(arguments).is_some() {

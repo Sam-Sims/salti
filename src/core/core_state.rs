@@ -1,11 +1,12 @@
 use crate::cli::StartupState;
 use crate::core::column_stats::{
     COLUMN_STATS_BUFFER_COLS, COLUMN_STATS_RECALC_MARGIN_COLS, ColumnStats, ColumnStatsRequest,
-    apply_positional_updates,
+    ConsensusMethod, apply_positional_updates,
 };
 use crate::core::command::{CoreAction, DiffMode};
 use crate::core::data::SequenceRecord;
 use crate::core::parser::{self, Alignment, SequenceType};
+use crate::core::visibility::Visibility;
 use crate::core::{AlignmentData, Viewport};
 use regex::Regex;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use tracing::debug;
 pub enum LoadingState {
     #[default]
     Idle,
+    Loading,
     Loaded,
     Failed(String),
 }
@@ -25,17 +27,18 @@ impl std::fmt::Display for LoadingState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LoadingState::Idle => write!(f, "Status: Idle"),
+            LoadingState::Loading => write!(f, "Status: Loading"),
             LoadingState::Loaded => write!(f, "Status: Loaded"),
             LoadingState::Failed(_) => write!(f, "Status: Failed"),
         }
     }
 }
 
-/// Represents the visible subset of the loaded sequences for display in the UI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VisibleSequence {
-    pub sequence_id: usize,
-    pub sequence_name: Arc<str>,
+/// Filter state
+#[derive(Debug, Default)]
+pub struct FilterState {
+    pub text: String,
+    pub regex: Option<Regex>,
 }
 
 /// The main application state
@@ -43,18 +46,18 @@ pub struct VisibleSequence {
 pub struct CoreState {
     pub data: AlignmentData,
     pub viewport: Viewport,
-    pub filter_text: String,
-    pub filter_regex: Option<Regex>,
+    pub filter: FilterState,
     pub loading_state: LoadingState,
+    pub input_path: Option<String>,
     pub initial_position: usize,
     pub reference_sequence_id: Option<usize>,
     pub pinned_sequence_ids: Vec<usize>,
-    pub display_sequence_ids: Vec<usize>,
-    pub display_pinned_count: usize,
+    pub row_visibility: Visibility,
+    pub column_visibility: Visibility,
     pub diff_mode: DiffMode,
     pub translate_nucleotide_to_amino_acid: bool,
     pub translation_frame: u8,
-    pub consensus_method: crate::core::column_stats::ConsensusMethod,
+    pub consensus_method: ConsensusMethod,
     pub consensus: Option<Vec<u8>>,
     pub conservation: Option<Vec<f32>>,
     // will contain the current window + a buffer either side, or None if no window is currently cached
@@ -64,30 +67,36 @@ pub struct CoreState {
 impl CoreState {
     #[must_use]
     pub fn new(startup: StartupState) -> Self {
-        let data = AlignmentData {
-            file_path: startup.file_path,
-            ..AlignmentData::default()
-        };
-
         Self {
-            data,
+            data: AlignmentData::default(),
             viewport: Viewport::default(),
-            filter_text: String::new(),
-            filter_regex: None,
+            filter: FilterState::default(),
             loading_state: LoadingState::default(),
+            input_path: startup.file_path,
             initial_position: startup.initial_position,
             reference_sequence_id: None,
             pinned_sequence_ids: Vec::new(),
-            display_sequence_ids: Vec::new(),
-            display_pinned_count: 0,
+            row_visibility: Visibility::default(),
+            column_visibility: Visibility::default(),
             diff_mode: DiffMode::Off,
             translate_nucleotide_to_amino_acid: false,
             translation_frame: 0,
-            consensus_method: crate::core::column_stats::ConsensusMethod::MajorityNonGap,
+            consensus_method: ConsensusMethod::default(),
             consensus: None,
             conservation: None,
             column_stats_window: None,
         }
+    }
+
+    /// Marks the core as loading the given input
+    pub fn prepare_load(&mut self, input: String) {
+        self.input_path = Some(input);
+        self.loading_state = LoadingState::Loading;
+    }
+
+    /// Sets core as idle
+    pub fn mark_idle(&mut self) {
+        self.loading_state = LoadingState::Idle;
     }
 
     /// Applies a single [`CoreAction`] command, where a core action is something that manipulates
@@ -113,18 +122,14 @@ impl CoreState {
                 self.viewport.scroll_names_right(amount);
             }
             CoreAction::JumpToSequence(sequence_id) => {
-                if self
-                    .visible_pinned_sequences()
-                    .any(|visible_sequence| visible_sequence.sequence_id == sequence_id)
+                if let Some(visible_row) = self
+                    .row_visibility
+                    .visible_to_absolute()
+                    .iter()
+                    .position(|&visible_sequence_id| visible_sequence_id == sequence_id)
                 {
-                    self.viewport.jump_to_sequence(0);
-                } else {
-                    let unpinned_row = self
-                        .visible_unpinned_sequences()
-                        .position(|visible_sequence| visible_sequence.sequence_id == sequence_id);
-                    if let Some(unpinned_row) = unpinned_row {
-                        self.viewport.jump_to_sequence(unpinned_row);
-                    }
+                    let scroll_target = visible_row.saturating_sub(self.visible_pinned_count());
+                    self.viewport.jump_to_sequence(scroll_target);
                 }
             }
             CoreAction::JumpToPosition(position) => {
@@ -195,16 +200,17 @@ impl CoreState {
             Ok(alignments) => {
                 let detected_sequence_type = parser::detect_sequence_type(&alignments);
                 self.data.load_alignments(alignments);
+                self.data.sequence_type = Some(detected_sequence_type);
+                if detected_sequence_type != SequenceType::Dna {
+                    self.translate_nucleotide_to_amino_acid = false;
+                }
+                self.row_visibility.reset_all(self.data.sequences.len());
+                self.column_visibility.reset_all(self.data.sequence_length);
                 self.loading_state = LoadingState::Loaded;
                 self.reference_sequence_id = None;
                 self.pinned_sequence_ids.clear();
                 self.refresh_viewport();
                 self.viewport.jump_to_position(self.initial_position);
-
-                self.data.sequence_type = Some(detected_sequence_type);
-                if detected_sequence_type != SequenceType::Dna {
-                    self.translate_nucleotide_to_amino_acid = false;
-                }
             }
             Err(error) => {
                 self.loading_state = LoadingState::Failed(error);
@@ -239,46 +245,45 @@ impl CoreState {
         name_visible_width: usize,
     ) {
         self.viewport
-            .update_dimensions(visible_width, visible_height, name_visible_width);
+            .set_dimensions(visible_width, visible_height, name_visible_width);
         self.refresh_viewport();
     }
 
-    /// Yields all sequence records that are not marked hidden
-    pub fn visible_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
-        self.display_sequence_ids
-            .iter()
-            .filter_map(|&sequence_id| self.data.sequences.get(sequence_id))
-    }
-
-    /// Yields pinned sequences in pin order.
+    /// Yields all visible sequence records in display order.
     ///
-    /// Used for operations that need to consider all pinned sequences
-    pub fn pinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
-        self.pinned_sequence_ids
+    /// This means visible pinned sequences first in pin order, followed by visible
+    /// unpinned sequences in same order as the original alignment.
+    pub fn all_visible_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
+        self.row_visibility
+            .visible_to_absolute()
             .iter()
-            .filter_map(|&sequence_id| self.data.sequences.get(sequence_id))
+            .map(|&sequence_id| &self.data.sequences[sequence_id])
     }
 
     /// Yields visible pinned sequences in pin order.
-    ///
-    /// Used for operations that only consider pinned sequences that are not marked hidden
-    pub fn visible_pinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
-        self.pinned_sequence_ids.iter().filter_map(|&sequence_id| {
-            self.data
-                .sequences
-                .get(sequence_id)
-                .filter(|sequence| !sequence.hidden)
-        })
+    pub fn pinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
+        self.pinned_sequence_ids
+            .iter()
+            .copied()
+            .filter(|&sequence_id| !self.row_visibility.is_hidden(sequence_id))
+            .map(|sequence_id| &self.data.sequences[sequence_id])
     }
 
-    /// Yields visible unpinned sequences in original alignment order.
-    ///
-    /// Used for operations that only consider unpinned sequences that are not marked hidden
-    pub fn visible_unpinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
-        self.data
-            .sequences
+    #[must_use]
+    pub fn visible_pinned_count(&self) -> usize {
+        self.pinned_sequence_ids
             .iter()
-            .filter(|sequence| !sequence.hidden && !self.is_sequence_pinned(sequence.sequence_id))
+            .copied()
+            .filter(|&sequence_id| !self.row_visibility.is_hidden(sequence_id))
+            .count()
+    }
+    /// Yields visible unpinned sequences in original alignment order.
+    pub fn visible_unpinned_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
+        self.row_visibility
+            .visible_to_absolute()
+            .iter()
+            .skip(self.visible_pinned_count())
+            .map(|&sequence_id| &self.data.sequences[sequence_id])
     }
 
     #[must_use]
@@ -294,29 +299,58 @@ impl CoreState {
             .map(|sequence| &sequence.alignment)
     }
 
-    /// Updates each sequence's `hidden` flag based on current reference and filter settings.
+    /// Updates `row_visibility` hidden flags
+    ///
+    /// Reference rows are always hidden. Pinned rows always bypass filter exclusion.
+    /// Unpinned rows are hidden when they do not match the active filter.
     fn apply_hide_flags(&mut self) {
         let reference_index = self.reference_sequence_id;
-        let filter = self.filter_regex.as_ref();
+        let filter = self.filter.regex.as_ref();
+        let sequences = &self.data.sequences;
+        let pinned_sequence_ids = &self.pinned_sequence_ids;
 
-        for sequence in Arc::make_mut(&mut self.data.sequences).iter_mut() {
-            let is_reference = reference_index == Some(sequence.sequence_id);
-            let is_pinned = self.pinned_sequence_ids.contains(&sequence.sequence_id);
+        self.row_visibility.set_hidden(|sequence_id| {
+            let sequence = &sequences[sequence_id];
+            let is_reference = reference_index == Some(sequence_id);
+            let is_pinned = pinned_sequence_ids.contains(&sequence_id);
             let excluded_by_filter = !is_pinned
                 && filter.is_some_and(|regex| !regex.is_match(sequence.alignment.id.as_ref()));
-            sequence.hidden = is_reference || excluded_by_filter;
-        }
+            is_reference || excluded_by_filter
+        });
+    }
+
+    /// Rebuilds row visibility in display order.
+    ///
+    /// Pinned rows are first in pin order, then visible remaining rows.
+    fn rebuild_row_visibility(&mut self) {
+        let visible_pinned: Vec<usize> = self
+            .pinned_sequence_ids
+            .iter()
+            .copied()
+            .filter(|&id| !self.row_visibility.is_hidden(id))
+            .collect();
+
+        let visible_unpinned = self
+            .data
+            .sequences
+            .iter()
+            .map(|s| s.sequence_id)
+            .filter(|&id| !self.row_visibility.is_hidden(id) && !self.is_sequence_pinned(id));
+
+        let ordered: Vec<usize> = visible_pinned
+            .iter()
+            .copied()
+            .chain(visible_unpinned)
+            .collect();
+
+        self.row_visibility.set_visible_order(&ordered);
     }
 
     /// Recomputes viewport params
-    ///
-    /// When filter or reference settings change, the set of visible sequences changes, which affects
-    /// the viewport's row mappings and scroll bounds. This method recalculates those parameters to
-    /// keep the viewport state consistent with the current visibility rules.
     fn refresh_viewport(&mut self) {
         self.apply_hide_flags();
-        self.rebuild_display_sequence_ids();
-        self.viewport.max_size.rows = self.display_sequence_ids.len();
+        self.rebuild_row_visibility();
+        self.viewport.max_size.rows = self.row_visibility.visible_count();
         self.viewport.max_size.cols = self.data.sequence_length;
         self.viewport.max_size.name_width = self.data.max_sequence_id_len;
         self.viewport.clamp_offsets();
@@ -326,8 +360,8 @@ impl CoreState {
     fn apply_filter(&mut self, filter: Option<(String, Regex)>) {
         // none = clear filter
         let Some((pattern, regex)) = filter else {
-            self.filter_text.clear();
-            self.filter_regex = None;
+            self.filter.text.clear();
+            self.filter.regex = None;
             self.refresh_viewport();
             return;
         };
@@ -336,11 +370,11 @@ impl CoreState {
         // this is for UX reasons, so users can clear the filter by deleting the pattern as well
         // as using `clear-filter` command
         if pattern.is_empty() {
-            self.filter_text.clear();
-            self.filter_regex = None;
+            self.filter.text.clear();
+            self.filter.regex = None;
         } else {
-            self.filter_text = pattern;
-            self.filter_regex = Some(regex);
+            self.filter.text = pattern;
+            self.filter.regex = Some(regex);
         }
 
         self.refresh_viewport();
@@ -405,7 +439,8 @@ impl CoreState {
             "Built column stats request"
         );
 
-        let visible_sequences: Vec<SequenceRecord> = self.visible_sequences().cloned().collect();
+        let visible_sequences: Vec<SequenceRecord> =
+            self.all_visible_sequences().cloned().collect();
         let sequence_type = self.sequence_type();
 
         ColumnStatsRequest {
@@ -438,30 +473,6 @@ impl CoreState {
         }
     }
 
-    /// Rebuilds the list of sequence IDs when sequence visibility changes
-    ///
-    /// Pinned sequences are always included at the start of the list in pin order
-    /// Hidden sequences are excluded entirely.
-    fn rebuild_display_sequence_ids(&mut self) {
-        self.display_sequence_ids.clear();
-
-        for &sequence_id in &self.pinned_sequence_ids {
-            if let Some(sequence) = self.data.sequences.get(sequence_id)
-                && !sequence.hidden
-            {
-                self.display_sequence_ids.push(sequence_id);
-            }
-        }
-
-        self.display_pinned_count = self.display_sequence_ids.len();
-
-        for sequence in self.data.sequences.iter() {
-            if !sequence.hidden && !self.is_sequence_pinned(sequence.sequence_id) {
-                self.display_sequence_ids.push(sequence.sequence_id);
-            }
-        }
-    }
-
     /// Removes a sequence ID from the pinned list
     fn remove_pin(&mut self, sequence_id: usize) {
         self.pinned_sequence_ids
@@ -486,8 +497,7 @@ mod tests {
             .collect();
 
         let mut core = CoreState::new(StartupState::default());
-        core.data.load_alignments(alignments);
-        core.refresh_viewport();
+        core.handle_alignments_loaded(Ok(alignments));
         core
     }
 
@@ -502,7 +512,7 @@ mod tests {
         });
 
         let visible_ids: Vec<_> = core
-            .visible_sequences()
+            .all_visible_sequences()
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![0, 1]);
@@ -516,12 +526,55 @@ mod tests {
         core.apply_action(CoreAction::PinSequence(0));
 
         let visible_ids: Vec<_> = core
-            .visible_sequences()
+            .all_visible_sequences()
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![2, 0, 1]);
     }
 
+    #[test]
+    fn pinned_sequences_excludes_reference_row() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
+
+        core.pinned_sequence_ids.push(1);
+        core.reference_sequence_id = Some(1);
+        core.refresh_viewport();
+
+        let pinned_ids: Vec<_> = core
+            .pinned_sequences()
+            .map(|sequence| sequence.sequence_id)
+            .collect();
+
+        assert!(pinned_ids.is_empty());
+        assert_eq!(core.visible_pinned_count(), 0);
+    }
+
+    #[test]
+    fn jump_to_sequence_uses_offset() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c", "seq-d"]);
+
+        core.apply_action(CoreAction::PinSequence(2));
+        core.apply_action(CoreAction::PinSequence(0));
+        core.apply_action(CoreAction::JumpToSequence(3));
+
+        assert_eq!(core.viewport.offsets.rows, 1);
+    }
+
+    #[test]
+    fn jump_to_sequence_ignores_hidden() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
+
+        core.apply_action(CoreAction::SetReference(1));
+        assert!(
+            core.all_visible_sequences()
+                .all(|sequence| sequence.sequence_id != 1)
+        );
+
+        core.viewport.offsets.rows = 1;
+        core.apply_action(CoreAction::JumpToSequence(1));
+
+        assert_eq!(core.viewport.offsets.rows, 1);
+    }
     #[test]
     fn setting_reference_removes_existing_pin() {
         let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
@@ -531,7 +584,7 @@ mod tests {
 
         assert!(!core.is_sequence_pinned(1));
         let visible_ids: Vec<_> = core
-            .visible_sequences()
+            .all_visible_sequences()
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![0, 2]);
@@ -549,7 +602,7 @@ mod tests {
         core.apply_action(CoreAction::UnpinSequence(0));
 
         let visible_ids: Vec<_> = core
-            .visible_sequences()
+            .all_visible_sequences()
             .map(|sequence| sequence.sequence_id)
             .collect();
         assert_eq!(visible_ids, vec![1]);

@@ -42,7 +42,7 @@ pub struct ViewportWindow {
 }
 
 impl Viewport {
-    pub fn update_dimensions(
+    pub fn set_dimensions(
         &mut self,
         visible_cols: usize,
         visible_rows: usize,
@@ -51,36 +51,40 @@ impl Viewport {
         self.dims.cols = visible_cols;
         self.dims.rows = visible_rows;
         self.dims.name_width = name_visible_width;
+    }
+
+    pub fn update_dimensions(
+        &mut self,
+        visible_cols: usize,
+        visible_rows: usize,
+        name_visible_width: usize,
+    ) {
+        self.set_dimensions(visible_cols, visible_rows, name_visible_width);
         self.clamp_offsets();
     }
 
     #[must_use]
     pub fn window(&self) -> ViewportWindow {
-        let row_max_offset = self.max_size.rows.saturating_sub(self.dims.rows);
-        let col_max_offset = self.max_size.cols.saturating_sub(self.dims.cols);
-        let name_max_offset = self
-            .max_size
-            .name_width
-            .saturating_sub(self.dims.name_width);
-
-        let row_offset = self.offsets.rows.min(row_max_offset);
-        let col_offset = self.offsets.cols.min(col_max_offset);
-        let name_offset = self.offsets.names.min(name_max_offset);
-
-        let row_end = row_offset
+        let row_end = self
+            .offsets
+            .rows
             .saturating_add(self.dims.rows)
             .min(self.max_size.rows);
-        let col_end = col_offset
+        let col_end = self
+            .offsets
+            .cols
             .saturating_add(self.dims.cols)
             .min(self.max_size.cols);
-        let name_end = name_offset
+        let name_end = self
+            .offsets
+            .names
             .saturating_add(self.dims.name_width)
             .min(self.max_size.name_width);
 
         ViewportWindow {
-            row_range: row_offset..row_end,
-            col_range: col_offset..col_end,
-            name_range: name_offset..name_end,
+            row_range: self.offsets.rows..row_end,
+            col_range: self.offsets.cols..col_end,
+            name_range: self.offsets.names..name_end,
         }
     }
 
@@ -120,7 +124,8 @@ impl Viewport {
     }
 
     pub fn jump_to_sequence(&mut self, sequence_index: usize) {
-        self.offsets.rows = sequence_index.min(self.max_size.rows.saturating_sub(1));
+        let max_scroll = self.max_size.rows.saturating_sub(self.dims.rows);
+        self.offsets.rows = sequence_index.min(max_scroll);
     }
 
     pub fn clamp_offsets(&mut self) {

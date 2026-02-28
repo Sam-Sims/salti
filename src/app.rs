@@ -15,10 +15,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::cli::StartupState;
 use crate::config::keybindings::{self, KeyAction};
+use crate::core::CoreState;
 use crate::core::column_stats::{ColumnStats, ColumnStatsRequest, compute_column_stats};
 use crate::core::command::CoreAction;
 use crate::core::parser::{self, Alignment};
-use crate::core::{CoreState, LoadingState};
 use crate::ui::layout::{AppLayout, FrameLayout};
 use crate::ui::render;
 use crate::ui::selection::selection_point_crosshair;
@@ -169,7 +169,7 @@ impl App {
         self.app_layout = AppLayout::new(self.frame_layout.content_area);
 
         let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
-        let visible_height = self.app_layout.alignment_pane.height.saturating_sub(4) as usize;
+        let visible_height = self.app_layout.alignment_pane_sequence_rows.height as usize;
         let number_width = self.core.data.sequences.len().max(1).to_string().len();
         let number_prefix_width = number_width + 1;
         let name_visible_width = self
@@ -228,7 +228,7 @@ impl App {
             previous.handle.abort();
         }
 
-        self.core.data.file_path = Some(input.clone());
+        self.core.prepare_load(input.clone());
 
         let cancel = CancellationToken::new();
         debug!(input = %input, "Spawning new load job for input");
@@ -245,9 +245,9 @@ impl App {
     /// If no file path is configured, loading is marked as [`LoadingState::Idle`] so the UI can
     /// present an idle status. If a path exists, a load job is spawned immediately.
     fn try_file_load(&mut self) {
-        let Some(input) = self.core.data.file_path.clone() else {
+        let Some(input) = self.core.input_path.clone() else {
             info!("No startup file provided; entering idle loading state");
-            self.core.loading_state = LoadingState::Idle;
+            self.core.mark_idle();
             return;
         };
         debug!(input = %input, "Loading startup alignment");
