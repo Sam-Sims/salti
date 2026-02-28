@@ -20,9 +20,9 @@ fn build_bottom_status_bar(
     let mut parts = Vec::new();
 
     // optional filter text building
-    if !core.filter_text.is_empty() {
-        let visible_count = core.display_sequence_ids.len();
-        let filter_text = &core.filter_text;
+    if !core.filter.text.is_empty() {
+        let visible_count = core.row_visibility.visible_count();
+        let filter_text = &core.filter.text;
         parts.push(
             format!("Filtered to {visible_count} alignments with filter: {filter_text}")
                 .set_style(theme.warning),

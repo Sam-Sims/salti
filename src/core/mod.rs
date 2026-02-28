@@ -8,7 +8,7 @@ pub mod search;
 pub mod viewport;
 pub mod visibility;
 
-pub use core_state::{ColumnStatsCache, CoreState, FilterState, LoadingState};
+pub use core_state::{CoreState, FilterState, LoadingState};
 pub use data::AlignmentData;
 pub use viewport::Viewport;
 

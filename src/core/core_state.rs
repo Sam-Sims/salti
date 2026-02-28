@@ -31,11 +31,11 @@ impl std::fmt::Display for LoadingState {
     }
 }
 
-/// Represents the visible subset of the loaded sequences for display in the UI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VisibleSequence {
-    pub sequence_id: usize,
-    pub sequence_name: Arc<str>,
+/// Filter state
+#[derive(Debug, Default)]
+pub struct FilterState {
+    pub text: String,
+    pub regex: Option<Regex>,
 }
 
 /// The main application state
@@ -43,8 +43,7 @@ pub struct VisibleSequence {
 pub struct CoreState {
     pub data: AlignmentData,
     pub viewport: Viewport,
-    pub filter_text: String,
-    pub filter_regex: Option<Regex>,
+    pub filter: FilterState,
     pub loading_state: LoadingState,
     pub input_path: Option<String>,
     pub initial_position: usize,
@@ -71,8 +70,7 @@ impl CoreState {
         Self {
             data,
             viewport: Viewport::default(),
-            filter_text: String::new(),
-            filter_regex: None,
+            filter: FilterState::default(),
             loading_state: LoadingState::default(),
             input_path,
             initial_position: startup.initial_position,
@@ -331,8 +329,8 @@ impl CoreState {
     fn apply_filter(&mut self, filter: Option<(String, Regex)>) {
         // none = clear filter
         let Some((pattern, regex)) = filter else {
-            self.filter_text.clear();
-            self.filter_regex = None;
+            self.filter.text.clear();
+            self.filter.regex = None;
             self.refresh_viewport();
             return;
         };
@@ -341,11 +339,11 @@ impl CoreState {
         // this is for UX reasons, so users can clear the filter by deleting the pattern as well
         // as using `clear-filter` command
         if pattern.is_empty() {
-            self.filter_text.clear();
-            self.filter_regex = None;
+            self.filter.text.clear();
+            self.filter.regex = None;
         } else {
-            self.filter_text = pattern;
-            self.filter_regex = Some(regex);
+            self.filter.text = pattern;
+            self.filter.regex = Some(regex);
         }
 
         self.refresh_viewport();
