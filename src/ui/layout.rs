@@ -4,6 +4,8 @@ use ratatui::macros::{horizontal, vertical};
 /// fixed height (rows) for the bottom consensus pane.
 /// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
+/// fixed height (rows) for the alignment ruler above sequence rows.
+pub const RULER_HEIGHT_ROWS: u16 = 2;
 /// width percentage for the left sequence ID pane (used in alignment and consensus panes).
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
@@ -62,7 +64,7 @@ impl AppLayout {
         );
         let [_, sequence_rows_area] = ratatui::widgets::Block::bordered()
             .inner(alignment_pane_area)
-            .layout(&vertical![==2, *=1]);
+            .layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
 
         Self {
             sequence_id_pane: sequence_id_pane_area,

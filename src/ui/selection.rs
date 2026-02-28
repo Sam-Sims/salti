@@ -23,7 +23,7 @@ pub fn selection_point_crosshair(
     let sequence_id = visible_rows.get(row_index).copied().flatten()?;
     let absolute_col = core.viewport.window().col_range.start + col_index;
     // Limits selection in short alignments where the pane can extend beyond sequence length.
-    (absolute_col < core.data().sequence_length).then_some((sequence_id, absolute_col))
+    (absolute_col < core.data.sequence_length).then_some((sequence_id, absolute_col))
 }
 
 /// Returns the (min, max) display-index bounds of a selection using the

@@ -1,5 +1,6 @@
 use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, LoadingState};
+use crate::ui::layout::RULER_HEIGHT_ROWS;
 use crate::ui::UiState;
 use crate::ui::rows::{format_row_spans, select_row_render_mode};
 use ratatui::Frame;
@@ -63,7 +64,7 @@ fn render_sequence_rows(
             ));
             continue;
         };
-        let sequence = &core.data().sequences[sequence_id];
+        let sequence = &core.data.sequences[sequence_id];
         let spans = format_row_spans(
             sequence.alignment.sequence.as_ref(),
             &horizontal_range,
@@ -226,7 +227,7 @@ pub fn render_alignment_pane(
         return;
     }
 
-    let [ruler_area, sequence_content_area] = inner_area.layout(&vertical![==2, *=1]);
+    let [ruler_area, sequence_content_area] = inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
 
     render_ruler(core, window, ruler_area, theme, f);
     render_sequence_rows(
