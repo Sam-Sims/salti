@@ -27,14 +27,15 @@ pub struct CommandPaletteState {
     pub(super) selectable_sequences: Vec<VisibleSequence>,
     pub(super) pinned_sequences: Vec<VisibleSequence>,
     pub(super) sequence_type: SequenceType,
+    pub(super) visible_columns: Vec<usize>,
 }
-
 impl CommandPaletteState {
     #[must_use]
     pub fn new(
         selectable_sequences: Vec<VisibleSequence>,
         pinned_sequences: Vec<VisibleSequence>,
         sequence_type: SequenceType,
+        visible_columns: Vec<usize>,
     ) -> Self {
         let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
         command_list.set_items(display_command_names());
@@ -49,6 +50,7 @@ impl CommandPaletteState {
             selectable_sequences,
             pinned_sequences,
             sequence_type,
+            visible_columns,
         }
     }
 

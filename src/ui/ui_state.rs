@@ -116,7 +116,7 @@ impl UiState {
         window: &ViewportWindow,
         row_capacity: usize,
     ) {
-        let row_ids = core.row_visibility.visible_to_absolute();
+        let row_ids = &core.row_visibility.visible_to_absolute;
         let pinned_count = core.visible_pinned_count();
         let has_pins = pinned_count > 0 && row_capacity > 0;
         let pinned_rows = if has_pins {
@@ -172,6 +172,7 @@ impl UiState {
                     selectable_sequences,
                     pinned_sequences,
                     core.sequence_type(),
+                    core.column_visibility.visible_to_absolute.clone(),
                 ));
             }
             UiAction::CloseCommandPalette => {

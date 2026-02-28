@@ -70,8 +70,17 @@ pub(super) fn run_toggle_translation(
     })
 }
 
+fn next_visible_column_index(visible_columns: &[usize], absolute_target: usize) -> Option<usize> {
+    match visible_columns.binary_search(&absolute_target) {
+        Ok(visible_index) => Some(visible_index),
+        Err(next_visible_index) => {
+            (next_visible_index < visible_columns.len()).then_some(next_visible_index)
+        }
+    }
+}
+
 pub(super) fn run_jump_position(
-    _: &CommandPaletteState,
+    state: &CommandPaletteState,
     arguments: &str,
 ) -> Result<Action, CommandError> {
     run_command("jump-position", arguments, || {
@@ -82,10 +91,21 @@ pub(super) fn run_jump_position(
                 "Invalid argument: expected a positive integer",
             ));
         };
+        if position == 0 {
+            return Err(CommandError::new(
+                "Invalid argument: expected a positive integer",
+            ));
+        }
 
-        Ok(Action::Core(CoreAction::JumpToPosition(
-            position.saturating_sub(1),
-        )))
+        let absolute_target = position - 1;
+        let Some(visible_col) = next_visible_column_index(&state.visible_columns, absolute_target)
+        else {
+            return Err(CommandError::new(
+                "No visible column at or after the requested position",
+            ));
+        };
+
+        Ok(Action::Core(CoreAction::JumpToPosition(visible_col)))
     })
 }
 
@@ -298,4 +318,52 @@ pub(super) fn run_quit(_: &CommandPaletteState, arguments: &str) -> Result<Actio
         ensure_no_argument(arguments)?;
         Ok(Action::Quit)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn palette_state_with_columns(visible_columns: Vec<usize>) -> CommandPaletteState {
+        CommandPaletteState::new(Vec::new(), Vec::new(), SequenceType::Dna, visible_columns)
+    }
+
+    #[test]
+    fn jump_position_uses_next_visible_column_when_target_hidden() {
+        let state = palette_state_with_columns(vec![0, 3, 4]);
+
+        let action = run_jump_position(&state, "2")
+            .expect("jump-position should resolve to the next visible column");
+
+        assert!(matches!(
+            action,
+            Action::Core(CoreAction::JumpToPosition(1))
+        ));
+    }
+
+    #[test]
+    fn jump_position_errors_when_target_is_after_last_visible_column() {
+        let state = palette_state_with_columns(vec![0, 3, 4]);
+
+        let error = run_jump_position(&state, "10")
+            .expect_err("jump-position should reject targets after the last visible column");
+
+        assert_eq!(
+            error.message,
+            "No visible column at or after the requested position"
+        );
+    }
+
+    #[test]
+    fn jump_position_rejects_zero() {
+        let state = palette_state_with_columns(vec![0, 1, 2]);
+
+        let error =
+            run_jump_position(&state, "0").expect_err("zero should be rejected as invalid input");
+
+        assert_eq!(
+            error.message,
+            "Invalid argument: expected a positive integer"
+        );
+    }
 }

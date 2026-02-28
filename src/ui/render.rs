@@ -72,6 +72,7 @@ fn shader(
 fn render_mouse_selection(
     f: &mut Frame,
     layout: &AppLayout,
+    core: &CoreState,
     window: &ViewportWindow,
     ui: &UiState,
     row_ids: &[Option<usize>],
@@ -126,7 +127,8 @@ fn render_mouse_selection(
         }
     }
 
-    if let Some(visible_col_range) = selection_visible_col_range(selection, &window.col_range) {
+    if let Some(visible_col_range) = selection_visible_col_range(selection, core, &window.col_range)
+    {
         let start_x =
             sequence_rows_area.x + (visible_col_range.start - window.col_range.start) as u16;
         let end_x_exclusive =
@@ -165,16 +167,15 @@ pub fn render(
     // render alignment pane (top-right pane).
     render_alignment_pane(f, layout, core, &window, ui, row_ids);
     // render consensus pane (bottom pane).
-    render_consensus_pane(f, layout, core, &window, ui);
+    render_consensus_pane(f, layout, core, ui);
     // mouse selection shader (does nothing if no selection)
-    render_mouse_selection(f, layout, &window, ui, row_ids);
+    render_mouse_selection(f, layout, core, &window, ui, row_ids);
     // status bars on transparent lines
     render_frame(
         f,
         frame_layout.top_status_area,
         frame_layout.bottom_status_area,
         core,
-        &window,
         ui,
     );
     // overlays (command palette and input line)

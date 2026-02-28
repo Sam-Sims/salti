@@ -11,5 +11,3 @@ pub mod visibility;
 pub use core_state::{CoreState, FilterState, LoadingState};
 pub use data::AlignmentData;
 pub use viewport::Viewport;
-
-pub(crate) use column_stats::COLUMN_STATS_BUFFER_COLS;

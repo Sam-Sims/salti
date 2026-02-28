@@ -1,6 +1,5 @@
 use crate::core::CoreState;
 use crate::core::parser::SequenceType;
-use crate::core::viewport::ViewportWindow;
 use crate::ui::UiState;
 use crate::ui::rows::{RowRenderMode, format_row_spans};
 use ratatui::Frame;
@@ -19,13 +18,7 @@ fn conservation_to_spark(value: f32) -> char {
     CONSERVATION_SPARK_CHARS[idx]
 }
 
-fn render_consensus_alignment_pane(
-    area: Rect,
-    core: &CoreState,
-    window: &ViewportWindow,
-    ui: &UiState,
-    f: &mut Frame,
-) {
+fn render_consensus_alignment_pane(area: Rect, core: &CoreState, ui: &UiState, f: &mut Frame) {
     let theme = &ui.theme_styles;
     let block = Block::bordered()
         .border_style(theme.border)
@@ -36,7 +29,6 @@ fn render_consensus_alignment_pane(
 
     let consensus = &core.consensus;
     let conservation = &core.conservation;
-    let horizontal_range = window.col_range.clone();
     let resolved_sequence_type = core.sequence_type();
     let translate_nucleotide_to_amino_acid =
         core.translate_nucleotide_to_amino_acid && resolved_sequence_type == SequenceType::Dna;
@@ -52,10 +44,11 @@ fn render_consensus_alignment_pane(
         }
     };
 
+    let visible_columns_in_window = core.visible_columns_in_window();
     let consensus_line = if let Some(consensus_data) = consensus {
         let spans = format_row_spans(
             consensus_data,
-            &horizontal_range,
+            visible_columns_in_window,
             &ui.theme.sequence,
             render_mode,
         );
@@ -69,7 +62,7 @@ fn render_consensus_alignment_pane(
         |alignment| {
             let spans = format_row_spans(
                 alignment.sequence.as_ref(),
-                &horizontal_range,
+                visible_columns_in_window,
                 &ui.theme.sequence,
                 render_mode,
             );
@@ -81,10 +74,11 @@ fn render_consensus_alignment_pane(
         vec![reference_line, consensus_line]
     } else {
         let conservation_line = if let Some(conservation_data) = conservation {
-            let sparkline: String = (horizontal_range.start..horizontal_range.end)
-                .map(|position| {
+            let sparkline: String = visible_columns_in_window
+                .iter()
+                .map(|&absolute_col| {
                     conservation_data
-                        .get(position)
+                        .get(absolute_col)
                         .copied()
                         .filter(|value| value.is_finite())
                         .map_or(' ', conservation_to_spark)
@@ -133,9 +127,8 @@ pub fn render_consensus_pane(
     f: &mut Frame,
     layout: &crate::ui::layout::AppLayout,
     core: &CoreState,
-    window: &ViewportWindow,
     ui: &UiState,
 ) {
     render_consensus_sequence_id_pane(layout.consensus_sequence_id_pane, core, ui, f);
-    render_consensus_alignment_pane(layout.consensus_alignment_pane, core, window, ui, f);
+    render_consensus_alignment_pane(layout.consensus_alignment_pane, core, ui, f);
 }

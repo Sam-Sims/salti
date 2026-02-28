@@ -88,17 +88,6 @@ impl CoreState {
         }
     }
 
-    /// Marks the core as loading the given input
-    pub fn prepare_load(&mut self, input: String) {
-        self.input_path = Some(input);
-        self.loading_state = LoadingState::Loading;
-    }
-
-    /// Sets core as idle
-    pub fn mark_idle(&mut self) {
-        self.loading_state = LoadingState::Idle;
-    }
-
     /// Applies a single [`CoreAction`] command, where a core action is something that manipulates
     /// the application state.
     pub fn apply_action(&mut self, action: CoreAction) {
@@ -124,7 +113,7 @@ impl CoreState {
             CoreAction::JumpToSequence(sequence_id) => {
                 if let Some(visible_row) = self
                     .row_visibility
-                    .visible_to_absolute()
+                    .visible_to_absolute
                     .iter()
                     .position(|&visible_sequence_id| visible_sequence_id == sequence_id)
                 {
@@ -132,8 +121,10 @@ impl CoreState {
                     self.viewport.jump_to_sequence(scroll_target);
                 }
             }
-            CoreAction::JumpToPosition(position) => {
-                self.viewport.jump_to_position(position);
+            CoreAction::JumpToPosition(visible_col) => {
+                if visible_col < self.column_visibility.visible_count() {
+                    self.viewport.jump_to_position(visible_col);
+                }
             }
             CoreAction::ClearReference => {
                 self.reference_sequence_id = None;
@@ -194,6 +185,17 @@ impl CoreState {
         }
     }
 
+    /// Sets the core as loading the given input
+    pub fn prepare_load(&mut self, input: String) {
+        self.input_path = Some(input);
+        self.loading_state = LoadingState::Loading;
+    }
+
+    /// Sets core as idle
+    pub fn mark_idle(&mut self) {
+        self.loading_state = LoadingState::Idle;
+    }
+
     /// Handles completion of a pending alignment load.
     pub fn handle_alignments_loaded(&mut self, result: Result<Vec<Alignment>, String>) {
         match result {
@@ -249,13 +251,19 @@ impl CoreState {
         self.refresh_viewport();
     }
 
+    /// Returns absolute column indices for currently visible columns in the viewport window.
+    pub fn visible_columns_in_window(&self) -> &[usize] {
+        let window = self.viewport.window();
+        &self.column_visibility.visible_to_absolute[window.col_range]
+    }
+
     /// Yields all visible sequence records in display order.
     ///
     /// This means visible pinned sequences first in pin order, followed by visible
     /// unpinned sequences in same order as the original alignment.
     pub fn all_visible_sequences(&self) -> impl Iterator<Item = &SequenceRecord> {
         self.row_visibility
-            .visible_to_absolute()
+            .visible_to_absolute
             .iter()
             .map(|&sequence_id| &self.data.sequences[sequence_id])
     }
@@ -312,7 +320,6 @@ impl CoreState {
         });
     }
 
-
     /// Rebuilds row visibility in display order.
     ///
     /// Pinned rows are first in pin order, then visible remaining rows.
@@ -335,7 +342,13 @@ impl CoreState {
     fn refresh_viewport(&mut self) {
         self.apply_hide_flags();
         self.rebuild_row_visibility();
+
+        let previous_column_projection = self.column_visibility.visible_to_absolute.clone();
         self.column_visibility.rebuild_projection();
+        if self.column_visibility.visible_to_absolute != previous_column_projection.as_slice() {
+            self.column_stats_window = None;
+        }
+
         self.viewport.max_size.rows = self.row_visibility.visible_count();
         self.viewport.max_size.cols = self.column_visibility.visible_count();
         self.viewport.max_size.name_width = self.data.max_sequence_id_len;
@@ -373,7 +386,7 @@ impl CoreState {
         let Some((current_start, current_end)) = self.column_stats_window else {
             return true;
         };
-        let sequence_length = self.data.sequence_length;
+        let visible_column_count = self.column_visibility.visible_count();
         let margin = COLUMN_STATS_RECALC_MARGIN_COLS;
         let viewport_range = self.viewport.window().col_range;
 
@@ -381,7 +394,8 @@ impl CoreState {
             return true;
         }
 
-        current_end < sequence_length && viewport_range.end > current_end.saturating_sub(margin)
+        current_end < visible_column_count
+            && viewport_range.end > current_end.saturating_sub(margin)
     }
 
     /// Clears cached consensus and conservation stats.
@@ -404,24 +418,33 @@ impl CoreState {
     /// Returns a request with empty positions if all positions are already
     /// cached.
     pub fn build_column_stats_request(&mut self) -> ColumnStatsRequest {
-        let sequence_length = self.data.sequence_length;
+        let visible_column_count = self.column_visibility.visible_count();
         let viewport_range = self.viewport.window().col_range;
         let window_start = viewport_range
             .start
             .saturating_sub(COLUMN_STATS_BUFFER_COLS);
-        let window_end = (viewport_range.end + COLUMN_STATS_BUFFER_COLS).min(sequence_length);
+        let window_end = viewport_range
+            .end
+            .saturating_add(COLUMN_STATS_BUFFER_COLS)
+            .min(visible_column_count);
 
         self.column_stats_window = Some((window_start, window_end));
 
         let positions = (window_start..window_end)
-            .filter(|&position| self.position_needs_calculation(position))
+            .filter_map(|visible_col| {
+                self.column_visibility
+                    .visible_to_absolute
+                    .get(visible_col)
+                    .copied()
+            })
+            .filter(|&absolute_col| self.position_needs_calculation(absolute_col))
             .collect::<Vec<_>>();
 
         debug!(
             position_count = positions.len(),
             method = ?self.consensus_method,
             sequence_type = ?self.sequence_type(),
-            column_stats_window = ?self.column_stats_window,
+            visible_column_stats_window = ?self.column_stats_window,
             "Built column stats request"
         );
 
@@ -562,6 +585,32 @@ mod tests {
         assert_eq!(core.viewport.offsets.rows, 1);
     }
     #[test]
+    fn jump_to_position_uses_visible_index() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b"]);
+        core.update_viewport_dimensions(1, 2, 10);
+        core.column_visibility
+            .set_hidden(|absolute_index| absolute_index == 1);
+        core.refresh_viewport();
+
+        core.apply_action(CoreAction::JumpToPosition(1));
+
+        assert_eq!(core.viewport.offsets.cols, 1);
+    }
+
+    #[test]
+    fn jump_to_position_ignores_out_of_range_visible_index() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b"]);
+        core.update_viewport_dimensions(1, 2, 10);
+        core.column_visibility
+            .set_hidden(|absolute_index| absolute_index == 1);
+        core.refresh_viewport();
+        core.viewport.offsets.cols = 1;
+
+        core.apply_action(CoreAction::JumpToPosition(3));
+
+        assert_eq!(core.viewport.offsets.cols, 1);
+    }
+    #[test]
     fn setting_reference_removes_existing_pin() {
         let mut core = test_core_with_ids(&["seq-a", "seq-b", "seq-c"]);
 
@@ -603,10 +652,12 @@ mod tests {
             core.data.sequence_length
         );
         assert_eq!(
-            core.column_visibility.visible_to_absolute(),
+            core.column_visibility.visible_to_absolute,
             expected_visible_to_absolute.as_slice()
         );
-        assert!((0..core.data.sequence_length).all(|index| !core.column_visibility.is_hidden(index)));
+        assert!(
+            (0..core.data.sequence_length).all(|index| !core.column_visibility.is_hidden(index))
+        );
     }
 
     #[test]
@@ -617,7 +668,30 @@ mod tests {
             .set_hidden(|absolute_index| absolute_index == 1 || absolute_index == 3);
         core.refresh_viewport();
 
-        assert_eq!(core.column_visibility.visible_to_absolute(), &[0, 2]);
+        assert_eq!(core.column_visibility.visible_to_absolute, &[0, 2]);
         assert_eq!(core.viewport.max_size.cols, 2);
+    }
+    #[test]
+    fn refresh_viewport_invalidates_cols() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b"]);
+        core.column_stats_window = Some((0, core.column_visibility.visible_count()));
+        core.column_visibility
+            .set_hidden(|absolute_index| absolute_index == 1);
+
+        core.refresh_viewport();
+
+        assert_eq!(core.column_stats_window, None);
+    }
+
+    #[test]
+    fn viewport_crossed_margin_uses_visible() {
+        let mut core = test_core_with_ids(&["seq-a", "seq-b"]);
+        core.update_viewport_dimensions(2, 2, 10);
+        core.column_visibility
+            .set_hidden(|absolute_index| absolute_index == 1 || absolute_index == 3);
+        core.refresh_viewport();
+        core.column_stats_window = Some((0, core.column_visibility.visible_count()));
+
+        assert!(!core.viewport_crossed_margin());
     }
 }

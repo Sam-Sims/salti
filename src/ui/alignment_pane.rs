@@ -45,7 +45,6 @@ fn render_idle_alignment_message(ui: &UiState, area: Rect, f: &mut Frame) {
 #[allow(clippy::too_many_arguments)]
 fn render_sequence_rows(
     core: &CoreState,
-    window: &ViewportWindow,
     ui: &UiState,
     area: Rect,
     theme: &crate::config::theme::ThemeStyles,
@@ -53,10 +52,10 @@ fn render_sequence_rows(
     consensus: Option<&[u8]>,
     row_ids: &[Option<usize>],
 ) {
-    let horizontal_range = window.col_range.clone();
     let mut alignment_lines = Vec::with_capacity(row_ids.len());
     let render_mode = select_row_render_mode(core, consensus);
 
+    let visible_columns_in_window = core.visible_columns_in_window();
     for row_id in row_ids.iter().copied() {
         let Some(sequence_id) = row_id else {
             alignment_lines.push(Line::from(
@@ -67,7 +66,7 @@ fn render_sequence_rows(
         let sequence = &core.data.sequences[sequence_id];
         let spans = format_row_spans(
             sequence.alignment.sequence.as_ref(),
-            &horizontal_range,
+            visible_columns_in_window,
             &ui.theme.sequence,
             render_mode,
         );
@@ -151,22 +150,16 @@ fn add_number_to_ruler(
     }
 }
 fn build_ruler(
-    core: &CoreState,
-    window: &ViewportWindow,
+    visible_columns_in_window: &[usize],
     theme: &crate::config::theme::ThemeStyles,
 ) -> (Line<'static>, Line<'static>) {
-    let start_pos = window.col_range.start;
-    let width = window.col_range.end.saturating_sub(window.col_range.start);
-    let total_cols = core.viewport.max_size.cols;
+    let width = visible_columns_in_window.len();
 
     let mut number_line = vec![Span::raw(" "); width];
     let mut marker_line = vec![Span::raw(" "); width];
 
     for (i, marker_span) in marker_line.iter_mut().enumerate() {
-        let display_pos = start_pos + i + 1;
-        if display_pos > total_cols {
-            break;
-        }
+        let display_pos = visible_columns_in_window[i] + 1;
 
         if display_pos == 1 || display_pos.is_multiple_of(5) {
             let is_major_tick = display_pos.is_multiple_of(10);
@@ -188,12 +181,11 @@ fn build_ruler(
 
 fn render_ruler(
     core: &CoreState,
-    window: &ViewportWindow,
     area: Rect,
     theme: &crate::config::theme::ThemeStyles,
     f: &mut Frame,
 ) {
-    let (number_line, marker_line) = build_ruler(core, window, theme);
+    let (number_line, marker_line) = build_ruler(core.visible_columns_in_window(), theme);
     let ruler_paragraph = Paragraph::new(vec![number_line, marker_line]).style(theme.base_block);
     f.render_widget(ruler_paragraph, area);
 }
@@ -230,10 +222,9 @@ pub fn render_alignment_pane(
     let [ruler_area, sequence_content_area] =
         inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
 
-    render_ruler(core, window, ruler_area, theme, f);
+    render_ruler(core, ruler_area, theme, f);
     render_sequence_rows(
         core,
-        window,
         ui,
         sequence_content_area,
         theme,

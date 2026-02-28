@@ -23,7 +23,7 @@ use super::completers;
 pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
     PaletteCommand::Typable(TypableCommand {
         name: "jump-position",
-        help_text: "Jump to a position in the alignment (1 based).",
+        help_text: "Jump to an alignment position (1 based), skipping forward to the next visible column if needed.",
         aliases: &["jp"],
         completer: None,
         static_candidates: &[],

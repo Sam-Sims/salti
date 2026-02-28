@@ -1,11 +1,10 @@
 use crate::config::theme::SequenceTheme;
+use crate::core::CoreState;
 use crate::core::command::DiffMode;
 use crate::core::lookups::{BYTE_TO_CHAR, translate_codon};
 use crate::core::parser::SequenceType;
-use crate::core::{COLUMN_STATS_BUFFER_COLS, CoreState};
 use ratatui::style::{Styled, Stylize};
 use ratatui::text::Span;
-use std::ops::Range;
 
 #[derive(Debug, Clone, Copy)]
 pub enum RowRenderMode<'a> {
@@ -20,17 +19,30 @@ pub enum RowRenderMode<'a> {
 }
 
 #[inline]
+fn span_for_sequence_byte(
+    sequence_byte: u8,
+    sequence_theme: &SequenceTheme,
+    sequence_type: SequenceType,
+) -> Span<'static> {
+    let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
+    let style = sequence_theme.style_for(sequence_byte, sequence_type);
+    Span::styled(character, style)
+}
+
+#[inline]
 fn format_sequence_bytes(
     sequence: &[u8],
+    absolute_columns: &[usize],
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
 ) -> Vec<Span<'static>> {
-    sequence
+    absolute_columns
         .iter()
-        .map(|&sequence_byte| {
-            let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
-            let style = sequence_theme.style_for(sequence_byte, sequence_type);
-            Span::styled(character, style)
+        .map(|&absolute_col| {
+            sequence.get(absolute_col).copied().map_or_else(
+                || Span::raw(" "),
+                |byte| span_for_sequence_byte(byte, sequence_theme, sequence_type),
+            )
         })
         .collect()
 }
@@ -39,80 +51,56 @@ fn format_sequence_bytes(
 fn format_sequence_bytes_with_reference(
     sequence: &[u8],
     reference: &[u8],
+    absolute_columns: &[usize],
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
 ) -> Vec<Span<'static>> {
-    let mut spans = Vec::with_capacity(sequence.len());
+    let mut spans = Vec::with_capacity(absolute_columns.len());
 
-    for (&sequence_byte, &reference_byte) in sequence.iter().zip(reference.iter()) {
-        if reference_byte == sequence_byte {
+    for &absolute_col in absolute_columns {
+        let Some(sequence_byte) = sequence.get(absolute_col).copied() else {
+            spans.push(Span::raw(" "));
+            continue;
+        };
+
+        if reference.get(absolute_col).copied() == Some(sequence_byte) {
             spans.push(".".fg(sequence_theme.diff_match));
         } else {
-            let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
-            let style = sequence_theme.style_for(sequence_byte, sequence_type);
-            spans.push(character.set_style(style));
+            spans.push(span_for_sequence_byte(
+                sequence_byte,
+                sequence_theme,
+                sequence_type,
+            ));
         }
     }
 
     spans
 }
 
-fn build_translated_state(
-    sequence: &[u8],
-    frame: u8,
-    window: &Range<usize>,
-    buffer: usize,
-) -> (Vec<Option<u8>>, Vec<bool>) {
-    if window.end <= window.start {
-        return (Vec::new(), Vec::new());
-    }
-
+#[inline]
+fn translated_column(sequence: &[u8], frame: u8, absolute_col: usize) -> Option<(u8, bool)> {
     let frame = usize::from(frame % 3);
-    let sequence_length = sequence.len();
-    let window_start = window.start;
-    let window_end = window.end.min(sequence_length);
-    let window_len = window_end.saturating_sub(window_start);
-    let mut amino_acid_for_position = vec![None; window_len];
-    let mut is_centre = vec![false; window_len];
-
-    let translation_start = window_start.saturating_sub(buffer);
-    let translation_end = (window_end + buffer).min(sequence_length);
-
-    let mut codon_start =
-        frame.max(translation_start - ((translation_start.saturating_sub(frame)) % 3));
-
-    while codon_start < translation_end {
-        let amino_acid = translate_codon(sequence, codon_start);
-        for position in codon_start..(codon_start + 3) {
-            if position >= window_start && position < window_end {
-                let index = position - window_start;
-                amino_acid_for_position[index] = Some(amino_acid);
-                if position == codon_start + 1 {
-                    is_centre[index] = true;
-                }
-            }
-        }
-        codon_start += 3;
+    if absolute_col < frame {
+        return None;
     }
 
-    (amino_acid_for_position, is_centre)
+    let phase = (absolute_col - frame) % 3;
+    let codon_start = absolute_col - phase;
+    let amino_acid = translate_codon(sequence, codon_start);
+    Some((amino_acid, phase == 1))
 }
 
 fn build_translated_spans(
     sequence: &[u8],
     frame: u8,
-    window: &Range<usize>,
-    buffer: usize,
+    absolute_columns: &[usize],
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
-    let (amino_acid_for_position, is_centre) =
-        build_translated_state(sequence, frame, window, buffer);
-
-    amino_acid_for_position
-        .into_iter()
-        .zip(is_centre)
-        .map(|(amino_acid, is_centre)| {
-            let Some(amino_acid) = amino_acid else {
+    absolute_columns
+        .iter()
+        .map(|&absolute_col| {
+            let Some((amino_acid, is_centre)) = translated_column(sequence, frame, absolute_col)
+            else {
                 return Span::raw(" ");
             };
             let style = sequence_theme.style_for(amino_acid, SequenceType::AminoAcid);
@@ -126,25 +114,19 @@ fn render_translated_row_with_diff(
     sequence: &[u8],
     diff_against: &[u8],
     frame: u8,
-    window: &Range<usize>,
-    buffer: usize,
+    absolute_columns: &[usize],
     sequence_theme: &SequenceTheme,
 ) -> Vec<Span<'static>> {
-    let (amino_acid_for_position, is_centre) =
-        build_translated_state(sequence, frame, window, buffer);
-    let (diff_amino_acid_for_position, _) =
-        build_translated_state(diff_against, frame, window, buffer);
-
-    amino_acid_for_position
-        .into_iter()
-        .zip(diff_amino_acid_for_position)
-        .zip(is_centre)
-        .map(|((amino_acid, diff_amino_acid), is_centre)| {
-            let Some(amino_acid) = amino_acid else {
+    absolute_columns
+        .iter()
+        .map(|&absolute_col| {
+            let Some((amino_acid, is_centre)) = translated_column(sequence, frame, absolute_col)
+            else {
                 return Span::raw(" ");
             };
 
-            let matches = diff_amino_acid.is_some_and(|diff| diff == amino_acid);
+            let matches = translated_column(diff_against, frame, absolute_col)
+                .is_some_and(|(diff_amino_acid, _)| diff_amino_acid == amino_acid);
 
             if is_centre {
                 if matches {
@@ -170,31 +152,24 @@ fn render_raw_row(
     diff_against: Option<&[u8]>,
     sequence_theme: &SequenceTheme,
     sequence_type: SequenceType,
-    window: &Range<usize>,
+    absolute_columns: &[usize],
 ) -> Vec<Span<'static>> {
-    let end = window.end.min(sequence.len());
-    let sequence_slice = &sequence[window.start..end];
-
-    if let Some(reference) = diff_against
-        && window.start < reference.len()
-    {
-        let reference_end = window.end.min(reference.len());
-        let reference_slice = &reference[window.start..reference_end];
-        return format_sequence_bytes_with_reference(
-            sequence_slice,
-            reference_slice,
+    match diff_against {
+        Some(reference) => format_sequence_bytes_with_reference(
+            sequence,
+            reference,
+            absolute_columns,
             sequence_theme,
             sequence_type,
-        );
+        ),
+        None => format_sequence_bytes(sequence, absolute_columns, sequence_theme, sequence_type),
     }
-
-    format_sequence_bytes(sequence_slice, sequence_theme, sequence_type)
 }
 
 #[must_use]
 pub fn format_row_spans(
     sequence: &[u8],
-    window: &Range<usize>,
+    absolute_columns: &[usize],
     sequence_theme: &SequenceTheme,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
@@ -207,7 +182,7 @@ pub fn format_row_spans(
             diff_against,
             sequence_theme,
             sequence_type,
-            window,
+            absolute_columns,
         ),
         RowRenderMode::Translate {
             frame,
@@ -217,17 +192,10 @@ pub fn format_row_spans(
                 sequence,
                 diff_against,
                 frame,
-                window,
-                COLUMN_STATS_BUFFER_COLS,
+                absolute_columns,
                 sequence_theme,
             ),
-            None => build_translated_spans(
-                sequence,
-                frame,
-                window,
-                COLUMN_STATS_BUFFER_COLS,
-                sequence_theme,
-            ),
+            None => build_translated_spans(sequence, frame, absolute_columns, sequence_theme),
         },
     }
 }

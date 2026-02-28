@@ -214,7 +214,7 @@ impl App {
             mouse,
             self.frame_layout.overlay_area,
             &window.col_range,
-            self.core.data.sequence_length,
+            &self.core.column_visibility.visible_to_absolute,
         ) {
             self.apply_actions([Action::Core(action)]);
         }
@@ -335,17 +335,22 @@ impl App {
             KeyAction::ToggleMinimap => Action::Ui(UiAction::ToggleMinimap),
             KeyAction::ToggleTranslationView => Action::Core(CoreAction::ToggleTranslationView),
             KeyAction::JumpToStart => {
-                if self.core.data.sequence_length > 0 {
-                    Action::Core(CoreAction::JumpToPosition(0))
-                } else {
+                if self.core.column_visibility.visible_to_absolute.is_empty() {
                     return;
                 }
+                Action::Core(CoreAction::JumpToPosition(0))
             }
             KeyAction::JumpToEnd => {
-                let Some(position) = self.core.data.sequence_length.checked_sub(1) else {
+                let Some(last_visible_col) = self
+                    .core
+                    .column_visibility
+                    .visible_to_absolute
+                    .len()
+                    .checked_sub(1)
+                else {
                     return;
                 };
-                Action::Core(CoreAction::JumpToPosition(position))
+                Action::Core(CoreAction::JumpToPosition(last_visible_col))
             }
             KeyAction::ScrollDown => Action::Core(CoreAction::ScrollDown {
                 amount: SCROLL_STEP,
@@ -411,6 +416,7 @@ impl App {
                             | CoreAction::SetReference(_)
                             | CoreAction::ClearReference
                             | CoreAction::PinSequence(_)
+                            | CoreAction::UnpinSequence(_)
                     );
                     // actions that should invalidate the cached column stats and SHOULD trigger a full re-run
                     // these are actions that change the visible sequence set, or modify the alignments
@@ -473,14 +479,15 @@ impl App {
             return;
         }
 
+        let visible_col_start = self.core.viewport.offsets.cols;
         let crosshair = selection_point_crosshair(
             &self.core,
             &self.ui.visible_rows,
+            visible_col_start,
             self.app_layout.alignment_pane_sequence_rows,
             mouse.column,
             mouse.row,
         );
-
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some((sequence_id, column)) = crosshair else {

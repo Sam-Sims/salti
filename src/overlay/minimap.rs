@@ -43,21 +43,23 @@ impl MinimapState {
         track_area: Rect,
         total_columns: usize,
         drag_anchor: usize,
-    ) -> CoreAction {
+    ) -> Option<CoreAction> {
         let column = Self::position_from_mouse(mouse_x, track_area, total_columns);
-        CoreAction::JumpToPosition(column.saturating_sub(drag_anchor))
+        let visible_target = column.saturating_sub(drag_anchor);
+        Some(CoreAction::JumpToPosition(visible_target))
     }
     pub fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
         overlay_area: Rect,
         viewport_column_range: &Range<usize>,
-        total_columns: usize,
+        visible_to_absolute: &[usize],
     ) -> Option<CoreAction> {
-        if total_columns == 0 {
+        if visible_to_absolute.is_empty() {
             return None;
         }
 
+        let total_columns = visible_to_absolute.len();
         let viewport_cols = viewport_column_range.end - viewport_column_range.start;
         let track_area = layout(overlay_area).track_area;
         let in_track = track_area.contains((mouse.column, mouse.row).into());
@@ -72,31 +74,16 @@ impl MinimapState {
                 };
 
                 self.anchor_columns = Some(drag_anchor);
-                Some(Self::pan_action(
-                    mouse.column,
-                    track_area,
-                    total_columns,
-                    drag_anchor,
-                ))
+                Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
             }
             MouseEventKind::Drag(MouseButton::Left) if in_track => {
                 let drag_anchor = self.anchor_columns?;
-                Some(Self::pan_action(
-                    mouse.column,
-                    track_area,
-                    total_columns,
-                    drag_anchor,
-                ))
+                Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let drag_anchor = self.anchor_columns.take()?;
                 if in_track {
-                    Some(Self::pan_action(
-                        mouse.column,
-                        track_area,
-                        total_columns,
-                        drag_anchor,
-                    ))
+                    Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
                 } else {
                     None
                 }
@@ -106,27 +93,33 @@ impl MinimapState {
     }
 }
 
-fn sample_alignments(core: &CoreState, column_start: usize, column_end: usize) -> Option<u8> {
-    let column_span = column_end.saturating_sub(column_start);
-    let row_ids = core.row_visibility.visible_to_absolute();
+fn sample_alignments(
+    core: &CoreState,
+    visible_column_start: usize,
+    visible_column_end: usize,
+) -> Option<u8> {
+    let visible_column_span = visible_column_end.saturating_sub(visible_column_start);
+    let row_ids = &core.row_visibility.visible_to_absolute;
     let row_count = row_ids.len();
-    if row_count == 0 || column_span == 0 {
+    if row_count == 0 || visible_column_span == 0 {
         return None;
     }
 
     let row_samples = row_count.min(MINIMAP_ROW_SAMPLES_PER_CELL);
-    let column_samples = column_span.clamp(1, MINIMAP_COLUMN_SAMPLES_PER_CELL);
+    let column_samples = visible_column_span.clamp(1, MINIMAP_COLUMN_SAMPLES_PER_CELL);
     let mut counts = [0u16; 256];
 
+    let visible_to_absolute = &core.column_visibility.visible_to_absolute;
     for column_sample in 0..column_samples {
-        let column_offset = (column_sample * 2 + 1) * column_span / (column_samples * 2);
-        let column = (column_start + column_offset).min(column_end - 1);
+        let visible_offset = (column_sample * 2 + 1) * visible_column_span / (column_samples * 2);
+        let visible_column = (visible_column_start + visible_offset).min(visible_column_end - 1);
+        let absolute_column = visible_to_absolute[visible_column];
 
         for row_sample in 0..row_samples {
             let row_index = row_sample * row_count / row_samples;
             let sequence_id = row_ids[row_index];
             let sequence = &core.data.sequences[sequence_id].alignment.sequence;
-            if let Some(&byte) = sequence.get(column) {
+            if let Some(&byte) = sequence.get(absolute_column) {
                 counts[usize::from(byte)] += 1;
             }
         }
@@ -142,11 +135,11 @@ fn sample_alignments(core: &CoreState, column_start: usize, column_end: usize) -
 fn calculate_block_colour(
     core: &CoreState,
     theme: &Theme,
-    column_start: usize,
-    column_end: usize,
+    visible_column_start: usize,
+    visible_column_end: usize,
 ) -> Color {
     let sequence_type = core.sequence_type();
-    sample_alignments(core, column_start, column_end)
+    sample_alignments(core, visible_column_start, visible_column_end)
         .and_then(|byte| theme.sequence.colour_for(byte, sequence_type))
         .unwrap_or(theme.panel_bg_dim)
 }
@@ -180,8 +173,13 @@ pub fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usiz
     ))
 }
 
-fn render_minimap_track(f: &mut Frame, area: Rect, core: &CoreState, theme: &Theme) {
-    let total_columns = core.data.sequence_length;
+fn render_minimap_track(
+    f: &mut Frame,
+    area: Rect,
+    core: &CoreState,
+    theme: &Theme,
+    total_columns: usize,
+) {
     let total_width = usize::from(area.width);
     let buffer = f.buffer_mut();
 
@@ -239,12 +237,13 @@ pub fn render(
         .style(styles.panel_block);
     f.render_widget(block, minimap_layout.area);
 
-    render_minimap_track(f, minimap_layout.track_area, core, theme);
+    let total_columns = core.column_visibility.visible_count();
+    render_minimap_track(f, minimap_layout.track_area, core, theme, total_columns);
 
     if let Some(viewport_box) = highlight_box(
         minimap_layout.track_area,
         core.viewport.window().col_range,
-        core.data.sequence_length,
+        total_columns,
     ) {
         shade_highlight_box(f, viewport_box, theme);
     }

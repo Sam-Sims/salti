@@ -1,4 +1,3 @@
-use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, LoadingState};
 use crate::ui::UiState;
 use crate::ui::selection::selection_row_bounds;
@@ -60,7 +59,6 @@ fn build_bottom_status_bar(
 
 fn build_top_status_bar(
     core: &CoreState,
-    window: &ViewportWindow,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
     let file_name = core
@@ -83,14 +81,14 @@ fn build_top_status_bar(
     };
     let loading_status = loading_text.set_style(loading_style);
 
+    let visible_columns_in_window = core.visible_columns_in_window();
     let alignment_count = core.data.sequences.len();
-    let position_range = if core.data.sequence_length > 0 {
-        let range = &window.col_range;
-        let start = range.start + 1;
-        let end = range.end;
-        format!("Positions: {start}-{end}")
-    } else {
-        "Positions: 0-0".to_string()
+    let position_range = match (
+        visible_columns_in_window.first().copied(),
+        visible_columns_in_window.last().copied(),
+    ) {
+        (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
+        _ => "Positions: 0-0".to_string(),
     };
 
     vec![
@@ -109,11 +107,10 @@ pub fn render_frame(
     top_status_area: Rect,
     bottom_status_area: Rect,
     core: &CoreState,
-    window: &ViewportWindow,
     ui: &UiState,
 ) {
     let theme = &ui.theme_styles;
-    let top_status_bar = build_top_status_bar(core, window, theme);
+    let top_status_bar = build_top_status_bar(core, theme);
     let bottom_status_bar = build_bottom_status_bar(core, ui, theme);
 
     if top_status_area.height > 0 {

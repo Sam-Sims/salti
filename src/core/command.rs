@@ -11,14 +11,29 @@ pub enum DiffMode {
 
 #[derive(Debug)]
 pub enum CoreAction {
-    ScrollDown { amount: usize },
-    ScrollUp { amount: usize },
-    ScrollLeft { amount: usize },
-    ScrollRight { amount: usize },
-    ScrollNamesLeft { amount: usize },
-    ScrollNamesRight { amount: usize },
+    ScrollDown {
+        amount: usize,
+    },
+    ScrollUp {
+        amount: usize,
+    },
+    ScrollLeft {
+        amount: usize,
+    },
+    ScrollRight {
+        amount: usize,
+    },
+    ScrollNamesLeft {
+        amount: usize,
+    },
+    ScrollNamesRight {
+        amount: usize,
+    },
     ClearFilter,
-    SetFilter { pattern: String, regex: Regex },
+    SetFilter {
+        pattern: String,
+        regex: Regex,
+    },
     JumpToSequence(usize),
     JumpToPosition(usize),
     PinSequence(usize),

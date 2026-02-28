@@ -5,11 +5,11 @@
 pub struct Visibility {
     /// Vector of bools indicating whether each index is hidden (true) or visible (false).
     /// Will always be same length as number of absolute indices (e.g. total rows or columns).
-    hidden: Vec<bool>,
+    pub hidden: Vec<bool>,
     /// Maps each visible index to its absolute index.
-    visible_to_absolute: Vec<usize>,
+    pub visible_to_absolute: Vec<usize>,
     /// Maps each absolute index to its visible index if visible.
-    absolute_to_visible: Vec<Option<usize>>,
+    pub absolute_to_visible: Vec<Option<usize>>,
 }
 
 impl Visibility {
@@ -33,11 +33,6 @@ impl Visibility {
     #[must_use]
     pub fn visible_count(&self) -> usize {
         self.visible_to_absolute.len()
-    }
-
-    #[must_use]
-    pub fn visible_to_absolute(&self) -> &[usize] {
-        &self.visible_to_absolute
     }
 
     /// Returns whether an absolute index is hidden.
@@ -105,7 +100,7 @@ mod tests {
         visibility.rebuild_projection();
 
         assert_eq!(visibility.visible_count(), 5);
-        assert_eq!(visibility.visible_to_absolute(), &[0, 1, 2, 3, 4]);
+        assert_eq!(visibility.visible_to_absolute, &[0, 1, 2, 3, 4]);
         assert!((0..5).all(|index| !visibility.is_hidden(index)));
     }
 
@@ -118,7 +113,7 @@ mod tests {
         visibility.rebuild_projection();
 
         assert_eq!(visibility.visible_count(), 4);
-        assert_eq!(visibility.visible_to_absolute(), &[0, 2, 3, 5]);
+        assert_eq!(visibility.visible_to_absolute, &[0, 2, 3, 5]);
         assert!(visibility.is_hidden(1));
         assert!(visibility.is_hidden(4));
     }
