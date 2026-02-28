@@ -1,7 +1,7 @@
 use crate::core::CoreState;
 use crate::core::viewport::ViewportWindow;
-use crate::ui::layout::RULER_HEIGHT_ROWS;
 use crate::ui::UiState;
+use crate::ui::layout::RULER_HEIGHT_ROWS;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Style, Styled};
@@ -51,12 +51,12 @@ fn render_sequence_id_rows(
     // reserve rows where the alignment pane ruler sits, so sequence ID pane rows stay aligned.
     for ruler_row in 0..ruler_height {
         if ruler_row == 1 && has_pins {
-        id_lines.push(Line::from(
-            "Pinned sequences:".set_style(ui.theme_styles.text_muted),
-        ));
-    } else {
-        id_lines.push(Line::from(" "));
-    }
+            id_lines.push(Line::from(
+                "Pinned sequences:".set_style(ui.theme_styles.text_muted),
+            ));
+        } else {
+            id_lines.push(Line::from(" "));
+        }
     }
 
     let name_width = window

@@ -15,10 +15,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::cli::StartupState;
 use crate::config::keybindings::{self, KeyAction};
+use crate::core::CoreState;
 use crate::core::column_stats::{ColumnStats, ColumnStatsRequest, compute_column_stats};
 use crate::core::command::CoreAction;
 use crate::core::parser::{self, Alignment};
-use crate::core::CoreState;
 use crate::ui::layout::{AppLayout, FrameLayout};
 use crate::ui::render;
 use crate::ui::selection::selection_point_crosshair;

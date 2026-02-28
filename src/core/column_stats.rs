@@ -260,7 +260,6 @@ mod tests {
     fn full_skips_conservation() {
         let sequences = vec![SequenceRecord {
             sequence_id: 0,
-            hidden: false,
             alignment: Alignment {
                 id: Arc::from("seq1"),
                 sequence: Arc::from(b"ABCD".to_vec()),

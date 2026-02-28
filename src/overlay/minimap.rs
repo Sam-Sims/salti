@@ -108,8 +108,13 @@ impl MinimapState {
 
 fn sample_alignments(core: &CoreState, column_start: usize, column_end: usize) -> Option<u8> {
     let column_span = column_end.saturating_sub(column_start);
-    let row_count = core.display_sequence_ids.len();
-    let row_samples = row_count.clamp(1, MINIMAP_ROW_SAMPLES_PER_CELL);
+    let row_ids = core.row_visibility.visible_to_absolute();
+    let row_count = row_ids.len();
+    if row_count == 0 || column_span == 0 {
+        return None;
+    }
+
+    let row_samples = row_count.min(MINIMAP_ROW_SAMPLES_PER_CELL);
     let column_samples = column_span.clamp(1, MINIMAP_COLUMN_SAMPLES_PER_CELL);
     let mut counts = [0u16; 256];
 
@@ -119,7 +124,7 @@ fn sample_alignments(core: &CoreState, column_start: usize, column_end: usize) -
 
         for row_sample in 0..row_samples {
             let row_index = row_sample * row_count / row_samples;
-            let sequence_id = core.display_sequence_ids[row_index];
+            let sequence_id = row_ids[row_index];
             let sequence = &core.data.sequences[sequence_id].alignment.sequence;
             if let Some(&byte) = sequence.get(column) {
                 counts[usize::from(byte)] += 1;

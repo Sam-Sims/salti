@@ -1,7 +1,7 @@
 use crate::core::viewport::ViewportWindow;
 use crate::core::{CoreState, LoadingState};
-use crate::ui::layout::RULER_HEIGHT_ROWS;
 use crate::ui::UiState;
+use crate::ui::layout::RULER_HEIGHT_ROWS;
 use crate::ui::rows::{format_row_spans, select_row_render_mode};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -227,7 +227,8 @@ pub fn render_alignment_pane(
         return;
     }
 
-    let [ruler_area, sequence_content_area] = inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
+    let [ruler_area, sequence_content_area] =
+        inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
 
     render_ruler(core, window, ruler_area, theme, f);
     render_sequence_rows(

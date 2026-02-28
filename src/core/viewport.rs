@@ -42,7 +42,7 @@ pub struct ViewportWindow {
 }
 
 impl Viewport {
-    pub fn update_dimensions(
+    pub fn set_dimensions(
         &mut self,
         visible_cols: usize,
         visible_rows: usize,
@@ -51,6 +51,15 @@ impl Viewport {
         self.dims.cols = visible_cols;
         self.dims.rows = visible_rows;
         self.dims.name_width = name_visible_width;
+    }
+
+    pub fn update_dimensions(
+        &mut self,
+        visible_cols: usize,
+        visible_rows: usize,
+        name_visible_width: usize,
+    ) {
+        self.set_dimensions(visible_cols, visible_rows, name_visible_width);
         self.clamp_offsets();
     }
 
