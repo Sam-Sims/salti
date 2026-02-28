@@ -13,9 +13,10 @@ pub(crate) const COLUMN_STATS_RECALC_MARGIN_COLS: usize = 25;
 ///
 /// `Majority` includes all observed symbols, including gaps (`-`).
 /// `MajorityNonGap` excludes gaps when choosing the winning symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConsensusMethod {
     Majority,
+    #[default]
     MajorityNonGap,
 }
 

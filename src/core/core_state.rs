@@ -1,7 +1,7 @@
 use crate::cli::StartupState;
 use crate::core::column_stats::{
     COLUMN_STATS_BUFFER_COLS, COLUMN_STATS_RECALC_MARGIN_COLS, ColumnStats, ColumnStatsRequest,
-    apply_positional_updates,
+    ConsensusMethod, apply_positional_updates,
 };
 use crate::core::command::{CoreAction, DiffMode};
 use crate::core::data::SequenceRecord;
@@ -55,7 +55,7 @@ pub struct CoreState {
     pub diff_mode: DiffMode,
     pub translate_nucleotide_to_amino_acid: bool,
     pub translation_frame: u8,
-    pub consensus_method: crate::core::column_stats::ConsensusMethod,
+    pub consensus_method: ConsensusMethod,
     pub consensus: Option<Vec<u8>>,
     pub conservation: Option<Vec<f32>>,
     // will contain the current window + a buffer either side, or None if no window is currently cached
@@ -83,7 +83,7 @@ impl CoreState {
             diff_mode: DiffMode::Off,
             translate_nucleotide_to_amino_acid: false,
             translation_frame: 0,
-            consensus_method: crate::core::column_stats::ConsensusMethod::MajorityNonGap,
+            consensus_method: ConsensusMethod::default(),
             consensus: None,
             conservation: None,
             column_stats_window: None,
