@@ -17,6 +17,7 @@ use tracing::debug;
 pub enum LoadingState {
     #[default]
     Idle,
+    Loading,
     Loaded,
     Failed(String),
 }
@@ -25,6 +26,7 @@ impl std::fmt::Display for LoadingState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LoadingState::Idle => write!(f, "Status: Idle"),
+            LoadingState::Loading => write!(f, "Status: Loading"),
             LoadingState::Loaded => write!(f, "Status: Loaded"),
             LoadingState::Failed(_) => write!(f, "Status: Failed"),
         }
@@ -68,11 +70,11 @@ impl CoreState {
         let data = AlignmentData::default();
 
         Self {
-            data,
+            data: AlignmentData::default(),
             viewport: Viewport::default(),
             filter: FilterState::default(),
             loading_state: LoadingState::default(),
-            input_path,
+            input_path: startup.file_path,
             initial_position: startup.initial_position,
             reference_sequence_id: None,
             pinned_sequence_ids: Vec::new(),
@@ -88,9 +90,15 @@ impl CoreState {
         }
     }
 
-    #[must_use]
-    pub fn data(&self) -> &AlignmentData {
-        &self.data
+    /// Marks the core as loading the given input
+    pub fn prepare_load(&mut self, input: String) {
+        self.input_path = Some(input);
+        self.loading_state = LoadingState::Loading;
+    }
+
+    /// Sets core as idle
+    pub fn mark_idle(&mut self) {
+        self.loading_state = LoadingState::Idle;
     }
 
     /// Applies a single [`CoreAction`] command, where a core action is something that manipulates
@@ -489,8 +497,7 @@ mod tests {
             .collect();
 
         let mut core = CoreState::new(StartupState::default());
-        core.data.load_alignments(alignments);
-        core.refresh_viewport();
+        core.handle_alignments_loaded(Ok(alignments));
         core
     }
 

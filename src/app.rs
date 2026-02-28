@@ -18,7 +18,7 @@ use crate::config::keybindings::{self, KeyAction};
 use crate::core::column_stats::{ColumnStats, ColumnStatsRequest, compute_column_stats};
 use crate::core::command::CoreAction;
 use crate::core::parser::{self, Alignment};
-use crate::core::{CoreState, LoadingState};
+use crate::core::CoreState;
 use crate::ui::layout::{AppLayout, FrameLayout};
 use crate::ui::render;
 use crate::ui::selection::selection_point_crosshair;
@@ -228,7 +228,7 @@ impl App {
             previous.handle.abort();
         }
 
-        self.core.input_path = Some(input.clone());
+        self.core.prepare_load(input.clone());
 
         let cancel = CancellationToken::new();
         debug!(input = %input, "Spawning new load job for input");
@@ -247,7 +247,7 @@ impl App {
     fn try_file_load(&mut self) {
         let Some(input) = self.core.input_path.clone() else {
             info!("No startup file provided; entering idle loading state");
-            self.core.loading_state = LoadingState::Idle;
+            self.core.mark_idle();
             return;
         };
         debug!(input = %input, "Loading startup alignment");

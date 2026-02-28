@@ -11,8 +11,6 @@ pub mod utils;
 
 use std::sync::Arc;
 
-/// A minimal view of a sequence record used by UI components (e.g. the command palette)
-/// to display and select sequences without coupling to the full core data model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleSequence {
     pub sequence_id: usize,

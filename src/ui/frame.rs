@@ -63,22 +63,21 @@ fn build_top_status_bar(
     window: &ViewportWindow,
     theme: &crate::config::theme::ThemeStyles,
 ) -> Vec<Span<'static>> {
-    let file_path = &core.input_path;
-
-    let file_name = file_path
-        .as_ref()
+    let file_name = core
+        .input_path
+        .as_deref()
         .map(|input| {
             // for local paths, show just the file name for URLs makes more sense to show the full input.
-            std::path::Path::new(input.as_str())
+            std::path::Path::new(input)
                 .file_name()
                 .and_then(|name| name.to_str())
-                .unwrap_or(input.as_str())
+                .unwrap_or(input)
         })
         .unwrap_or("Unknown");
 
     let loading_text = core.loading_state.to_string();
     let loading_style = match &core.loading_state {
-        LoadingState::Idle => theme.text_dim,
+        LoadingState::Idle | LoadingState::Loading => theme.text_dim,
         LoadingState::Loaded => theme.success,
         LoadingState::Failed(_) => theme.error,
     };
