@@ -40,7 +40,7 @@ pub enum AlignmentError {
     #[error("translation in {frame:?} is empty for alignment length {length}")]
     TranslationEmpty { frame: ReadingFrame, length: usize },
     /// The requested operation is not available for the active alignment kind.
-    #[error("operation '{operation}' is not supported for alignment kind {kind:?}")]
+    #[error("operation '{operation}' is not supported for alignment kind {kind}")]
     UnsupportedOperation {
         operation: &'static str,
         kind: AlignmentType,
