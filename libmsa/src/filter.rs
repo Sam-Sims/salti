@@ -57,6 +57,9 @@ impl<'a> FilterBuilder<'a> {
         for row_ids in &self.row_exclude_sets {
             validate_row_ids(row_ids, row_count)?;
         }
+        if let Some(max_gap_fraction) = self.max_gap_fraction {
+            validate_gap_fraction(max_gap_fraction)?;
+        }
 
         let mut row_ids: Vec<usize> = (0..row_count).collect();
         if let Some(pattern) = &self.row_name_regex {
@@ -149,6 +152,14 @@ fn validate_row_ids(row_ids: &[usize], row_count: usize) -> Result<(), Alignment
         }
     }
     Ok(())
+}
+
+fn validate_gap_fraction(threshold: f32) -> Result<(), AlignmentError> {
+    if threshold.is_finite() && (0.0..=1.0).contains(&threshold) {
+        return Ok(());
+    }
+
+    Err(AlignmentError::InvalidGapFraction(threshold))
 }
 
 #[cfg(test)]
@@ -260,6 +271,18 @@ mod filter_builder_tests {
             .unwrap_err();
 
         assert!(matches!(err, AlignmentError::InvalidRegex { .. }));
+    }
+
+    #[test]
+    fn invalid_gap_fraction_returns_error() {
+        let err = generic_alignment(&[("sample-1", b"AC")])
+            .filter()
+            .unwrap()
+            .with_max_gap_fraction(1.5)
+            .apply()
+            .unwrap_err();
+
+        assert_eq!(err, AlignmentError::InvalidGapFraction(1.5));
     }
 
     #[test]

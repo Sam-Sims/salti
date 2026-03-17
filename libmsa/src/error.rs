@@ -54,6 +54,9 @@ pub enum AlignmentError {
     /// Parsing alignment data failed with the attached message.
     #[error("failed to parse alignment: {0}")]
     Parse(String),
+    /// A gap-filter threshold was outside the supported finite range.
+    #[error("invalid gap fraction: {0} (expected a finite value in 0.0..=1.0)")]
+    InvalidGapFraction(f32),
     /// A regex row-name filter could not be compiled.
     #[error("invalid regex '{pattern}'")]
     InvalidRegex {
