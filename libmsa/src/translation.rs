@@ -4,10 +4,13 @@ use crate::Alignment;
 use crate::alignment_type::AlignmentType;
 use crate::data::{AlignmentData, RawSequence};
 use crate::error::AlignmentError;
-use crate::metrics::{ConsensusMethod, consensus_from_columns, counted_translated_columns_range};
+use crate::metrics::{
+    ColumnSummary, ConsensusMethod, counted_translated_columns_positions,
+    counted_translated_columns_range, summaries_from_columns,
+};
 
 /// Reading frames for translating.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReadingFrame {
     Frame1,
     Frame2,
@@ -152,6 +155,11 @@ pub struct TranslatedAlignment<'a> {
 }
 
 impl<'a> TranslatedAlignment<'a> {
+    /// Returns the number of visible protein columns in this translated view.
+    pub fn column_count(&self) -> usize {
+        self.translated_column_count
+    }
+
     /// Returns the translated view for one visible row by absolute row id.
     ///
     /// The row id is resolved against the source alignment's current row
@@ -217,7 +225,73 @@ impl<'a> TranslatedAlignment<'a> {
             .collect::<Result<Vec<_>, _>>()?;
 
         let data = AlignmentData::from_raw(translated)?;
-        Ok(Alignment::from_typed_data(data, AlignmentType::Protein))
+        Ok(Alignment::from_data(data, AlignmentType::Protein))
+    }
+
+    /// Returns a summary for each requested protein column.
+    ///
+    /// The returned positions use protein-column coordinates from the translated
+    /// view. Consensus, conservation, and gap fraction are calculated from the
+    /// visible rows in the source alignment with this view's reading frame and
+    /// translation table.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
+    /// valid protein-column index in the translated view.
+    pub fn column_summaries_positions(
+        &self,
+        positions: &[usize],
+        method: ConsensusMethod,
+    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
+        let columns = counted_translated_columns_positions(
+            &self.source.data,
+            &self.source.rows,
+            positions,
+            self.frame,
+            &self.table,
+        )?;
+        let mut rng = rand::rng();
+        Ok(summaries_from_columns(
+            &columns,
+            method,
+            AlignmentType::Protein.conservation_alphabet_size(),
+            &mut rng,
+        ))
+    }
+
+    /// Returns summary for each protein column in `range`.
+    ///
+    /// The returned positions use protein-column coordinates from the translated
+    /// view. Consensus, conservation, and gap fraction are calculated from the
+    /// visible rows in the source alignment with this view's reading frame and
+    /// translation table.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignmentError::EmptyRange`] if `range` is empty.
+    ///
+    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than
+    /// the translated width of this view.
+    pub fn column_summaries_range(
+        &self,
+        range: Range<usize>,
+        method: ConsensusMethod,
+    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
+        let columns = counted_translated_columns_range(
+            &self.source.data,
+            &self.source.rows,
+            range,
+            self.frame,
+            &self.table,
+        )?;
+        let mut rng = rand::rng();
+        Ok(summaries_from_columns(
+            &columns,
+            method,
+            AlignmentType::Protein.conservation_alphabet_size(),
+            &mut rng,
+        ))
     }
 
     /// Returns the translated consensus byte for each protein column in `range`.
@@ -237,15 +311,11 @@ impl<'a> TranslatedAlignment<'a> {
         range: Range<usize>,
         method: ConsensusMethod,
     ) -> Result<Vec<(usize, Option<u8>)>, AlignmentError> {
-        let columns = counted_translated_columns_range(
-            &self.source.data,
-            &self.source.rows,
-            range,
-            self.frame,
-            &self.table,
-        )?;
-        let mut rng = rand::rng();
-        Ok(consensus_from_columns(&columns, method, &mut rng))
+        let summaries = self.column_summaries_range(range, method)?;
+        Ok(summaries
+            .into_iter()
+            .map(|summary| (summary.position, summary.consensus))
+            .collect())
     }
 }
 
@@ -683,6 +753,29 @@ mod translated_alignment_tests {
         assert_eq!(frame3_sequence.byte_at(1), Some(b'L'));
         assert_eq!(frame3_sequence.byte_at(2), Some(b'X'));
         assert_eq!(frame3_sequence.byte_at(3), None);
+    }
+
+    #[test]
+    fn column_count_matches() {
+        let alignment =
+            Alignment::new_with_type(vec![raw("s1", b"ATGCCCTAA")], AlignmentType::Dna).unwrap();
+
+        let frame1 = alignment.translated(ReadingFrame::Frame1).unwrap();
+        let frame2 = alignment.translated(ReadingFrame::Frame2).unwrap();
+        let frame3 = alignment.translated(ReadingFrame::Frame3).unwrap();
+
+        assert_eq!(
+            frame1.column_count(),
+            ReadingFrame::Frame1.translated_length(9)
+        );
+        assert_eq!(
+            frame2.column_count(),
+            ReadingFrame::Frame2.translated_length(9)
+        );
+        assert_eq!(
+            frame3.column_count(),
+            ReadingFrame::Frame3.translated_length(9)
+        );
     }
 
     #[test]

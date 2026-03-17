@@ -780,6 +780,47 @@ mod tests {
     }
 
     #[test]
+    fn translated_column_summaries_positions_return_protein_metrics() {
+        let alignment = Alignment::new_with_type(
+            vec![raw("s1", b"GCT"), raw("s2", b"GCC")],
+            AlignmentType::Dna,
+        )
+        .unwrap();
+
+        let raw_summary = alignment
+            .column_summaries_positions(&[2], ConsensusMethod::MajorityNonGap)
+            .unwrap();
+        let translated_summary = alignment
+            .translated(crate::ReadingFrame::Frame1)
+            .unwrap()
+            .column_summaries_positions(&[0], ConsensusMethod::MajorityNonGap)
+            .unwrap();
+
+        assert_eq!(translated_summary.len(), 1);
+        assert_eq!(translated_summary[0].position, 0);
+        assert_eq!(translated_summary[0].consensus, Some(b'A'));
+        assert_eq!(translated_summary[0].conservation, Some(1.0));
+        assert!(raw_summary[0].conservation.unwrap() < 1.0);
+    }
+
+    #[test]
+    fn column_summaries_range_returns_requested_positions() {
+        let alignment =
+            Alignment::new_with_type(vec![raw("s1", b"AC"), raw("s2", b"AT")], AlignmentType::Dna)
+                .unwrap();
+
+        assert_eq!(
+            alignment
+                .column_summaries_range(0..2, ConsensusMethod::MajorityNonGap)
+                .unwrap()
+                .into_iter()
+                .map(|summary| summary.position)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
     fn conservation_positions_returns_score() {
         let alignment =
             Alignment::new_with_type(vec![raw("s1", b"A"), raw("s2", b"A")], AlignmentType::Dna)
