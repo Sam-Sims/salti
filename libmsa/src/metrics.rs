@@ -23,6 +23,36 @@ pub enum ConsensusMethod {
     MajorityNonGap,
 }
 
+impl ConsensusMethod {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Majority => "majority",
+            Self::MajorityNonGap => "majority-non-gap",
+        }
+    }
+
+    pub const fn all() -> [Self; 2] {
+        [Self::Majority, Self::MajorityNonGap]
+    }
+}
+
+impl std::fmt::Display for ConsensusMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl std::str::FromStr for ConsensusMethod {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|method| method.name() == value)
+            .ok_or(())
+    }
+}
+
 /// Calculated values for a single alignment column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnSummary {

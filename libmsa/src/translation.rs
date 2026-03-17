@@ -15,6 +15,18 @@ pub enum ReadingFrame {
 }
 
 impl ReadingFrame {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Frame1 => "1",
+            Self::Frame2 => "2",
+            Self::Frame3 => "3",
+        }
+    }
+
+    pub const fn all() -> [Self; 3] {
+        [Self::Frame1, Self::Frame2, Self::Frame3]
+    }
+
     /// Returns the nucleotide offset for this reading frame.
     pub const fn offset(self) -> usize {
         match self {
@@ -44,6 +56,23 @@ impl ReadingFrame {
         }
 
         ((nucleotide_length - 1 - offset) / 3) + 1
+    }
+}
+
+impl std::fmt::Display for ReadingFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl std::str::FromStr for ReadingFrame {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|frame| frame.name() == value)
+            .ok_or(())
     }
 }
 
