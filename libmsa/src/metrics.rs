@@ -476,7 +476,7 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
         entropy -= frequency * frequency.log2();
     }
 
-    let gap_fraction = f64::from(gap_fraction_from_counts(counts));
+    let gap_fraction = f64::from(gap_count) / f64::from(total);
     let conservation = (1.0 - entropy / max_entropy).max(0.0);
     (conservation * (1.0 - gap_fraction)) as f32
 }
