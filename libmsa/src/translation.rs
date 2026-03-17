@@ -627,11 +627,9 @@ mod translated_alignment_tests {
         }
     }
 
-    
     fn translated_bytes(view: TranslatedSequenceView<'_>, len: usize) -> Vec<(usize, u8)> {
         view.bytes_range(0..len).unwrap().collect()
     }
-
 
     #[test]
     fn translated_sequence_byte_at_respects_frames() {

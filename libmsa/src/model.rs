@@ -228,7 +228,6 @@ impl Alignment {
     }
 
     /// Sets the active type override to `type`.
-
     ///
     /// If `kind` matches the detected type, this clears any existing override instead.
     pub fn set_override_type(&mut self, kind: AlignmentType) {

@@ -250,7 +250,6 @@ mod filter_builder_tests {
         assert_eq!(ids, vec![0, 1]);
     }
 
-
     #[test]
     fn invalid_regex_returns_error() {
         let err = generic_alignment(&[("sample-1", b"AC")])

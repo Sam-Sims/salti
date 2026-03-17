@@ -33,7 +33,7 @@ impl Default for DetectionOptions {
 
 impl DetectionOptions {
     /// Creates a new [`DetectionOptions`] with the given parameters.
-    /// 
+    ///
     /// # Errors
     ///
     /// [`AlignmentError::InvalidClassificationThreshold`] if
@@ -42,8 +42,7 @@ impl DetectionOptions {
         sample_size: NonZeroUsize,
         classification_threshold: f32,
     ) -> Result<Self, AlignmentError> {
-        if !(0.0..=1.0).contains(&classification_threshold)
-        {
+        if !(0.0..=1.0).contains(&classification_threshold) {
             return Err(AlignmentError::InvalidClassificationThreshold(
                 classification_threshold,
             ));
@@ -94,7 +93,7 @@ pub(crate) fn detect_alignment_type(
     let nucleotide_fraction = nucleotide_count as f32 / total_count as f32;
     let protein_matches = protein_fraction >= options.classification_threshold();
     let nucleotide_matches = nucleotide_fraction >= options.classification_threshold();
-    
+
     match (protein_matches, nucleotide_matches) {
         (true, false) => AlignmentType::Protein,
         (false, true) => AlignmentType::Dna,
