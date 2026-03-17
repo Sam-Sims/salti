@@ -82,12 +82,11 @@ impl<'a> FilterBuilder<'a> {
         let mut column_ids: Vec<usize> = (0..column_count).collect();
         if let Some(max_gap_fraction) = self.max_gap_fraction {
             let temp_rows = Projection::Filtered(Arc::from(row_ids.as_slice()));
-            let relative_positions: Vec<usize> = (0..column_count).collect();
-            let gap_fractions = metrics::counted_columns_positions(
+            let gap_fractions = metrics::counted_columns_range(
                 &self.source.data,
                 &temp_rows,
                 &self.source.columns,
-                &relative_positions,
+                0..column_count,
             )
             .map(|columns| metrics::gap_fraction_from_columns(&columns))?;
 

@@ -1,13 +1,11 @@
-use std::num::NonZeroU8;
-use std::ops::Range;
-
 use rand::seq::IndexedRandom;
+use std::{num::NonZeroU8, ops::Range};
 
 use crate::data::AlignmentData;
 use crate::error::AlignmentError;
 use crate::model::Alignment;
 use crate::projection::Projection;
-use crate::translation::{ReadingFrame, TranslationTable, translated_byte_at, translated_length};
+use crate::translation::{ReadingFrame, TranslationTable, translated_byte_at};
 
 /// Selects how consensus bytes are chosen for alignment columns.
 ///
@@ -128,6 +126,26 @@ impl Alignment {
         Ok(gap_fraction_from_columns(&columns))
     }
 
+    /// Returns the gap fraction for each relative column in `range`.
+    ///
+    /// Each position is resolved against the alignment's current column projection.
+    /// The returned vector keeps the requested relative positions and contains one
+    /// gap fraction for each visible column in `range`.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignmentError::EmptyRange`] if `range` is empty.
+    ///
+    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than the
+    /// current column projection width.
+    pub fn gap_fraction_range(
+        &self,
+        range: Range<usize>,
+    ) -> Result<Vec<(usize, f32)>, AlignmentError> {
+        let columns = counted_columns_range(&self.data, &self.rows, &self.columns, range)?;
+        Ok(gap_fraction_from_columns(&columns))
+    }
+
     /// Returns a derived summary for each requested relative column.
     ///
     /// Each position is resolved against the alignment's current column projection.
@@ -145,6 +163,38 @@ impl Alignment {
         method: ConsensusMethod,
     ) -> Result<Vec<ColumnSummary>, AlignmentError> {
         let columns = counted_columns_positions(&self.data, &self.rows, &self.columns, positions)?;
+        let mut rng = rand::rng();
+        Ok(summaries_from_columns(
+            &columns,
+            method,
+            self.active_type().conservation_alphabet_size(),
+            &mut rng,
+        ))
+    }
+
+    /// Returns a derived summary for each column in `range`.
+    ///
+    /// Each position is resolved against the alignment's current column projection.
+    /// The returned vector keeps the requested relative positions and contains a
+    /// [`ColumnSummary`] with consensus, gap fraction, and conservation when that
+    /// measure is defined for the active alignment kind.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignmentError::EmptyRange`] if `range` is empty.
+    ///
+    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than the
+    /// current column projection width.
+    pub fn column_summaries_range(
+        &self,
+        range: Range<usize>,
+        method: ConsensusMethod,
+    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
+        if range.is_empty() {
+            return Err(AlignmentError::EmptyRange);
+        }
+
+        let columns = counted_columns_range(&self.data, &self.rows, &self.columns, range)?;
         let mut rng = rand::rng();
         Ok(summaries_from_columns(
             &columns,
@@ -180,6 +230,65 @@ pub(crate) fn counted_columns_positions(
         .collect()
 }
 
+pub(crate) fn counted_columns_range(
+    data: &AlignmentData,
+    rows: &Projection,
+    columns: &Projection,
+    range: Range<usize>,
+) -> Result<Vec<CountedColumn>, AlignmentError> {
+    if range.is_empty() {
+        return Err(AlignmentError::EmptyRange);
+    }
+
+    if range.end > columns.len() {
+        return Err(AlignmentError::ColumnOutOfBounds {
+            index: range.end,
+            length: columns.len(),
+        });
+    }
+
+    Ok(range
+        .map(|rel_col| CountedColumn {
+            position: rel_col,
+            counts: column_byte_counts(
+                data,
+                rows,
+                columns
+                    .absolute(rel_col)
+                    .expect("validated range positions map into the projection"),
+            ),
+        })
+        .collect())
+}
+
+pub(crate) fn counted_translated_columns_positions(
+    data: &AlignmentData,
+    rows: &Projection,
+    positions: &[usize],
+    frame: ReadingFrame,
+    table: &TranslationTable,
+) -> Result<Vec<CountedColumn>, AlignmentError> {
+    let translated_len = frame.translated_length(data.length);
+
+    positions
+        .iter()
+        .copied()
+        .map(|protein_col| {
+            if protein_col >= translated_len {
+                return Err(AlignmentError::ColumnOutOfBounds {
+                    index: protein_col,
+                    length: translated_len,
+                });
+            }
+
+            Ok(CountedColumn {
+                position: protein_col,
+                counts: translated_column_byte_counts(data, rows, protein_col, frame, table),
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn counted_translated_columns_range(
     data: &AlignmentData,
     rows: &Projection,
@@ -191,10 +300,10 @@ pub(crate) fn counted_translated_columns_range(
         return Err(AlignmentError::EmptyRange);
     }
 
-    let translated_len = translated_length(data.length, frame);
+    let translated_len = frame.translated_length(data.length);
     if range.end > translated_len {
         return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end - 1,
+            index: range.end,
             length: translated_len,
         });
     }
@@ -679,6 +788,18 @@ mod tests {
         assert_eq!(
             alignment.conservation_positions(&[0]).unwrap(),
             vec![(0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn gap_fraction_range_returns_requested_positions() {
+        let alignment =
+            Alignment::new_with_type(vec![raw("s1", b"A-"), raw("s2", b"--")], AlignmentType::Dna)
+                .unwrap();
+
+        assert_eq!(
+            alignment.gap_fraction_range(0..2).unwrap(),
+            vec![(0, 0.5), (1, 1.0)]
         );
     }
 
