@@ -55,6 +55,10 @@ pub enum AlignmentError {
     #[error("failed to parse alignment: {0}")]
     Parse(String),
     /// A regex row-name filter could not be compiled.
-    #[error("invalid regex '{pattern}': {message}")]
-    InvalidRegex { pattern: String, message: String },
+    #[error("invalid regex '{pattern}'")]
+    InvalidRegex {
+        pattern: String,
+        #[source]
+        source: regex::Error,
+    },
 }

@@ -131,7 +131,7 @@ impl<'a> FilterBuilder<'a> {
 fn compile_regex(pattern: &str) -> Result<Regex, AlignmentError> {
     Regex::new(pattern).map_err(|error| AlignmentError::InvalidRegex {
         pattern: pattern.to_string(),
-        message: error.to_string(),
+        source: error,
     })
 }
 
