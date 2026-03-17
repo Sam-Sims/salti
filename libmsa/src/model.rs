@@ -75,7 +75,7 @@ impl Alignment {
     ) -> Result<Self, AlignmentError> {
         let data = AlignmentData::from_raw(seqs.into_iter().collect())?;
         let detected = detect_alignment_type(&data, options, &mut rand::rng());
-        Ok(Self::from_detected_data(data, detected))
+        Ok(Self::from_data(data, detected))
     }
 
     /// Creates an alignment from raw sequences with an explicit type.
@@ -95,7 +95,7 @@ impl Alignment {
         kind: AlignmentType,
     ) -> Result<Self, AlignmentError> {
         let data = AlignmentData::from_raw(seqs.into_iter().collect())?;
-        Ok(Self::from_typed_data(data, kind))
+        Ok(Self::from_data(data, kind))
     }
 }
 
@@ -371,29 +371,15 @@ impl<'a> SequenceView<'a> {
 }
 
 impl Alignment {
-    pub(crate) fn from_detected_data(data: AlignmentData, detected: AlignmentType) -> Self {
+    pub(crate) fn from_data(data: AlignmentData, alignment_type: AlignmentType) -> Self {
         let rows = Projection::Full {
             len: data.sequences.len(),
         };
         let columns = Projection::Full { len: data.length };
         Self {
             data: Arc::new(data),
-            detected_type: detected,
-            active_type: detected,
-            rows,
-            columns,
-        }
-    }
-
-    pub(crate) fn from_typed_data(data: AlignmentData, kind: AlignmentType) -> Self {
-        let rows = Projection::Full {
-            len: data.sequences.len(),
-        };
-        let columns = Projection::Full { len: data.length };
-        Self {
-            data: Arc::new(data),
-            detected_type: kind,
-            active_type: kind,
+            detected_type: alignment_type,
+            active_type: alignment_type,
             rows,
             columns,
         }
