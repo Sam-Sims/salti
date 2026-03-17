@@ -121,8 +121,15 @@ impl Alignment {
     pub fn max_id_len(&self) -> usize {
         self.rows
             .iter()
-            .filter_map(|abs_row| self.data.sequences.get(abs_row))
-            .map(|seq| seq.id().chars().count())
+            .map(|abs_row| {
+                self.data
+                    .sequences
+                    .get(abs_row)
+                    .expect("selected row must exist")
+                    .id()
+                    .chars()
+                    .count()
+            })
             .max()
             .unwrap_or(0)
     }
@@ -153,7 +160,7 @@ impl Alignment {
     ///
     /// Returns `None` if `absolute_row` is out of bounds or refers to a row that is not visible.
     pub fn sequence_by_absolute(&self, absolute_row: usize) -> Option<SequenceView<'_>> {
-        let _relative = self.rows.relative(absolute_row)?;
+        self.rows.relative(absolute_row)?;
         let seq = self.data.sequences.get(absolute_row)?;
         Some(SequenceView {
             absolute_row_id: absolute_row,
@@ -227,19 +234,13 @@ impl Alignment {
         self.active_type
     }
 
-    /// Sets the active type override to `type`.
-    ///
-    /// If `kind` matches the detected type, this clears any existing override instead.
-    pub fn set_override_type(&mut self, kind: AlignmentType) {
-        self.active_type = if kind == self.detected_type {
-            self.detected_type
-        } else {
-            kind
-        };
+    /// Sets the active type override to `alignment_type`.
+    pub fn set_override_type(&mut self, alignment_type: AlignmentType) {
+        self.active_type = alignment_type;
     }
 
-    /// Clears any active kind override and restores the detected kind.
-    pub fn clear_override_kind(&mut self) {
+    /// Clears any active type override and restores the detected type.
+    pub fn clear_override_type(&mut self) {
         self.active_type = self.detected_type;
     }
 }
@@ -446,7 +447,7 @@ mod alignment_construction_tests {
     }
 
     #[test]
-    fn override_set() {
+    fn override_type_methods_work() {
         let mut alignment =
             Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")]).unwrap();
 
@@ -454,7 +455,7 @@ mod alignment_construction_tests {
         assert_eq!(alignment.detected_type(), AlignmentType::Dna);
         assert_eq!(alignment.active_type(), AlignmentType::Protein);
 
-        alignment.set_override_type(AlignmentType::Dna);
+        alignment.clear_override_type();
         assert_eq!(alignment.active_type(), AlignmentType::Dna);
     }
 
@@ -518,6 +519,23 @@ mod alignment_access_tests {
         assert_eq!(sv.byte_at(0), Some(b'A'));
         assert_eq!(sv.byte_at(3), Some(b'T'));
         assert_eq!(sv.byte_at(4), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "selected row must exist")]
+    fn max_id_len_panics_for_invalid_row_projection() {
+        let alignment = Alignment::new(vec![raw("s1", b"AC")]).unwrap();
+        let filtered = Alignment::from_selection(
+            alignment.data.clone(),
+            alignment.detected_type(),
+            alignment.active_type(),
+            Projection::Filtered(Arc::from(vec![1usize])),
+            Projection::Full {
+                len: alignment.column_count(),
+            },
+        );
+
+        filtered.max_id_len();
     }
 
     #[test]
