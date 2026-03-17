@@ -26,7 +26,7 @@ impl AlignmentType {
     ///
     /// Only DNA alignments support translation. Protein and generic alignments
     /// return `false`.
-    pub fn supports_translation(self) -> bool {
+    pub const fn supports_translation(self) -> bool {
         matches!(self, Self::Dna)
     }
 }
