@@ -1,0 +1,369 @@
+use crate::app::Action;
+use crate::config::theme::ThemeId;
+use crate::core::column_stats::ConsensusMethod;
+use crate::core::command::{CoreAction, DiffMode};
+use crate::core::parser::SequenceType;
+use crate::ui::UiAction;
+use tracing::warn;
+
+use super::command_error::CommandError;
+use super::input::CommandPaletteState;
+use super::utils::parse_argument;
+use crate::ui::VisibleSequence;
+
+fn ensure_no_argument(arguments: &str) -> Result<(), CommandError> {
+    if parse_argument(arguments).is_some() {
+        return Err(CommandError::new("Expected 0 arguments, got 1"));
+    }
+    Ok(())
+}
+
+fn run_command(
+    command: &'static str,
+    arguments: &str,
+    run: impl FnOnce() -> Result<Action, CommandError>,
+) -> Result<Action, CommandError> {
+    let result = run();
+    if let Err(error) = &result {
+        warn!(
+            command,
+            arguments = %arguments,
+            error = %error.message,
+            "Command runner rejected command input"
+        );
+    }
+    result
+}
+
+pub(super) fn run_clear_filter(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("clear-filter", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Action::Core(CoreAction::ClearFilter))
+    })
+}
+
+pub(super) fn run_clear_reference(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("clear-reference", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Action::Core(CoreAction::ClearReference))
+    })
+}
+
+pub(super) fn run_toggle_translation(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("toggle-translate", arguments, || {
+        ensure_no_argument(arguments)?;
+        if state.sequence_type != SequenceType::Dna {
+            return Err(CommandError::new(
+                "toggle-translate is only available for DNA sequences",
+            ));
+        }
+        Ok(Action::Core(CoreAction::ToggleTranslationView))
+    })
+}
+
+fn next_visible_column_index(visible_columns: &[usize], absolute_target: usize) -> Option<usize> {
+    match visible_columns.binary_search(&absolute_target) {
+        Ok(visible_index) => Some(visible_index),
+        Err(next_visible_index) => {
+            (next_visible_index < visible_columns.len()).then_some(next_visible_index)
+        }
+    }
+}
+
+pub(super) fn run_jump_position(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("jump-position", arguments, || {
+        let value = require_argument(arguments)?;
+
+        let Ok(position) = value.parse::<usize>() else {
+            return Err(CommandError::new(
+                "Invalid argument: expected a positive integer",
+            ));
+        };
+        if position == 0 {
+            return Err(CommandError::new(
+                "Invalid argument: expected a positive integer",
+            ));
+        }
+
+        let absolute_target = position - 1;
+        let Some(visible_col) = next_visible_column_index(&state.visible_columns, absolute_target)
+        else {
+            return Err(CommandError::new(
+                "No visible column at or after the requested position",
+            ));
+        };
+
+        Ok(Action::Core(CoreAction::JumpToPosition(visible_col)))
+    })
+}
+
+// this searches through the visible sequences to get the seq id - in the future might want to
+// consider a hashmap? would changes behaviour to last seq wins rather than first
+fn lookup_sequence_id(sequences: &[VisibleSequence], sequence_name: &str) -> Option<usize> {
+    sequences
+        .iter()
+        .find(|sequence| sequence.sequence_name.as_ref() == sequence_name)
+        .map(|sequence| sequence.sequence_id)
+}
+
+fn require_argument(arguments: &str) -> Result<String, CommandError> {
+    parse_argument(arguments)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CommandError::new("Expected 1 argument, got 0"))
+}
+
+fn resolve_argument_to_sequence_id(
+    sequences: &[VisibleSequence],
+    arguments: &str,
+) -> Result<usize, CommandError> {
+    let sequence_name = require_argument(arguments)?;
+    lookup_sequence_id(sequences, sequence_name.as_str())
+        .ok_or_else(|| CommandError::new(format!("Sequence not found: {sequence_name}")))
+}
+
+pub(super) fn run_jump_sequence(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("jump-sequence", arguments, || {
+        let sequence_id = resolve_argument_to_sequence_id(&state.selectable_sequences, arguments)?;
+        Ok(Action::Core(CoreAction::JumpToSequence(sequence_id)))
+    })
+}
+
+pub(super) fn run_pin_sequence(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("pin-sequence", arguments, || {
+        let sequence_id = resolve_argument_to_sequence_id(&state.selectable_sequences, arguments)?;
+        Ok(Action::Core(CoreAction::PinSequence(sequence_id)))
+    })
+}
+
+pub(super) fn run_unpin_sequence(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("unpin-sequence", arguments, || {
+        let sequence_id = resolve_argument_to_sequence_id(&state.pinned_sequences, arguments)?;
+        Ok(Action::Core(CoreAction::UnpinSequence(sequence_id)))
+    })
+}
+
+pub(super) fn run_filter(_: &CommandPaletteState, arguments: &str) -> Result<Action, CommandError> {
+    run_command("set-filter", arguments, || {
+        if arguments.is_empty() {
+            Ok(Action::Core(CoreAction::ClearFilter))
+        } else {
+            match regex::Regex::new(arguments) {
+                Ok(regex) => Ok(Action::Core(CoreAction::SetFilter {
+                    pattern: arguments.to_string(),
+                    regex,
+                })),
+                Err(_) => Err(CommandError::new(
+                    "Invalid argument: expected a valid regular expression",
+                )),
+            }
+        }
+    })
+}
+
+pub(super) fn run_set_reference(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-reference", arguments, || {
+        let arg = require_argument(arguments)?;
+
+        let sequence_id = lookup_sequence_id(&state.selectable_sequences, arg.as_str())
+            .ok_or_else(|| CommandError::new(format!("Sequence not found: {arg}")))?;
+        Ok(Action::Core(CoreAction::SetReference(sequence_id)))
+    })
+}
+
+pub(super) fn run_load_alignment(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("load-alignment", arguments, || {
+        let path = require_argument(arguments)?;
+
+        Ok(Action::LoadFile {
+            input: path.to_owned(),
+        })
+    })
+}
+
+fn parse_consensus_method(arg: &str) -> Option<ConsensusMethod> {
+    match arg {
+        "majority" => Some(ConsensusMethod::Majority),
+        "majority-non-gap" => Some(ConsensusMethod::MajorityNonGap),
+        _ => None,
+    }
+}
+
+fn parse_diff_mode(arg: &str) -> Option<DiffMode> {
+    match arg {
+        "off" => Some(DiffMode::Off),
+        "reference" => Some(DiffMode::Reference),
+        "consensus" => Some(DiffMode::Consensus),
+        _ => None,
+    }
+}
+
+pub(super) fn run_diff_mode(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-diff-mode", arguments, || {
+        let arg = require_argument(arguments)?;
+        let mode = parse_diff_mode(arg.as_str()).ok_or_else(|| {
+            CommandError::new(format!("Invalid argument for set-diff-mode: {arg}"))
+        })?;
+        Ok(Action::Core(CoreAction::SetDiffMode(mode)))
+    })
+}
+
+pub(super) fn run_consensus_method(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-consensus-method", arguments, || {
+        let arg = require_argument(arguments)?;
+        let method = parse_consensus_method(arg.as_str()).ok_or_else(|| {
+            CommandError::new(format!("Invalid argument for set-consensus-method: {arg}"))
+        })?;
+        Ok(Action::Core(CoreAction::SetConsensusMethod(method)))
+    })
+}
+
+fn parse_translation_frame(arg: &str) -> Option<u8> {
+    arg.parse::<u8>()
+        .ok()
+        .filter(|frame| (1..=3).contains(frame))
+}
+
+pub(super) fn run_translation_frame(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-translation-frame", arguments, || {
+        let arg = require_argument(arguments)?;
+        let frame = parse_translation_frame(arg.as_str()).ok_or_else(|| {
+            CommandError::new(format!("Invalid argument for set-translation-frame: {arg}"))
+        })?;
+        Ok(Action::Core(CoreAction::SetTranslationFrame(frame)))
+    })
+}
+
+fn parse_theme(arg: &str) -> Option<ThemeId> {
+    match arg {
+        "everforest-dark" => Some(ThemeId::EverforestDark),
+        "solarized-light" => Some(ThemeId::SolarizedLight),
+        "tokyo-night" => Some(ThemeId::TokyoNight),
+        "terminal-default" => Some(ThemeId::TerminalDefault),
+        _ => None,
+    }
+}
+
+pub(super) fn run_theme(_: &CommandPaletteState, arguments: &str) -> Result<Action, CommandError> {
+    run_command("set-theme", arguments, || {
+        let arg = require_argument(arguments)?;
+        let theme = parse_theme(arg.as_str())
+            .ok_or_else(|| CommandError::new(format!("Invalid argument for set-theme: {arg}")))?;
+        Ok(Action::Ui(UiAction::SetTheme(theme)))
+    })
+}
+
+pub(super) fn run_sequence_type(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("set-sequence-type", arguments, || {
+        let arg = require_argument(arguments)?;
+        let sequence_type = arg.parse::<SequenceType>().map_err(|()| {
+            CommandError::new(format!("Invalid argument for set-sequence-type: {arg}"))
+        })?;
+        Ok(Action::Core(CoreAction::SetSequenceType(sequence_type)))
+    })
+}
+
+pub(super) fn run_check_update(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> Result<Action, CommandError> {
+    run_command("check-update", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Action::CheckForUpdate {
+            show_success_message: true,
+        })
+    })
+}
+
+pub(super) fn run_quit(_: &CommandPaletteState, arguments: &str) -> Result<Action, CommandError> {
+    run_command("quit", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Action::Quit)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn palette_state_with_columns(visible_columns: Vec<usize>) -> CommandPaletteState {
+        CommandPaletteState::new(Vec::new(), Vec::new(), SequenceType::Dna, visible_columns)
+    }
+
+    #[test]
+    fn jump_position_uses_next_visible_column_when_target_hidden() {
+        let state = palette_state_with_columns(vec![0, 3, 4]);
+
+        let action = run_jump_position(&state, "2")
+            .expect("jump-position should resolve to the next visible column");
+
+        assert!(matches!(
+            action,
+            Action::Core(CoreAction::JumpToPosition(1))
+        ));
+    }
+
+    #[test]
+    fn jump_position_errors_when_target_is_after_last_visible_column() {
+        let state = palette_state_with_columns(vec![0, 3, 4]);
+
+        let error = run_jump_position(&state, "10")
+            .expect_err("jump-position should reject targets after the last visible column");
+
+        assert_eq!(
+            error.message,
+            "No visible column at or after the requested position"
+        );
+    }
+
+    #[test]
+    fn jump_position_rejects_zero() {
+        let state = palette_state_with_columns(vec![0, 1, 2]);
+
+        let error =
+            run_jump_position(&state, "0").expect_err("zero should be rejected as invalid input");
+
+        assert_eq!(
+            error.message,
+            "Invalid argument: expected a positive integer"
+        );
+    }
+}
