@@ -8,6 +8,7 @@ use ratatui::widgets::Paragraph;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationLevel {
     Error,
+    #[allow(dead_code)]
     Warning,
     Info,
 }

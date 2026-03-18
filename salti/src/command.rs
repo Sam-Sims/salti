@@ -1,12 +1,12 @@
 use crate::config::theme::ThemeId;
 use crate::core::model::DiffMode;
-use crate::overlay::Notification;
+use crate::ui::notification::Notification;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Quit,
     OpenCommandPalette,
-    CloseCommandPalette,
+    CloseOverlay,
     ToggleMinimap,
     SetTheme(ThemeId),
     ShowNotification(Notification),
