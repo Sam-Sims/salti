@@ -7,15 +7,17 @@ use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Widget};
 
-use crate::config::theme::{Theme, ThemeStyles};
-use crate::core::CoreState;
-use crate::core::command::CoreAction;
+use crate::command::Command;
+use crate::config::theme::Theme;
+use crate::core::model::AlignmentModel;
+use crate::ui::ui_state::UiState;
 
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
 
 /// number of sampled columns per minimap cell when collapsing
 const MINIMAP_COLUMN_SAMPLES_PER_CELL: usize = 8;
+
 /// number of sampled sequences per minimap cell when estimating colour.
 const MINIMAP_ROW_SAMPLES_PER_CELL: usize = 10;
 
@@ -31,6 +33,15 @@ pub struct MinimapState {
 }
 
 impl MinimapState {
+    pub fn is_dragging(&self) -> bool {
+        self.anchor_columns.is_some()
+    }
+
+    pub fn contains_mouse(&self, mouse: MouseEvent, overlay_area: Rect) -> bool {
+        let track_area = layout(overlay_area).track_area;
+        track_area.contains((mouse.column, mouse.row).into())
+    }
+
     fn position_from_mouse(mouse_x: u16, track_area: Rect, total_columns: usize) -> usize {
         let offset = usize::from(mouse_x - track_area.x);
         let width = usize::from(track_area.width);
@@ -43,26 +54,28 @@ impl MinimapState {
         track_area: Rect,
         total_columns: usize,
         drag_anchor: usize,
-    ) -> Option<CoreAction> {
+    ) -> Command {
         let column = Self::position_from_mouse(mouse_x, track_area, total_columns);
         let visible_target = column.saturating_sub(drag_anchor);
-        Some(CoreAction::JumpToPosition(visible_target))
+        Command::JumpToPosition(visible_target)
     }
+
     pub fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
         overlay_area: Rect,
         viewport_column_range: &Range<usize>,
-        visible_to_absolute: &[usize],
-    ) -> Option<CoreAction> {
-        if visible_to_absolute.is_empty() {
+        total_columns: usize,
+    ) -> Option<Command> {
+        if total_columns == 0 {
             return None;
         }
 
-        let total_columns = visible_to_absolute.len();
-        let viewport_cols = viewport_column_range.end - viewport_column_range.start;
+        let viewport_cols = viewport_column_range
+            .end
+            .saturating_sub(viewport_column_range.start);
         let track_area = layout(overlay_area).track_area;
-        let in_track = track_area.contains((mouse.column, mouse.row).into());
+        let in_track = self.contains_mouse(mouse, overlay_area);
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) if in_track => {
@@ -74,16 +87,31 @@ impl MinimapState {
                 };
 
                 self.anchor_columns = Some(drag_anchor);
-                Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
+                Some(Self::pan_action(
+                    mouse.column,
+                    track_area,
+                    total_columns,
+                    drag_anchor,
+                ))
             }
             MouseEventKind::Drag(MouseButton::Left) if in_track => {
                 let drag_anchor = self.anchor_columns?;
-                Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
+                Some(Self::pan_action(
+                    mouse.column,
+                    track_area,
+                    total_columns,
+                    drag_anchor,
+                ))
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let drag_anchor = self.anchor_columns.take()?;
                 if in_track {
-                    Self::pan_action(mouse.column, track_area, total_columns, drag_anchor)
+                    Some(Self::pan_action(
+                        mouse.column,
+                        track_area,
+                        total_columns,
+                        drag_anchor,
+                    ))
                 } else {
                     None
                 }
@@ -94,13 +122,12 @@ impl MinimapState {
 }
 
 fn sample_alignments(
-    core: &CoreState,
+    alignment: &AlignmentModel,
     visible_column_start: usize,
     visible_column_end: usize,
 ) -> Option<u8> {
     let visible_column_span = visible_column_end.saturating_sub(visible_column_start);
-    let row_ids = &core.row_visibility.visible_to_absolute;
-    let row_count = row_ids.len();
+    let row_count = alignment.view().row_count();
     if row_count == 0 || visible_column_span == 0 {
         return None;
     }
@@ -109,19 +136,19 @@ fn sample_alignments(
     let column_samples = visible_column_span.clamp(1, MINIMAP_COLUMN_SAMPLES_PER_CELL);
     let mut counts = [0u16; 256];
 
-    let visible_to_absolute = &core.column_visibility.visible_to_absolute;
     for column_sample in 0..column_samples {
         let visible_offset = (column_sample * 2 + 1) * visible_column_span / (column_samples * 2);
         let visible_column = (visible_column_start + visible_offset).min(visible_column_end - 1);
-        let absolute_column = visible_to_absolute[visible_column];
 
         for row_sample in 0..row_samples {
-            let row_index = row_sample * row_count / row_samples;
-            let sequence_id = row_ids[row_index];
-            let sequence = &core.data.sequences[sequence_id].alignment.sequence;
-            if let Some(&byte) = sequence.get(absolute_column) {
-                counts[usize::from(byte)] += 1;
-            }
+            let relative_row = row_sample * row_count / row_samples;
+            let Some(sequence) = alignment.view().sequence(relative_row) else {
+                continue;
+            };
+            let Some(byte) = sequence.byte_at(visible_column) else {
+                continue;
+            };
+            counts[usize::from(byte)] += 1;
         }
     }
 
@@ -133,14 +160,15 @@ fn sample_alignments(
 }
 
 fn calculate_block_colour(
-    core: &CoreState,
+    alignment: &AlignmentModel,
     theme: &Theme,
     visible_column_start: usize,
     visible_column_end: usize,
 ) -> Color {
-    let sequence_type = core.sequence_type();
-    sample_alignments(core, visible_column_start, visible_column_end)
-        .and_then(|byte| theme.sequence.colour_for(byte, sequence_type))
+    let alignment_type = alignment.base().active_type();
+
+    sample_alignments(alignment, visible_column_start, visible_column_end)
+        .and_then(|byte| theme.sequence.colour_for(byte, alignment_type))
         .unwrap_or(theme.panel_bg_dim)
 }
 
@@ -158,6 +186,7 @@ pub fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usiz
     if total_columns == 0 {
         return None;
     }
+
     let width = usize::from(track_area.width);
     let start_offset = (window.start * width / total_columns).min(width - 1);
     let end_offset = (window.end * width)
@@ -176,7 +205,7 @@ pub fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usiz
 fn render_minimap_track(
     f: &mut Frame,
     area: Rect,
-    core: &CoreState,
+    alignment: &AlignmentModel,
     theme: &Theme,
     total_columns: usize,
 ) {
@@ -200,8 +229,7 @@ fn render_minimap_track(
             .div_ceil(total_width)
             .max(block_start + 1)
             .min(total_columns);
-        let block_colour = calculate_block_colour(core, theme, block_start, block_end);
-
+        let block_colour = calculate_block_colour(alignment, theme, block_start, block_end);
         let block_x = area.x + block_index as u16;
         let block_area = Rect::new(block_x, area.y, 1, area.height);
         for position in block_area.positions() {
@@ -225,24 +253,32 @@ pub fn render(
     f: &mut Frame,
     overlay_area: Rect,
     input_area: Rect,
-    core: &CoreState,
-    theme: &Theme,
-    styles: &ThemeStyles,
+    alignment: &AlignmentModel,
+    ui: &UiState,
 ) {
     let minimap_layout = layout(overlay_area);
+    let theme = &ui.theme.theme;
+    let styles = &ui.theme.styles;
+    let total_columns = alignment.view().column_count();
+
     Clear.render(minimap_layout.area, f.buffer_mut());
-
-    let block = Block::bordered()
-        .border_style(styles.border)
-        .style(styles.panel_block);
-    f.render_widget(block, minimap_layout.area);
-
-    let total_columns = core.column_visibility.visible_count();
-    render_minimap_track(f, minimap_layout.track_area, core, theme, total_columns);
+    f.render_widget(
+        Block::bordered()
+            .border_style(styles.border)
+            .style(styles.panel_block),
+        minimap_layout.area,
+    );
+    render_minimap_track(
+        f,
+        minimap_layout.track_area,
+        alignment,
+        theme,
+        total_columns,
+    );
 
     if let Some(viewport_box) = highlight_box(
         minimap_layout.track_area,
-        core.viewport.window().col_range,
+        ui.viewport.window().col_range,
         total_columns,
     ) {
         shade_highlight_box(f, viewport_box, theme);
