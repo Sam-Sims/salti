@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-use color_eyre::Result;
+use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;

@@ -29,7 +29,6 @@ pub struct Cli {
 }
 
 impl Cli {
-    #[must_use]
     pub fn load_startup_sate(self) -> StartupState {
         StartupState {
             file_path: self.file,
