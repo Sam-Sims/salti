@@ -10,6 +10,32 @@ pub const RULER_HEIGHT_ROWS: u16 = 2;
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PinnedSectionLayout {
+    pub pinned_rendered: usize,
+    pub divider_height: usize,
+    pub scrollable_height: usize,
+}
+
+pub fn pinned_section_layout(pinned_count: usize, available_height: usize) -> PinnedSectionLayout {
+    if available_height == 0 {
+        return PinnedSectionLayout {
+            pinned_rendered: 0,
+            divider_height: 0,
+            scrollable_height: 0,
+        };
+    }
+
+    let pinned_rendered = pinned_count.min(available_height.saturating_sub(1));
+    let divider_height = usize::from(pinned_rendered > 0);
+    let scrollable_height = available_height.saturating_sub(pinned_rendered + divider_height);
+
+    PinnedSectionLayout {
+        pinned_rendered,
+        divider_height,
+        scrollable_height,
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub struct FrameLayout {
     pub top_status_area: Rect,
@@ -20,7 +46,6 @@ pub struct FrameLayout {
 }
 
 impl FrameLayout {
-    #[must_use]
     pub fn new(terminal_area: Rect) -> Self {
         let [non_input_area, input_area] = terminal_area.layout(&vertical![*=1, ==1]);
         let [top_status_area, overlay_area] = non_input_area.layout(&vertical![==1, *=1]);
@@ -46,10 +71,7 @@ pub struct AppLayout {
 }
 
 impl AppLayout {
-    #[must_use]
-    pub fn new(area: Rect) -> Self {
-        let content_area = area;
-
+    pub fn new(content_area: Rect) -> Self {
         let [alignment_area, consensus_area] = content_area
             .layout(&vertical![*=1, ==CONSENSUS_PANE_HEIGHT_ROWS].spacing(Spacing::Overlap(1)));
 
