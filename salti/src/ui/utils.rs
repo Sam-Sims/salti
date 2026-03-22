@@ -1,4 +1,3 @@
-#[must_use]
 pub fn truncate_label(value: &str, width: usize) -> String {
     let char_count = value.chars().count();
     if char_count <= width {
