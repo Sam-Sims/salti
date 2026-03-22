@@ -1,5 +1,4 @@
 mod command_definitions;
-mod command_error;
 mod command_runners;
 mod command_spec;
 mod completers;

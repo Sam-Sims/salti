@@ -1,8 +1,8 @@
 use super::command_runners::{
     run_check_update, run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode,
-    run_filter, run_jump_position, run_jump_sequence, run_load_alignment, run_pin_sequence,
-    run_quit, run_sequence_type, run_set_reference, run_theme, run_toggle_translation,
-    run_translation_frame, run_unpin_sequence,
+    run_filter_gaps, run_filter_rows, run_jump_position, run_jump_sequence, run_load_alignment,
+    run_pin_sequence, run_quit, run_set_active_type, run_set_reference, run_theme,
+    run_toggle_translation, run_translation_frame, run_unpin_sequence,
 };
 use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
 use super::completers;
@@ -54,18 +54,26 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         run: run_unpin_sequence,
     }),
     PaletteCommand::Typable(TypableCommand {
-        name: "set-filter",
+        name: "filter-rows",
         help_text: "Filter sequences by regular expression.",
         aliases: &[],
         completer: Some(completers::filter_matches),
         static_candidates: &[],
-        run: run_filter,
+        run: run_filter_rows,
     }),
     PaletteCommand::Static(StaticCommand {
         name: "clear-filter",
-        help_text: "Clear the active filter.",
+        help_text: "Clear all active filters.",
         aliases: &[],
         run: run_clear_filter,
+    }),
+    PaletteCommand::Typable(TypableCommand {
+        name: "filter-gaps",
+        help_text: "Hide columns with a gap percentage above the given threshold. Use 0 to disable it.",
+        aliases: &[],
+        completer: None,
+        static_candidates: &["0", "5", "10", "25", "50"],
+        run: run_filter_gaps,
     }),
     PaletteCommand::Typable(TypableCommand {
         name: "set-reference",
@@ -149,7 +157,7 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         help_text: "Override sequence type detection for rendering.",
         aliases: &[],
         completer: None,
-        static_candidates: &["dna", "aa", "full"],
-        run: run_sequence_type,
+        static_candidates: &["dna", "protein", "generic"],
+        run: run_set_active_type,
     }),
 ];

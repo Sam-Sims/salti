@@ -1,4 +1,4 @@
-use crate::core::parser::SequenceType;
+use libmsa::AlignmentType;
 use ratatui::style::{Color, Style};
 
 // Generated from iwanthue
@@ -281,7 +281,13 @@ pub enum ThemeId {
 }
 
 impl ThemeId {
-    #[must_use]
+    pub const ALL: &[ThemeId] = &[
+        ThemeId::EverforestDark,
+        ThemeId::SolarizedLight,
+        ThemeId::TokyoNight,
+        ThemeId::TerminalDefault,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             ThemeId::EverforestDark => "everforest-dark",
@@ -290,15 +296,23 @@ impl ThemeId {
             ThemeId::TerminalDefault => "terminal-default",
         }
     }
+}
 
-    #[must_use]
-    pub const fn all() -> [ThemeId; 4] {
-        [
-            ThemeId::EverforestDark,
-            ThemeId::SolarizedLight,
-            ThemeId::TokyoNight,
-            ThemeId::TerminalDefault,
-        ]
+impl std::fmt::Display for ThemeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl std::str::FromStr for ThemeId {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|theme| theme.name() == value)
+            .ok_or(())
     }
 }
 
@@ -308,6 +322,7 @@ pub struct Theme {
     pub surface_bg: Color,
     pub panel_bg: Color,
     pub panel_bg_dim: Color,
+    #[allow(dead_code)]
     pub overlay_bg: Color,
     pub border: Color,
     pub border_active: Color,
@@ -330,6 +345,7 @@ pub struct ThemeStyles {
     pub panel_block: Style,
     pub panel_block_dim: Style,
     pub border: Style,
+    #[allow(dead_code)]
     pub border_active: Style,
     pub text: Style,
     pub text_muted: Style,
@@ -374,24 +390,21 @@ pub struct SequenceTheme {
 }
 
 impl SequenceTheme {
-    #[must_use]
-    pub fn style_for(&self, byte: u8, sequence_type: SequenceType) -> Style {
-        self.colour_for(byte, sequence_type)
+    pub fn style_for(&self, byte: u8, alignment_type: AlignmentType) -> Style {
+        self.colour_for(byte, alignment_type)
             .map_or(Style::new(), |colour| {
                 Style::new().bg(colour).fg(self.foreground)
             })
     }
 
-    #[must_use]
-    pub fn colour_for(&self, byte: u8, sequence_type: SequenceType) -> Option<Color> {
-        match sequence_type {
-            SequenceType::Dna => self.dna_colour(byte),
-            SequenceType::AminoAcid => self.amino_acid_colour(byte),
-            SequenceType::Full => self.full_colour(byte),
+    pub fn colour_for(&self, byte: u8, alignment_type: AlignmentType) -> Option<Color> {
+        match alignment_type {
+            AlignmentType::Dna => self.dna_colour(byte),
+            AlignmentType::Protein => self.amino_acid_colour(byte),
+            AlignmentType::Generic => self.full_colour(byte),
         }
     }
 
-    #[must_use]
     pub fn dna_colour(&self, byte: u8) -> Option<Color> {
         match byte {
             b'A' | b'a' => Some(self.dna.a),
@@ -408,7 +421,7 @@ impl SequenceTheme {
 
     // colours from clustal default
     // http://www.jalview.org/help/html/colourSchemes/clustal.html
-    #[must_use]
+
     pub fn amino_acid_colour(&self, byte: u8) -> Option<Color> {
         match byte {
             b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f'
@@ -424,7 +437,6 @@ impl SequenceTheme {
         }
     }
 
-    #[must_use]
     pub fn full_colour(&self, byte: u8) -> Option<Color> {
         FULL_ASCII_COLOURS
             .get(usize::from(byte.checked_sub(33)?))
@@ -432,7 +444,6 @@ impl SequenceTheme {
     }
 }
 
-#[must_use]
 pub fn theme_from_id(theme_id: ThemeId) -> Theme {
     match theme_id {
         ThemeId::EverforestDark => EVERFOREST_DARK,
@@ -442,7 +453,6 @@ pub fn theme_from_id(theme_id: ThemeId) -> Theme {
     }
 }
 
-#[must_use]
 pub fn build_theme_styles(theme: Theme) -> ThemeStyles {
     ThemeStyles {
         base_block: Style::new().bg(theme.base_bg).fg(theme.text),
