@@ -76,7 +76,9 @@ pub(crate) fn handle_mouse_event(
         MouseRoute::Minimap => {
             if let Some(alignment) = alignment {
                 let viewport_col_range = ui.viewport.window().col_range;
-                if let Some(ActiveOverlay::Minimap(minimap_state)) = ui.overlay.active_overlay.as_mut() {
+                if let Some(ActiveOverlay::Minimap(minimap_state)) =
+                    ui.overlay.active_overlay.as_mut()
+                {
                     handle_minimap_mouse_event(
                         &mut commands,
                         alignment,
