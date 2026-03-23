@@ -208,6 +208,8 @@ Commands:
 
 ## Some notes on features
 
+*until I write proper docs*
+
 ### Fuzzy matching
 
 All commands that take string input support fuzzy matching. For example, `jump-sequence` will match any sequence name
@@ -225,6 +227,18 @@ If there is a tie for most common character, one is chosen at random.
 
 Consensus is calculated in the background
 
+### Gap filtering
+
+`filter-gaps` hides columns whose gap fraction is above the threshold you give it. The threshold is a percentage, so
+`filter-gaps 25` removes columns where 25% of positions are gaps. You can use `filter-gaps 0` to clear the filter.
+
+Gap filtering changes the visible coordinate space. The ruler still shows absolute positions, but marks jumps where
+hidden columns have been skipped. A single jump is shown with an arrow pointing towards the side that has a jump.
+Dense regions of skipped columns are shown as a run of `~` characters rather than individual arrows.
+
+Gap filtering and translation cannot be used at the same time. If translation is active, `filter-gaps` will be
+rejected. Likewise if a gap filter is active, translation cannot be enabled until the filter is cleared.
+
 ### Pinned behaviour
 
 - Pinned sequences stay visible and remain at the top, even when they do not match the active filter.
@@ -240,8 +254,8 @@ Consensus is calculated in the background
 ### Update check:
 
 `salti` will check for updates on startup and notify you if a new version is available. It does this by
-querying the crates api: https://crates.io/api/v1/crates. However, no network connection is required, and will not cause
-any issues if the check fails.
+querying the crates api: https://crates.io/api/v1/crates. However, no network connection is required to use `salti`, and
+will not cause any issues if the check fails.
 
 This behaviour can be disabled entirely by setting `SALTI_SKIP_UPDATE_CHECK=true`. You can still check for updates
 manually with the `check-update` command.
