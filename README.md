@@ -10,10 +10,6 @@
 `salti` is a terminal based multiple sequence alignment (MSA) viewer for FASTA files.
 It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want
 to leave the terminal.
-<br>
-<p align="center">
-  <img src="assets/splash_img.png" />
-</p>
 
 ## Contents
 
@@ -196,7 +192,8 @@ Commands:
 - `jump-sequence` - Jump to a sequence by name
 - `pin-sequence` - Pin a visible sequence to the top of the alignment view.
 - `unpin-sequence` - Remove a sequence from the pinned group.
-- `set-filter` - Filter visible sequences by regex.
+- `filter-rows` - Filter rows by their IDs (fasta headers) via regex.
+- `filter-gaps` - Filter columns by their gap percentage.
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
