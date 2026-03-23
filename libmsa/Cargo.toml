@@ -1,0 +1,16 @@
+[package]
+name = "libmsa"
+version = "0.1.0"
+edition = "2024"
+authors = ["Samuel Sims"]
+description = "A library for operations on multiple sequence alignments"
+readme = "README.md"
+repository = "https://github.com/Sam-Sims/salti"
+license = "MIT"
+keywords = ["bioinformatics", "MSA", "TUI", "ratatui"]
+categories = ["command-line-utilities", "science"]
+
+[dependencies]
+rand = "0.9"
+regex = "1.12.3"
+thiserror = "2.0.18"
