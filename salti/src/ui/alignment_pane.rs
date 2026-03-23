@@ -431,8 +431,8 @@ fn build_ruler(
     }
 
     for (start, end) in dense_spans {
-        for position in start..=end {
-            marker_line[position] = "~".set_style(theme.styles.warning);
+        for marker in marker_line.iter_mut().take(end + 1).skip(start) {
+            *marker = "~".set_style(theme.styles.warning);
         }
     }
 
