@@ -28,7 +28,6 @@ pub struct StatsJobResult {
     pub summaries: Result<Vec<libmsa::ColumnSummary>, String>,
 }
 
-
 #[derive(Debug)]
 pub struct ColumnStatsCache {
     pub generation: u64,
@@ -36,7 +35,6 @@ pub struct ColumnStatsCache {
     translated: ChunkedCache,
     translated_frame: Option<libmsa::ReadingFrame>,
 }
-
 
 impl Default for ColumnStatsCache {
     fn default() -> Self {
@@ -229,7 +227,6 @@ impl ChunkedCache {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
