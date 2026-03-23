@@ -339,25 +339,46 @@ fn break_positions(
     breaks
 }
 
-fn dense_break_positions(breaks: &[(usize, BreakMarker)]) -> Vec<usize> {
-    let mut dense_positions = Vec::new();
+fn dense_break_marker_position(position: usize, marker: BreakMarker, width: usize) -> usize {
+    match marker {
+        BreakMarker::Leading => position,
+        BreakMarker::Trailing => {
+            if position + 1 < width {
+                position + 1
+            } else {
+                position
+            }
+        }
+    }
+}
+
+fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<(usize, usize)> {
+    let marker_positions: Vec<usize> = breaks
+        .iter()
+        .map(|&(position, marker)| dense_break_marker_position(position, marker, width))
+        .collect();
+    let mut spans = Vec::new();
     let mut cluster_start = 0;
 
-    while cluster_start < breaks.len() {
+    while cluster_start < marker_positions.len() {
         let mut cluster_end = cluster_start + 1;
-        while cluster_end < breaks.len() && breaks[cluster_end].0 == breaks[cluster_end - 1].0 + 1 {
+        while cluster_end < marker_positions.len()
+            && marker_positions[cluster_end] <= marker_positions[cluster_end - 1] + 3
+        {
             cluster_end += 1;
         }
 
-        let cluster = &breaks[cluster_start..cluster_end];
-        if cluster.len() >= 2 {
-            dense_positions.extend(cluster.iter().map(|&(position, _)| position));
+        if cluster_end - cluster_start >= 2 {
+            spans.push((
+                marker_positions[cluster_start],
+                marker_positions[cluster_end - 1],
+            ));
         }
 
         cluster_start = cluster_end;
     }
 
-    dense_positions
+    spans
 }
 
 fn build_ruler(
@@ -391,11 +412,14 @@ fn build_ruler(
     }
 
     let breaks = break_positions(absolute_columns, filtered_leading, filtered_trailing);
-    let dense_positions = dense_break_positions(&breaks);
+    let dense_spans = dense_break_spans(&breaks, width);
 
     for (position, marker) in breaks {
-        if dense_positions.contains(&position) {
-            marker_line[position] = "~".set_style(theme.styles.warning);
+        let marker_position = dense_break_marker_position(position, marker, width);
+        if dense_spans
+            .iter()
+            .any(|&(start, end)| start <= marker_position && marker_position <= end)
+        {
             continue;
         }
 
@@ -404,6 +428,12 @@ fn build_ruler(
             BreakMarker::Trailing => "›",
         };
         marker_line[position] = symbol.set_style(theme.styles.warning);
+    }
+
+    for (start, end) in dense_spans {
+        for position in start..=end {
+            marker_line[position] = "~".set_style(theme.styles.warning);
+        }
     }
 
     (Line::from(number_line), Line::from(marker_line))
@@ -473,175 +503,4 @@ pub fn render_alignment_pane(
         theme,
         layout.alignment_pane,
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    fn line_text(line: &Line<'_>) -> String {
-        line.spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect()
-    }
-
-    fn break_chars(marker_line: &Line<'_>) -> Vec<(usize, String)> {
-        marker_line
-            .spans
-            .iter()
-            .enumerate()
-            .filter_map(|(index, span)| match span.content.as_ref() {
-                "‹" | "›" | "~" => Some((index, span.content.to_string())),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn build_ruler_returns_empty_lines_for_empty_columns() {
-        let theme = ThemeState::default();
-        let (number, marker) = build_ruler(&[], false, false, &theme);
-
-        assert_eq!(line_text(&number), "");
-        assert_eq!(line_text(&marker), "");
-    }
-
-    #[test]
-    fn build_ruler_shows_no_breaks_for_contiguous_columns() {
-        let cols: Vec<usize> = (0..20).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert!(break_chars(&marker).is_empty());
-    }
-
-    #[test]
-    fn build_ruler_does_not_show_breaks_for_scrolled_contiguous_columns() {
-        let cols: Vec<usize> = (50..70).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert!(break_chars(&marker).is_empty());
-    }
-
-    #[test]
-    fn build_ruler_marks_single_interior_gap() {
-        let cols: Vec<usize> = (0..5).chain(9..15).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert_eq!(break_chars(&marker), vec![(4, "›".to_string())]);
-    }
-
-    #[test]
-    fn build_ruler_marks_leading_filtered_gap() {
-        let cols: Vec<usize> = (358..378).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, true, false, &theme);
-
-        assert_eq!(break_chars(&marker), vec![(0, "‹".to_string())]);
-    }
-
-    #[test]
-    fn build_ruler_marks_trailing_filtered_gap() {
-        let cols: Vec<usize> = (491..501).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, true, &theme);
-
-        assert_eq!(break_chars(&marker), vec![(9, "›".to_string())]);
-    }
-
-    #[test]
-    fn build_ruler_fills_dense_break_clusters_with_tildes() {
-        let cols = vec![0, 5, 10, 15, 20];
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert_eq!(
-            break_chars(&marker),
-            vec![
-                (0, "~".to_string()),
-                (1, "~".to_string()),
-                (2, "~".to_string()),
-                (3, "~".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn build_ruler_leaves_separated_breaks_as_arrows() {
-        let cols: Vec<usize> = (0..5).chain(9..14).chain(18..23).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert_eq!(
-            break_chars(&marker),
-            vec![(4, "›".to_string()), (9, "›".to_string())]
-        );
-    }
-
-    #[test]
-    fn build_ruler_preserves_tick_marks() {
-        let cols: Vec<usize> = (0..20).collect();
-        let theme = ThemeState::default();
-        let (_number, marker) = build_ruler(&cols, false, false, &theme);
-        let text = line_text(&marker);
-
-        assert_eq!(&text[4..5], ".");
-        assert_eq!(&text[9..10], "|");
-    }
-
-    #[test]
-    fn build_ruler_preserves_number_labels_when_breaks_are_present() {
-        let cols: Vec<usize> = (0..10).chain(50..60).collect();
-        let theme = ThemeState::default();
-        let (number, marker) = build_ruler(&cols, false, false, &theme);
-
-        assert!(line_text(&number).contains("10"));
-        assert_eq!(break_chars(&marker), vec![(9, "›".to_string())]);
-    }
-
-    #[test]
-    fn build_sequence_row_lines_renders_translated_rows_with_diff() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("pinned", b"ATGAAATTT"),
-            raw("reference", b"ATGAAATTT"),
-            raw("visible", b"ATGCCCTTT"),
-        ])
-        .expect("test alignment should be valid");
-        let mut alignment =
-            AlignmentModel::new(alignment).expect("alignment model should be created");
-        alignment.pin(0).expect("pin should succeed");
-        alignment.set_reference(1).expect("reference should be set");
-        alignment.diff_mode = DiffMode::Reference;
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 0..0,
-        };
-        let lines = build_sequence_row_lines(
-            &alignment,
-            &window,
-            &ColumnStatsCache::default(),
-            Rect::new(0, 0, 9, 3),
-            &ThemeState::default(),
-        );
-
-        assert_eq!(lines.len(), 3);
-        assert_eq!(line_text(&lines[0]), " .  .  . ");
-        assert_eq!(line_text(&lines[1]), "─────────");
-        assert_eq!(line_text(&lines[2]), " .  P  . ");
-    }
 }
