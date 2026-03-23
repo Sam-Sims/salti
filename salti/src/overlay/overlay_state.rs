@@ -3,7 +3,7 @@ use super::minimap::MinimapState;
 
 #[derive(Debug)]
 pub enum ActiveOverlay {
-    Palette(CommandPaletteState),
+    Palette(Box<CommandPaletteState>),
     Minimap(MinimapState),
 }
 
@@ -14,7 +14,7 @@ pub struct OverlayState {
 
 impl OverlayState {
     pub fn open_palette(&mut self, palette: CommandPaletteState) {
-        self.active_overlay = Some(ActiveOverlay::Palette(palette));
+        self.active_overlay = Some(ActiveOverlay::Palette(Box::new(palette)));
     }
 
     pub fn toggle_minimap(&mut self) {
