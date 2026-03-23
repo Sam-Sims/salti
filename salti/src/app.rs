@@ -595,7 +595,7 @@ impl App {
             return;
         };
         let col_range = self.ui.viewport.window().col_range;
-        let generation = self.stats_cache.generation();
+        let generation = self.stats_cache.generation;
 
         for chunk_idx in self.stats_cache.raw_chunks_to_spawn(&col_range) {
             self.stats_cache.mark_raw_pending(chunk_idx);

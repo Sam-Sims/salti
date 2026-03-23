@@ -11,20 +11,6 @@ enum ChunkState {
     Filled,
 }
 
-#[derive(Debug)]
-struct ChunkedCache {
-    chunks: Vec<ChunkState>,
-    summaries: Vec<Option<libmsa::ColumnSummary>>,
-}
-
-#[derive(Debug)]
-pub struct ColumnStatsCache {
-    generation: u64,
-    raw: ChunkedCache,
-    translated: ChunkedCache,
-    translated_frame: Option<libmsa::ReadingFrame>,
-}
-
 pub struct StatsJobRequest {
     pub alignment: libmsa::Alignment,
     pub view: StatsView,
@@ -40,6 +26,157 @@ pub struct StatsJobResult {
     pub chunk_idx: usize,
     pub view: StatsView,
     pub summaries: Result<Vec<libmsa::ColumnSummary>, String>,
+}
+
+
+#[derive(Debug)]
+pub struct ColumnStatsCache {
+    pub generation: u64,
+    raw: ChunkedCache,
+    translated: ChunkedCache,
+    translated_frame: Option<libmsa::ReadingFrame>,
+}
+
+
+impl Default for ColumnStatsCache {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            raw: ChunkedCache::empty(),
+            translated: ChunkedCache::empty(),
+            translated_frame: None,
+        }
+    }
+}
+
+impl ColumnStatsCache {
+    pub fn init(&mut self, nucleotide_cols: usize) {
+        self.generation += 1;
+        self.raw = ChunkedCache::new(nucleotide_cols);
+        self.translated = ChunkedCache::empty();
+        self.translated_frame = None;
+    }
+
+    pub fn raw_summary_at(&self, col: usize) -> Option<&libmsa::ColumnSummary> {
+        self.raw
+            .summaries
+            .get(col)
+            .and_then(|summary| summary.as_ref())
+    }
+
+    pub fn translated_summary_at(
+        &self,
+        frame: libmsa::ReadingFrame,
+        protein_col: usize,
+    ) -> Option<&libmsa::ColumnSummary> {
+        if self.translated_frame != Some(frame) {
+            return None;
+        }
+        self.translated
+            .summaries
+            .get(protein_col)
+            .and_then(|summary| summary.as_ref())
+    }
+
+    pub fn raw_chunks_to_spawn(&mut self, visible_col_range: &Range<usize>) -> Vec<usize> {
+        self.raw
+            .chunks_for_range(visible_col_range)
+            .filter(|&idx| self.raw.chunks[idx] == ChunkState::Empty)
+            .collect()
+    }
+
+    pub fn translated_chunks_to_spawn(
+        &mut self,
+        visible_protein_range: &Range<usize>,
+        frame: libmsa::ReadingFrame,
+        protein_cols: usize,
+    ) -> Vec<usize> {
+        if self.translated_frame != Some(frame) || self.translated.summaries.len() != protein_cols {
+            self.translated_frame = Some(frame);
+            self.translated = ChunkedCache::new(protein_cols);
+        }
+
+        self.translated
+            .chunks_for_range(visible_protein_range)
+            .filter(|&idx| self.translated.chunks[idx] == ChunkState::Empty)
+            .collect()
+    }
+
+    pub fn store(&mut self, result: StatsJobResult) -> bool {
+        if result.generation != self.generation {
+            return false;
+        }
+
+        let summaries = match result.summaries {
+            Ok(summaries) => summaries,
+            Err(_) => {
+                let cache = match result.view {
+                    StatsView::Raw => &mut self.raw,
+                    StatsView::Translated(frame) => {
+                        if self.translated_frame != Some(frame) {
+                            return false;
+                        }
+                        &mut self.translated
+                    }
+                };
+                if let Some(state) = cache.chunks.get_mut(result.chunk_idx) {
+                    *state = ChunkState::Empty;
+                }
+                return false;
+            }
+        };
+
+        let cache = match result.view {
+            StatsView::Raw => &mut self.raw,
+            StatsView::Translated(frame) => {
+                if self.translated_frame != Some(frame) {
+                    return false;
+                }
+                &mut self.translated
+            }
+        };
+        cache.fill_chunk(result.chunk_idx, summaries);
+        true
+    }
+
+    pub fn invalidate_all(&mut self, nucleotide_cols: usize) {
+        self.generation += 1;
+        self.raw.reset(nucleotide_cols);
+        self.translated = ChunkedCache::empty();
+        self.translated_frame = None;
+    }
+
+    pub fn invalidate_translated(&mut self) {
+        self.generation += 1;
+        self.translated = ChunkedCache::empty();
+        self.translated_frame = None;
+    }
+
+    pub fn mark_raw_pending(&mut self, chunk_idx: usize) {
+        if let Some(state) = self.raw.chunks.get_mut(chunk_idx) {
+            *state = ChunkState::Pending;
+        }
+    }
+
+    pub fn mark_translated_pending(&mut self, chunk_idx: usize) {
+        if let Some(state) = self.translated.chunks.get_mut(chunk_idx) {
+            *state = ChunkState::Pending;
+        }
+    }
+
+    pub fn raw_chunk_range(&self, chunk_idx: usize) -> Range<usize> {
+        self.raw.chunk_range(chunk_idx)
+    }
+
+    pub fn translated_chunk_range(&self, chunk_idx: usize) -> Range<usize> {
+        self.translated.chunk_range(chunk_idx)
+    }
+}
+
+#[derive(Debug)]
+struct ChunkedCache {
+    chunks: Vec<ChunkState>,
+    summaries: Vec<Option<libmsa::ColumnSummary>>,
 }
 
 impl ChunkedCache {
@@ -93,144 +230,6 @@ impl ChunkedCache {
     }
 }
 
-impl Default for ColumnStatsCache {
-    fn default() -> Self {
-        Self {
-            generation: 0,
-            raw: ChunkedCache::empty(),
-            translated: ChunkedCache::empty(),
-            translated_frame: None,
-        }
-    }
-}
-
-impl ColumnStatsCache {
-    pub fn init(&mut self, nucleotide_cols: usize) {
-        self.generation += 1;
-        self.raw = ChunkedCache::new(nucleotide_cols);
-        self.translated = ChunkedCache::empty();
-        self.translated_frame = None;
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    pub fn raw_summary_at(&self, col: usize) -> Option<&libmsa::ColumnSummary> {
-        self.raw
-            .summaries
-            .get(col)
-            .and_then(|summary| summary.as_ref())
-    }
-
-    pub fn translated_summary_at(
-        &self,
-        frame: libmsa::ReadingFrame,
-        protein_col: usize,
-    ) -> Option<&libmsa::ColumnSummary> {
-        if self.translated_frame != Some(frame) {
-            return None;
-        }
-        self.translated
-            .summaries
-            .get(protein_col)
-            .and_then(|summary| summary.as_ref())
-    }
-
-    pub fn raw_chunks_to_spawn(&mut self, visible_col_range: &Range<usize>) -> Vec<usize> {
-        self.raw
-            .chunks_for_range(visible_col_range)
-            .filter(|&idx| self.raw.chunks[idx] == ChunkState::Empty)
-            .collect()
-    }
-
-    pub fn translated_chunks_to_spawn(
-        &mut self,
-        visible_protein_range: &Range<usize>,
-        frame: libmsa::ReadingFrame,
-        protein_cols: usize,
-    ) -> Vec<usize> {
-        if self.translated_frame != Some(frame) || self.translated.summaries.len() != protein_cols {
-            self.translated_frame = Some(frame);
-            self.translated = ChunkedCache::new(protein_cols);
-        }
-
-        self.translated
-            .chunks_for_range(visible_protein_range)
-            .filter(|&idx| self.translated.chunks[idx] == ChunkState::Empty)
-            .collect()
-    }
-
-    pub fn mark_raw_pending(&mut self, chunk_idx: usize) {
-        if let Some(state) = self.raw.chunks.get_mut(chunk_idx) {
-            *state = ChunkState::Pending;
-        }
-    }
-
-    pub fn mark_translated_pending(&mut self, chunk_idx: usize) {
-        if let Some(state) = self.translated.chunks.get_mut(chunk_idx) {
-            *state = ChunkState::Pending;
-        }
-    }
-
-    pub fn raw_chunk_range(&self, chunk_idx: usize) -> Range<usize> {
-        self.raw.chunk_range(chunk_idx)
-    }
-
-    pub fn translated_chunk_range(&self, chunk_idx: usize) -> Range<usize> {
-        self.translated.chunk_range(chunk_idx)
-    }
-
-    pub fn store(&mut self, result: StatsJobResult) -> bool {
-        if result.generation != self.generation {
-            return false;
-        }
-
-        let summaries = match result.summaries {
-            Ok(summaries) => summaries,
-            Err(_) => {
-                let cache = match result.view {
-                    StatsView::Raw => &mut self.raw,
-                    StatsView::Translated(frame) => {
-                        if self.translated_frame != Some(frame) {
-                            return false;
-                        }
-                        &mut self.translated
-                    }
-                };
-                if let Some(state) = cache.chunks.get_mut(result.chunk_idx) {
-                    *state = ChunkState::Empty;
-                }
-                return false;
-            }
-        };
-
-        let cache = match result.view {
-            StatsView::Raw => &mut self.raw,
-            StatsView::Translated(frame) => {
-                if self.translated_frame != Some(frame) {
-                    return false;
-                }
-                &mut self.translated
-            }
-        };
-        cache.fill_chunk(result.chunk_idx, summaries);
-        true
-    }
-
-    pub fn invalidate_all(&mut self, nucleotide_cols: usize) {
-        self.generation += 1;
-        self.raw.reset(nucleotide_cols);
-        self.translated = ChunkedCache::empty();
-        self.translated_frame = None;
-    }
-
-    pub fn invalidate_translated(&mut self) {
-        self.generation += 1;
-        self.translated = ChunkedCache::empty();
-        self.translated_frame = None;
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -304,7 +303,7 @@ mod tests {
         cache.init(10);
 
         let stored = cache.store(StatsJobResult {
-            generation: cache.generation() + 1,
+            generation: cache.generation + 1,
             chunk_idx: 0,
             view: StatsView::Raw,
             summaries: Ok(vec![summary(b'A'); 10]),
@@ -321,7 +320,7 @@ mod tests {
         let _ = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame1, 2);
 
         let stored = cache.store(StatsJobResult {
-            generation: cache.generation(),
+            generation: cache.generation,
             chunk_idx: 0,
             view: StatsView::Translated(libmsa::ReadingFrame::Frame2),
             summaries: Ok(vec![summary(b'M'); 2]),
@@ -342,7 +341,7 @@ mod tests {
         cache.mark_raw_pending(0);
 
         let stored = cache.store(StatsJobResult {
-            generation: cache.generation(),
+            generation: cache.generation,
             chunk_idx: 0,
             view: StatsView::Raw,
             summaries: Ok(vec![summary(b'A'); 10]),
@@ -360,12 +359,12 @@ mod tests {
     fn invalidate_all_resets_both_caches_and_bumps_generation() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
-        let previous_generation = cache.generation();
+        let previous_generation = cache.generation;
         let _ = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame1, 2);
 
         cache.invalidate_all(5);
 
-        assert_eq!(cache.generation(), previous_generation + 1);
+        assert_eq!(cache.generation, previous_generation + 1);
         assert_eq!(cache.raw.summaries.len(), 5);
         assert!(cache.translated.summaries.is_empty());
         assert_eq!(cache.translated_frame, None);
@@ -376,17 +375,17 @@ mod tests {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
         cache.store(StatsJobResult {
-            generation: cache.generation(),
+            generation: cache.generation,
             chunk_idx: 0,
             view: StatsView::Raw,
             summaries: Ok(vec![summary(b'A'); 10]),
         });
         let _ = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame1, 2);
-        let previous_generation = cache.generation();
+        let previous_generation = cache.generation;
 
         cache.invalidate_translated();
 
-        assert_eq!(cache.generation(), previous_generation + 1);
+        assert_eq!(cache.generation, previous_generation + 1);
         assert_eq!(
             cache.raw_summary_at(0).and_then(|it| it.consensus),
             Some(b'A')

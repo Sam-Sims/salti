@@ -358,7 +358,7 @@ mod tests {
             })
             .collect();
         let view = view;
-        let generation = cache.generation();
+        let generation = cache.generation;
         let chunk_idx = 0;
         let stored = cache.store(StatsJobResult {
             generation,
