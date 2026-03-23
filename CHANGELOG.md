@@ -10,12 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Installer bash script for easy installation on Linux.
+- `filter-gaps` command to remove columns that contain a % of gaps.
+- `libmsa` lib crate to handle alignment parsing and manipulation
+- mouse selection now selects the full AA codon in the translated view
+- Ruler markers to indicate filtered columns. An arrow on the ruler will point to a location where 1 or core columns have been removed due to filters. `~` characters will mark a region where lots of columns have been filtered and would be too crowded to render lots of arrows. You might expect big jumps in absolute positions in these regions.
+- Total length is now displayed on the top status bar
 
 ### Changed
 
+- Moved core alignment functions to `libmsa`
 - Each status bar has separation of concerns for a more consistent UI. The top bar is for "global" concerns, i.e number
   of alignments, visible region etc
     - The bottom bar is for "local" concerns, i.e the current selected position and sequence
+- Under the hood changes to how the caching worked - now cache mantains blocks of 5000nts instead of moving window + region. This simplifies the handling and makes it easier to cache new metrics in the future.
+- Renamed `set-filter` to `filter-rows` to be explicit what it does
+- Renamed `full` alignment type to `generic`
+- Renamed `aa` type to `protein`
+- `jump-position` will jump to next visible position if the provided position is filtered out
+- You can now middle mouse pan while minimap is open
 
 ### Removed
 
@@ -26,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Further omptimised dist build profile
 - Removed the need for vendored OpenSSL
     - Together with the previous optimisations, this reduces the dist binary size from 13mb to 6.9mb
+- Conservation in translated view now shows conservation of the amino acid in that position
 
 ## [0.7.1] - 2026-02-21
 
@@ -130,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Command palette overlay (`:`) that centralises all features and replaces previous popups
-- Regex-based sequence filtering (`set-filter`, `clear-filter`).
+- Regex-based sequence filtering (`filter-rows`, `clear-filter`).
 - Sequence pinning controls (`pin-sequence`, `unpin-sequence`)
 - Reference sequence controls (`set-reference`, `clear-reference`) and reference-diff rendering mode (
   `toggle-reference-diff`).
