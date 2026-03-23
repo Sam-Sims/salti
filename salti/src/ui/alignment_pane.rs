@@ -244,11 +244,7 @@ fn render_scrollbar(
     let width = area.width.saturating_sub(2) as usize;
     let max_index = total_columns.saturating_sub(1);
     let col_offset = viewport.window().col_range.start;
-    let percent = if max_index == 0 {
-        0
-    } else {
-        col_offset.saturating_mul(100) / max_index
-    };
+    let percent = col_offset.saturating_mul(100).checked_div(max_index).unwrap_or(0);
     let track_max = width.saturating_sub(1);
     let thumb_index = if track_max == 0 {
         0
