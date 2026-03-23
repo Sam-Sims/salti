@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Installer bash script for easy installation on Linux.
-- `filter-gaps` command to remove columns that contain a % of gaps.
+- `filter-gaps` command to remove columns that contain a % of gaps. Translation is disabled if a gap filter is active and vice-versa
 - `libmsa` lib crate to handle alignment parsing and manipulation
 - mouse selection now selects the full AA codon in the translated view
 - Ruler markers to indicate filtered columns. An arrow on the ruler will point to a location where 1 or core columns have been removed due to filters. `~` characters will mark a region where lots of columns have been filtered and would be too crowded to render lots of arrows. You might expect big jumps in absolute positions in these regions.
 - Total length is now displayed on the top status bar
+- Human panic messages
 
 ### Changed
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `aa` type to `protein`
 - `jump-position` will jump to next visible position if the provided position is filtered out
 - You can now middle mouse pan while minimap is open
+- Most app errors now raise notifications on the bottom bar
 
 ### Removed
 
