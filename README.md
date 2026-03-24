@@ -11,6 +11,19 @@
 It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want
 to leave the terminal.
 
+## Quick start
+If using linux/macOS
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.8.0/salti-installer.sh | sh
+```
+
+or conda (All supported platforms)
+
+```bash
+conda install -c bioconda salti
+```
+
 ## Contents
 
 - [Features](#features)
@@ -108,6 +121,12 @@ conda install -c bioconda salti
 
 Precompiled binaries for Linux, MacOS and Windows are attached to the latest
 release.
+
+You can also use the installer script:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.8.0/salti-installer.sh | sh
+```
 
 ### Cargo:
 
