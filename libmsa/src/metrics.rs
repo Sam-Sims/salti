@@ -1,6 +1,7 @@
 use rand::seq::IndexedRandom;
 use std::{num::NonZeroU8, ops::Range};
 
+use crate::AlignmentType;
 use crate::data::AlignmentData;
 use crate::error::AlignmentError;
 use crate::model::Alignment;
@@ -405,6 +406,29 @@ pub(crate) fn gap_fraction_from_counts(counts: &[u32; 256]) -> f32 {
     }
 }
 
+pub(crate) fn max_counted_symbol_fraction_from_counts(
+    counts: &[u32; 256],
+    kind: AlignmentType,
+) -> Option<f32> {
+    let mut counted_total = 0u32;
+    let mut max_count = 0u32;
+
+    for (symbol, &count) in counts.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+
+        if is_ignored_constant_symbol(symbol as u8, kind) {
+            continue;
+        }
+
+        counted_total += count;
+        max_count = max_count.max(count);
+    }
+
+    (counted_total != 0).then_some(max_count as f32 / counted_total as f32)
+}
+
 fn consensus_from_counts(
     counts: &[u32; 256],
     method: ConsensusMethod,
@@ -479,6 +503,19 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
     let gap_fraction = f64::from(gap_count) / f64::from(total);
     let conservation = (1.0 - entropy / max_entropy).max(0.0);
     (conservation * (1.0 - gap_fraction)) as f32
+}
+
+#[inline]
+const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
+    if is_gap_byte(byte) {
+        return true;
+    }
+
+    match kind {
+        AlignmentType::Dna => matches!(byte, b'N' | b'n'),
+        AlignmentType::Protein => matches!(byte, b'X' | b'x'),
+        AlignmentType::Generic => false,
+    }
 }
 
 fn column_byte_counts(data: &AlignmentData, rows: &Projection, abs_col: usize) -> [u32; 256] {
@@ -715,6 +752,53 @@ mod conservation_count_tests {
         let mixed = conservation_from_counts(&counts_for(b"AACT"), DNA_MAX_ENTROPY);
         assert!(mixed < conserved);
         assert!(mixed > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod constant_fraction_count_tests {
+    use crate::AlignmentType;
+
+    use super::max_counted_symbol_fraction_from_counts;
+
+    fn counts_for(symbols: &[u8]) -> [u32; 256] {
+        let mut counts = [0u32; 256];
+        for &s in symbols {
+            counts[usize::from(s)] += 1;
+        }
+        counts
+    }
+
+    #[test]
+    fn dna_constant_fraction_ignores_gaps_and_ns() {
+        let counts = counts_for(b"AANn--T");
+        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Dna);
+
+        assert_eq!(fraction, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn protein_constant_fraction_ignores_gaps_and_xs() {
+        let counts = counts_for(b"MMXx--K");
+        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Protein);
+
+        assert_eq!(fraction, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn generic_constant_fraction_counts_n() {
+        let counts = counts_for(b"NN-A");
+        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Generic);
+
+        assert_eq!(fraction, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn constant_fraction_returns_none_when_all_symbols_are_ignored() {
+        let counts = counts_for(b"-Nn");
+        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Dna);
+
+        assert_eq!(fraction, None);
     }
 }
 

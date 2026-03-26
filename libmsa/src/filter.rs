@@ -16,13 +16,15 @@ use crate::projection::Projection;
 /// 1. Regex - rows not matching [`Self::with_row_regex`] are removed.
 /// 2. Exclusion - explicit excludes ([`Self::without_rows`]) are removed last.
 ///
-/// Column filters ([`Self::with_max_gap_fraction`]) run over the final row set.
+/// Column filters ([`Self::with_max_gap_fraction`], [`Self::with_min_constant_fraction`]) run
+/// over the final row set.
 #[derive(Debug, Clone)]
 pub struct FilterBuilder<'a> {
     source: &'a Alignment,
     row_exclude_sets: Vec<Vec<usize>>,
     row_name_regex: Option<String>,
     max_gap_fraction: Option<f32>,
+    min_constant_fraction: Option<f32>,
 }
 
 impl<'a> FilterBuilder<'a> {
@@ -49,6 +51,12 @@ impl<'a> FilterBuilder<'a> {
         self
     }
 
+    /// Keeps only columns whose dominant counted symbol fraction is below `threshold`.
+    pub fn with_min_constant_fraction(mut self, threshold: f32) -> Self {
+        self.min_constant_fraction = Some(threshold);
+        self
+    }
+
     /// Resolves all filters and builds a new [`Alignment`]
     pub fn apply(self) -> Result<Alignment, AlignmentError> {
         let row_count = self.source.row_count();
@@ -59,6 +67,9 @@ impl<'a> FilterBuilder<'a> {
         }
         if let Some(max_gap_fraction) = self.max_gap_fraction {
             validate_gap_fraction(max_gap_fraction)?;
+        }
+        if let Some(min_constant_fraction) = self.min_constant_fraction {
+            validate_constant_fraction(min_constant_fraction)?;
         }
 
         let mut row_ids: Vec<usize> = (0..row_count).collect();
@@ -80,20 +91,31 @@ impl<'a> FilterBuilder<'a> {
         row_ids.retain(|&row_id| membership[row_id]);
 
         let mut column_ids: Vec<usize> = (0..column_count).collect();
-        if let Some(max_gap_fraction) = self.max_gap_fraction {
+        if self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some() {
             let temp_rows = Projection::Filtered(Arc::from(row_ids.as_slice()));
-            let gap_fractions = metrics::counted_columns_range(
+            let columns = metrics::counted_columns_range(
                 &self.source.data,
                 &temp_rows,
                 &self.source.columns,
                 0..column_count,
-            )
-            .map(|columns| metrics::gap_fraction_from_columns(&columns))?;
+            )?;
 
             column_ids.retain(|&column_id| {
-                gap_fractions
-                    .get(column_id)
-                    .is_none_or(|(_, gap_fraction)| *gap_fraction <= max_gap_fraction)
+                columns.get(column_id).is_none_or(|column| {
+                    let gap_ok = self.max_gap_fraction.is_none_or(|max_gap_fraction| {
+                        metrics::gap_fraction_from_counts(&column.counts) <= max_gap_fraction
+                    });
+                    let constant_ok =
+                        self.min_constant_fraction
+                            .is_none_or(|min_constant_fraction| {
+                                metrics::max_counted_symbol_fraction_from_counts(
+                                    &column.counts,
+                                    self.source.active_type(),
+                                )
+                                .is_none_or(|fraction| fraction < min_constant_fraction)
+                            });
+                    gap_ok && constant_ok
+                })
             });
         }
 
@@ -126,6 +148,7 @@ impl<'a> FilterBuilder<'a> {
             row_exclude_sets: Vec::new(),
             row_name_regex: None,
             max_gap_fraction: None,
+            min_constant_fraction: None,
         }
     }
 }
@@ -159,6 +182,14 @@ fn validate_gap_fraction(threshold: f32) -> Result<(), AlignmentError> {
     }
 
     Err(AlignmentError::InvalidGapFraction(threshold))
+}
+
+fn validate_constant_fraction(threshold: f32) -> Result<(), AlignmentError> {
+    if threshold.is_finite() && (0.0..=1.0).contains(&threshold) {
+        return Ok(());
+    }
+
+    Err(AlignmentError::InvalidConstantFraction(threshold))
 }
 
 #[cfg(test)]
@@ -226,6 +257,36 @@ mod filter_builder_tests {
     }
 
     #[test]
+    fn constant_filter_is_order_insensitive() {
+        let alignment = dna_alignment(&[
+            ("ref", b"AN-"),
+            ("keep-a", b"AAA"),
+            ("keep-b", b"AAA"),
+            ("drop", b"NT-"),
+        ]);
+
+        let first = alignment
+            .filter()
+            .unwrap()
+            .without_rows([0])
+            .with_min_constant_fraction(1.0)
+            .apply()
+            .unwrap();
+        let second = alignment
+            .filter()
+            .unwrap()
+            .with_min_constant_fraction(1.0)
+            .without_rows([0])
+            .apply()
+            .unwrap();
+
+        assert_eq!(
+            first.absolute_column_ids().collect::<Vec<_>>(),
+            second.absolute_column_ids().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn filter_supports_regex_and_index_filters() {
         let alignment = generic_alignment(&[
             ("ref", b"AC"),
@@ -285,6 +346,18 @@ mod filter_builder_tests {
     }
 
     #[test]
+    fn invalid_constant_fraction_returns_error() {
+        let err = generic_alignment(&[("sample-1", b"AC")])
+            .filter()
+            .unwrap()
+            .with_min_constant_fraction(1.5)
+            .apply()
+            .unwrap_err();
+
+        assert_eq!(err, AlignmentError::InvalidConstantFraction(1.5));
+    }
+
+    #[test]
     fn gap_fraction_filter_uses_filtered_rows() {
         let alignment = dna_alignment(&[("ref", b"A"), ("s1", b"A"), ("s2", b"A"), ("s3", b"-")]);
         let filtered = alignment
@@ -297,6 +370,63 @@ mod filter_builder_tests {
 
         let col_ids: Vec<_> = filtered.absolute_column_ids().collect();
         assert_eq!(col_ids, vec![0]);
+    }
+
+    #[test]
+    fn constant_filter_hides_fully_constant_dna_columns() {
+        let alignment = dna_alignment(&[("s1", b"AN"), ("s2", b"AC"), ("s3", b"AT")]);
+        let filtered = alignment
+            .filter()
+            .unwrap()
+            .with_min_constant_fraction(1.0)
+            .apply()
+            .unwrap();
+
+        assert_eq!(filtered.absolute_column_ids().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn constant_filter_uses_filtered_rows() {
+        let alignment = dna_alignment(&[("ref", b"T"), ("s1", b"A"), ("s2", b"A"), ("s3", b"T")]);
+        let filtered = alignment
+            .filter()
+            .unwrap()
+            .without_rows([0, 3])
+            .with_min_constant_fraction(1.0)
+            .apply()
+            .unwrap();
+
+        assert!(filtered.absolute_column_ids().next().is_none());
+    }
+
+    #[test]
+    fn constant_filter_keeps_columns_with_only_ignored_symbols() {
+        let alignment = dna_alignment(&[("s1", b"N-"), ("s2", b"-N"), ("s3", b"NN")]);
+        let filtered = alignment
+            .filter()
+            .unwrap()
+            .with_min_constant_fraction(1.0)
+            .apply()
+            .unwrap();
+
+        assert_eq!(
+            filtered.absolute_column_ids().collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn gap_and_constant_filters_can_be_combined() {
+        let alignment = dna_alignment(&[("s1", b"AA-"), ("s2", b"AA-"), ("s3", b"ATC")]);
+        let filtered = alignment
+            .filter()
+            .unwrap()
+            .with_max_gap_fraction(0.5)
+            .with_min_constant_fraction(0.9)
+            .apply()
+            .unwrap();
+
+        assert_eq!(filtered.absolute_column_ids().collect::<Vec<_>>(), vec![1]);
     }
 
     #[test]

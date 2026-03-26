@@ -430,7 +430,7 @@ pub(crate) fn normalise_nucleotide(byte: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn translate_sequence(
+pub fn translate_sequence(
     sequence: &[u8],
     frame: ReadingFrame,
     table: &TranslationTable,
