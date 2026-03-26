@@ -118,6 +118,7 @@ impl RowPresentationState {
 pub struct FilterState {
     pattern: Option<String>,
     max_gap_fraction: Option<f32>,
+    min_constant_fraction: Option<f32>,
 }
 
 impl FilterState {
@@ -129,12 +130,18 @@ impl FilterState {
         self.max_gap_fraction
     }
 
+    pub fn min_constant_fraction(&self) -> Option<f32> {
+        self.min_constant_fraction
+    }
+
     pub fn has_column_filter(&self) -> bool {
-        self.max_gap_fraction.is_some()
+        self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some()
     }
 
     pub fn is_active(&self) -> bool {
-        self.pattern.is_some() || self.max_gap_fraction.is_some()
+        self.pattern.is_some()
+            || self.max_gap_fraction.is_some()
+            || self.min_constant_fraction.is_some()
     }
 }
 
@@ -243,9 +250,23 @@ impl AlignmentModel {
         Ok(())
     }
 
+    pub fn set_constant_filter(
+        &mut self,
+        min_constant_fraction: Option<f32>,
+    ) -> Result<(), libmsa::AlignmentError> {
+        let previous = self.filter.min_constant_fraction;
+        self.filter.min_constant_fraction = min_constant_fraction;
+        if let Err(error) = self.derive_view_from_intent() {
+            self.filter.min_constant_fraction = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub fn clear_filter(&mut self) -> Result<(), libmsa::AlignmentError> {
         self.filter.pattern = None;
         self.filter.max_gap_fraction = None;
+        self.filter.min_constant_fraction = None;
         self.derive_view_from_intent()
     }
 
@@ -364,6 +385,9 @@ impl AlignmentModel {
         }
         if let Some(max_gap_fraction) = self.filter.max_gap_fraction() {
             builder = builder.with_max_gap_fraction(max_gap_fraction);
+        }
+        if let Some(min_constant_fraction) = self.filter.min_constant_fraction() {
+            builder = builder.with_min_constant_fraction(min_constant_fraction);
         }
         self.view = builder.apply()?;
         Ok(())
@@ -655,7 +679,21 @@ mod tests {
     }
 
     #[test]
-    fn clear_filter_removes_both_filters() {
+    fn set_constant_filter_applies_column_filter() {
+        let mut model = alignment_model(vec![
+            raw("alpha", b"AN-T"),
+            raw("beta", b"A--T"),
+            raw("gamma", b"ATGT"),
+        ]);
+
+        model.set_constant_filter(Some(1.0)).unwrap();
+
+        assert_eq!(model.filter().min_constant_fraction(), Some(1.0));
+        assert_eq!(model.view().column_count(), 2);
+    }
+
+    #[test]
+    fn clear_filter_removes_all_filters() {
         let mut model = alignment_model(vec![
             raw("alpha", b"A--T"),
             raw("beta", b"A--T"),
@@ -663,11 +701,13 @@ mod tests {
         ]);
         model.set_filter("alpha|beta".to_string()).unwrap();
         model.set_gap_filter(Some(0.0)).unwrap();
+        model.set_constant_filter(Some(1.0)).unwrap();
 
         model.clear_filter().unwrap();
 
         assert_eq!(model.filter().pattern(), None);
         assert_eq!(model.filter().max_gap_fraction(), None);
+        assert_eq!(model.filter().min_constant_fraction(), None);
         assert_eq!(model.view().row_count(), 3);
         assert_eq!(model.view().column_count(), 4);
     }

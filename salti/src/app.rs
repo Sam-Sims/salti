@@ -447,6 +447,17 @@ impl App {
                 self.on_view_rebuilt();
                 return Ok(());
             }
+            Command::SetConstantFilter(min_constant_fraction) => {
+                let alignment = self.alignment_mut()?;
+                if min_constant_fraction.is_some() && alignment.translation().is_some() {
+                    return Err(format_err!(
+                        "filter-constant is unavailable while translation is active"
+                    ));
+                }
+                alignment.set_constant_filter(min_constant_fraction)?;
+                self.on_view_rebuilt();
+                return Ok(());
+            }
             Command::ClearFilter => {
                 self.alignment_mut()?.clear_filter()?;
                 self.on_view_rebuilt();
@@ -462,7 +473,7 @@ impl App {
                 let alignment = self.alignment_mut()?;
                 if alignment.translation().is_none() && alignment.filter().has_column_filter() {
                     return Err(format_err!(
-                        "translation is unavailable while filter-gaps is active"
+                        "translation is unavailable while a column filter is active"
                     ));
                 }
                 alignment.toggle_translation_view()?;
@@ -846,6 +857,24 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn filter_constant_shows_notification_when_translation_is_active() {
+        let mut app =
+            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
+
+        let notification = app
+            .ui
+            .notification
+            .as_ref()
+            .expect("notification should be created");
+        assert_eq!(
+            notification.message,
+            "filter-constant is unavailable while translation is active"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn translation_shows_notification_when_gap_filter_is_active() {
         let mut app = app_with_alignment(vec![raw("row1", b"ATG---"), raw("row2", b"ATG---")]);
         app.execute_commands([Command::SetGapFilter(Some(0.0))]);
@@ -858,7 +887,24 @@ mod tests {
             .expect("notification should be created");
         assert_eq!(
             notification.message,
-            "translation is unavailable while filter-gaps is active"
+            "translation is unavailable while a column filter is active"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn translation_shows_notification_when_constant_filter_is_active() {
+        let mut app = app_with_alignment(vec![raw("row1", b"ATGAAA"), raw("row2", b"ATGAAA")]);
+        app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
+        app.execute_commands([Command::ToggleTranslationView]);
+
+        let notification = app
+            .ui
+            .notification
+            .as_ref()
+            .expect("notification should be created");
+        assert_eq!(
+            notification.message,
+            "translation is unavailable while a column filter is active"
         );
     }
 

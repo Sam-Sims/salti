@@ -286,19 +286,30 @@ fn add_number_to_ruler(
     centre_pos: usize,
     number: usize,
     theme: &ThemeState,
-) {
+) -> bool {
     let number_string = number.to_string();
     let number_length = number_string.len();
     let ruler_width = number_line.len();
     let start_idx = centre_pos
         .saturating_sub(number_length / 2)
         .min(ruler_width.saturating_sub(number_length));
+    let left_padding = start_idx.saturating_sub(1);
+    let right_padding = (start_idx + number_length + 1).min(ruler_width);
+
+    if number_line[left_padding..right_padding]
+        .iter()
+        .any(|span| span.content.as_ref() != " ")
+    {
+        return false;
+    }
 
     for (offset, digit) in number_string.chars().enumerate() {
         if let Some(cell) = number_line.get_mut(start_idx + offset) {
             *cell = digit.to_string().set_style(theme.styles.accent);
         }
     }
+
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,6 +392,22 @@ fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<(usiz
     spans
 }
 
+fn run_start_positions(absolute_columns: &[usize]) -> Vec<usize> {
+    let mut starts = Vec::new();
+    if absolute_columns.is_empty() {
+        return starts;
+    }
+
+    starts.push(0);
+    for (index, pair) in absolute_columns.windows(2).enumerate() {
+        if pair[1] != pair[0] + 1 {
+            starts.push(index + 1);
+        }
+    }
+
+    starts
+}
+
 fn build_ruler(
     absolute_columns: &[usize],
     filtered_leading: bool,
@@ -394,6 +421,9 @@ fn build_ruler(
 
     let mut number_line = vec![Span::raw(" "); width];
     let mut marker_line = vec![Span::raw(" "); width];
+    let breaks = break_positions(absolute_columns, filtered_leading, filtered_trailing);
+    let fragmented_view = !breaks.is_empty();
+    let run_starts = fragmented_view.then(|| run_start_positions(absolute_columns));
 
     for (index, marker_span) in marker_line.iter_mut().enumerate() {
         let display_pos = absolute_columns[index] + 1;
@@ -405,13 +435,17 @@ fn build_ruler(
                 ".".set_style(theme.styles.text_dim)
             };
 
-            if is_major_tick || display_pos == 1 {
-                add_number_to_ruler(&mut number_line, index, display_pos, theme);
+            let should_label = if let Some(run_starts) = &run_starts {
+                run_starts.contains(&index)
+            } else {
+                is_major_tick || display_pos == 1
+            };
+            if should_label {
+                let _ = add_number_to_ruler(&mut number_line, index, display_pos, theme);
             }
         }
     }
 
-    let breaks = break_positions(absolute_columns, filtered_leading, filtered_trailing);
     let dense_spans = dense_break_spans(&breaks, width);
 
     for (position, marker) in breaks {

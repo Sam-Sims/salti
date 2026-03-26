@@ -1,8 +1,8 @@
 use super::command_runners::{
     run_check_update, run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode,
-    run_filter_gaps, run_filter_rows, run_jump_position, run_jump_sequence, run_load_alignment,
-    run_pin_sequence, run_quit, run_set_active_type, run_set_reference, run_theme,
-    run_toggle_translation, run_translation_frame, run_unpin_sequence,
+    run_filter_constant, run_filter_gaps, run_filter_rows, run_jump_position, run_jump_sequence,
+    run_load_alignment, run_pin_sequence, run_quit, run_set_active_type, run_set_reference,
+    run_theme, run_toggle_translation, run_translation_frame, run_unpin_sequence,
 };
 use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
 use super::completers;
@@ -74,6 +74,14 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
         completer: None,
         static_candidates: &["0", "5", "10", "25", "50"],
         run: run_filter_gaps,
+    }),
+    PaletteCommand::Typable(TypableCommand {
+        name: "filter-constant",
+        help_text: "Hide columns when a counted symbol reaches the given percentage. Gaps and type-specific unknowns are ignored. Use 0 to disable it.",
+        aliases: &[],
+        completer: None,
+        static_candidates: &["0", "70", "90", "95", "100"],
+        run: run_filter_constant,
     }),
     PaletteCommand::Typable(TypableCommand {
         name: "set-reference",

@@ -24,6 +24,7 @@ pub enum Command {
     JumpToEnd,
     SetFilter(String),
     SetGapFilter(Option<f32>),
+    SetConstantFilter(Option<f32>),
     ClearFilter,
     PinSequence(usize),
     UnpinSequence(usize),

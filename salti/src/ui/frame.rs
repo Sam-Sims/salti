@@ -15,8 +15,8 @@ use ratatui::widgets::Paragraph;
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
 
-fn format_gap_percent(max_gap_fraction: f32) -> String {
-    let mut text = format!("{:.2}", max_gap_fraction * 100.0);
+fn format_percent(fraction: f32) -> String {
+    let mut text = format!("{:.2}", fraction * 100.0);
     while text.ends_with('0') {
         text.pop();
     }
@@ -40,8 +40,16 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
         if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
             filter_text.push_str(&format!(
                 " [gaps: <= {}%]",
-                format_gap_percent(max_gap_fraction)
+                format_percent(max_gap_fraction)
             ));
+        }
+        if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
+            filter_text.push_str(&format!(
+                " [constant: >= {}%]",
+                format_percent(min_constant_fraction)
+            ));
+        }
+        if alignment.filter().has_column_filter() {
             let visible_cols = alignment.view().column_count();
             counts.push_str(&format!(" ({visible_cols} cols)"));
         }
@@ -237,6 +245,49 @@ mod tests {
         assert_eq!(
             status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
             "Filters: [rows: alpha|beta] [gaps: <= 0%] (2 rows) (2 cols)"
+        );
+    }
+
+    #[test]
+    fn bottom_status_bar_formats_constant_filter_summary() {
+        let alignment = libmsa::Alignment::new(vec![
+            raw("alpha", b"AN-T"),
+            raw("beta", b"A--T"),
+            raw("gamma", b"ATGT"),
+        ])
+        .expect("alignment should be valid");
+        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
+        alignment
+            .set_constant_filter(Some(1.0))
+            .expect("constant filter should apply");
+        let ui = ui_state();
+
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Filters: [constant: >= 100%] (3 rows) (2 cols)"
+        );
+    }
+
+    #[test]
+    fn bottom_status_bar_formats_combined_column_filter_summary() {
+        let alignment = libmsa::Alignment::new(vec![
+            raw("alpha", b"AN-T"),
+            raw("beta", b"A--T"),
+            raw("gamma", b"ATGT"),
+        ])
+        .expect("alignment should be valid");
+        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
+        alignment
+            .set_gap_filter(Some(0.5))
+            .expect("gap filter should apply");
+        alignment
+            .set_constant_filter(Some(1.0))
+            .expect("constant filter should apply");
+        let ui = ui_state();
+
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Filters: [gaps: <= 50%] [constant: >= 100%] (3 rows) (2 cols)"
         );
     }
 

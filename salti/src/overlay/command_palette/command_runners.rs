@@ -74,27 +74,36 @@ fn next_visible_column_index(visible_columns: &[usize], absolute_target: usize) 
     }
 }
 
+fn parse_percentage_argument(arguments: &str) -> anyhow::Result<Option<f32>> {
+    let value = require_argument(arguments)?;
+    let Ok(percent) = value.parse::<f32>() else {
+        return Err(format_err!(
+            "Invalid argument: expected a percentage in 0..=100",
+        ));
+    };
+    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+        return Err(format_err!(
+            "Invalid argument: expected a percentage in 0..=100",
+        ));
+    }
+
+    Ok((percent != 0.0).then_some(percent / 100.0))
+}
+
 pub(super) fn run_filter_gaps(_: &CommandPaletteState, arguments: &str) -> anyhow::Result<Command> {
     run_command("filter-gaps", arguments, || {
-        let value = require_argument(arguments)?;
-        let Ok(percent) = value.parse::<f32>() else {
-            return Err(format_err!(
-                "Invalid argument: expected a percentage in 0..=100",
-            ));
-        };
-        if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
-            return Err(format_err!(
-                "Invalid argument: expected a percentage in 0..=100",
-            ));
-        }
+        Ok(Command::SetGapFilter(parse_percentage_argument(arguments)?))
+    })
+}
 
-        let max_gap_fraction = if percent == 0.0 {
-            None
-        } else {
-            Some(percent / 100.0)
-        };
-
-        Ok(Command::SetGapFilter(max_gap_fraction))
+pub(super) fn run_filter_constant(
+    _: &CommandPaletteState,
+    arguments: &str,
+) -> anyhow::Result<Command> {
+    run_command("filter-constant", arguments, || {
+        Ok(Command::SetConstantFilter(parse_percentage_argument(
+            arguments,
+        )?))
     })
 }
 
@@ -373,6 +382,29 @@ mod tests {
             error.to_string(),
             "Invalid argument: expected a percentage in 0..=100"
         );
+    }
+
+    #[test]
+    fn filter_constant_parses_percentage_into_constant_fraction() {
+        let state = palette_state_with_columns(Vec::new());
+
+        let action = run_filter_constant(&state, "90").expect("percentage should parse");
+
+        assert!(matches!(
+            action,
+            Command::SetConstantFilter(Some(value))
+            if (value - 0.9).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn filter_constant_zero_clears_the_constant_filter() {
+        let state = palette_state_with_columns(Vec::new());
+
+        let action =
+            run_filter_constant(&state, "0").expect("zero should disable the constant filter");
+
+        assert_eq!(action, Command::SetConstantFilter(None));
     }
 
     #[test]
