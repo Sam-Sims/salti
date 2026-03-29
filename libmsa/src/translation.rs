@@ -60,6 +60,15 @@ impl ReadingFrame {
 
         ((nucleotide_length - 1 - offset) / 3) + 1
     }
+
+    /// Returns the number of complete three-nucleotide codons for this frame.
+    ///
+    /// Unlike [`translated_length`](Self::translated_length), this excludes the
+    /// incomplete terminal codon when the remaining nucleotides after the frame
+    /// offset are not divisible by three.
+    pub const fn complete_codons(self, nucleotide_len: usize) -> usize {
+        nucleotide_len.saturating_sub(self.offset()) / 3
+    }
 }
 
 impl std::fmt::Display for ReadingFrame {
@@ -711,6 +720,23 @@ mod reading_frame_tests {
         assert_eq!(ReadingFrame::Frame1.translated_length(4), 2);
         assert_eq!(ReadingFrame::Frame2.translated_length(2), 1);
         assert_eq!(ReadingFrame::Frame3.translated_length(2), 0);
+    }
+
+    #[test]
+    fn complete_codons_excludes_incomplete_terminal() {
+        // 9 nucleotides, frame 1: 9 / 3 = 3 complete codons.
+        assert_eq!(ReadingFrame::Frame1.complete_codons(9), 3);
+        // 10 nucleotides, frame 1: 10 / 3 = 3 (drops the leftover).
+        assert_eq!(ReadingFrame::Frame1.complete_codons(10), 3);
+        // translated_length would give 4 here (includes the incomplete).
+        assert_eq!(ReadingFrame::Frame1.translated_length(10), 4);
+
+        // Frame 2, 9 nucleotides: (9 - 1) / 3 = 2 complete codons.
+        assert_eq!(ReadingFrame::Frame2.complete_codons(9), 2);
+        // Frame 3, 2 nucleotides: (2 - 2) / 3 = 0.
+        assert_eq!(ReadingFrame::Frame3.complete_codons(2), 0);
+        // Edge: empty sequence.
+        assert_eq!(ReadingFrame::Frame1.complete_codons(0), 0);
     }
 }
 

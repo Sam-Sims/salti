@@ -1,18 +1,3 @@
-use crate::{
-    core::{
-        model::{AlignmentModel, DiffMode},
-        stats_cache::ColumnStatsCache,
-        viewport::{Viewport, ViewportWindow},
-    },
-    ui::{
-        layout::{AppLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
-        rows::{
-            RowRenderMode, TranslatedDiffRange, format_row_spans, format_translated_row_spans,
-            visible_bytes, visible_protein_range,
-        },
-        ui_state::ThemeState,
-    },
-};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::macros::vertical;
@@ -20,6 +5,20 @@ use ratatui::style::Styled;
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
+
+use crate::{
+    core::{
+        codon::TranslatedDiffRange,
+        model::{AlignmentModel, DiffMode},
+        stats_cache::ColumnStatsCache,
+        viewport::{Viewport, ViewportWindow},
+    },
+    ui::{
+        layout::{AppLayout, PinnedSectionLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
+        rows::{RowRenderMode, format_row_spans, format_translated_row_spans, visible_bytes},
+        ui_state::ThemeState,
+    },
+};
 
 const SCROLLBAR_THUMB_WIDTH: usize = 3;
 const SCROLLBAR_THUMB_MIN_WIDTH: usize = 1;
@@ -58,6 +57,44 @@ fn translated_diff_range<'a>(
     }
 }
 
+fn emit_band_rows(
+    lines: &mut Vec<Line<'static>>,
+    alignment: &AlignmentModel,
+    window: &ViewportWindow,
+    band_layout: &PinnedSectionLayout,
+    area_width: u16,
+    theme: &ThemeState,
+    render_row: &mut dyn FnMut(usize) -> Option<Line<'static>>,
+) {
+    for &absolute_row in alignment
+        .rows()
+        .pinned()
+        .iter()
+        .take(band_layout.pinned_rendered)
+    {
+        if let Some(line) = render_row(absolute_row) {
+            lines.push(line);
+        }
+    }
+
+    if band_layout.divider_height == 1 {
+        lines.push(Line::from(
+            "─"
+                .repeat(area_width as usize)
+                .set_style(theme.styles.border),
+        ));
+    }
+
+    for relative_row in window.row_range.clone() {
+        let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
+            continue;
+        };
+        if let Some(line) = render_row(absolute_row) {
+            lines.push(line);
+        }
+    }
+}
+
 fn build_sequence_row_lines(
     alignment: &AlignmentModel,
     window: &ViewportWindow,
@@ -70,31 +107,26 @@ fn build_sequence_row_lines(
         band_layout.pinned_rendered + band_layout.divider_height + window.row_range.len(),
     );
 
-    if let Some(translated) = alignment.translated_view() {
-        let frame = alignment
-            .translation()
-            .expect("translated view requires an active frame");
-        let nucleotide_len = alignment.view().column_count();
-        let protein_range = visible_protein_range(&window.col_range, frame, nucleotide_len);
+    if let Some(overlay) = alignment.translation_overlay()
+        && let Some(translated) = alignment.translated_view()
+    {
+        let protein_range = overlay.visible_protein_range(&window.col_range);
         let reference_bytes: Option<Vec<u8>> = protein_range.clone().and_then(|protein_range| {
             alignment
                 .rows()
                 .reference()
                 .and_then(|abs_row| translated.project_absolute_row(abs_row))
-                .map(|sequence| {
-                    sequence
-                        .bytes_range(protein_range)
-                        .expect("visible protein range must fit the translated view")
-                        .map(|(_, byte)| byte)
-                        .collect()
+                .and_then(|sequence| {
+                    let bytes = sequence.bytes_range(protein_range).ok()?;
+                    Some(bytes.map(|(_, byte)| byte).collect())
                 })
         });
         let consensus_bytes: Option<Vec<u8>> = protein_range.clone().and_then(|protein_range| {
             protein_range
                 .clone()
-                .map(|protein_col| {
+                .map(|protein_col: usize| {
                     metrics
-                        .translated_summary_at(frame, protein_col)
+                        .translated_summary_at(overlay.frame, protein_col)
                         .map(|summary| summary.consensus.unwrap_or(b' '))
                 })
                 .collect()
@@ -108,51 +140,25 @@ fn build_sequence_row_lines(
             )
         });
 
-        for &absolute_row in alignment
-            .rows()
-            .pinned()
-            .iter()
-            .take(band_layout.pinned_rendered)
-        {
-            let Some(sequence) = translated.project_absolute_row(absolute_row) else {
-                continue;
-            };
-            let spans = format_translated_row_spans(
-                sequence,
-                &window.col_range,
-                nucleotide_len,
-                frame,
-                &theme.theme.sequence,
-                diff_against,
-            );
-            lines.push(Line::from(spans));
-        }
-
-        if band_layout.divider_height == 1 {
-            lines.push(Line::from(
-                "─"
-                    .repeat(area.width as usize)
-                    .set_style(theme.styles.border),
-            ));
-        }
-
-        for relative_row in window.row_range.clone() {
-            let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
-                continue;
-            };
-            let Some(sequence) = translated.sequence_by_absolute(absolute_row) else {
-                continue;
-            };
-            let spans = format_translated_row_spans(
-                sequence,
-                &window.col_range,
-                nucleotide_len,
-                frame,
-                &theme.theme.sequence,
-                diff_against,
-            );
-            lines.push(Line::from(spans));
-        }
+        emit_band_rows(
+            &mut lines,
+            alignment,
+            window,
+            &band_layout,
+            area.width,
+            theme,
+            &mut |absolute_row| {
+                let sequence = translated.project_absolute_row(absolute_row)?;
+                let spans = format_translated_row_spans(
+                    sequence,
+                    &window.col_range,
+                    &overlay,
+                    &theme.theme.sequence,
+                    diff_against,
+                );
+                Some(Line::from(spans))
+            },
+        );
 
         return lines;
     }
@@ -177,36 +183,20 @@ fn build_sequence_row_lines(
         consensus_bytes.as_deref(),
     );
 
-    for &absolute_row in alignment
-        .rows()
-        .pinned()
-        .iter()
-        .take(band_layout.pinned_rendered)
-    {
-        let Some(projected_row) = alignment.view().project_absolute_row(absolute_row) else {
-            continue;
-        };
-        let bytes = visible_bytes(projected_row, &window.col_range);
-        let spans = format_row_spans(&bytes, &theme.theme.sequence, render_mode);
-        lines.push(Line::from(spans));
-    }
-
-    if band_layout.divider_height == 1 {
-        lines.push(Line::from(
-            "─"
-                .repeat(area.width as usize)
-                .set_style(theme.styles.border),
-        ));
-    }
-
-    for relative_row in window.row_range.clone() {
-        let Some(sequence) = alignment.view().sequence(relative_row) else {
-            continue;
-        };
-        let bytes = visible_bytes(sequence, &window.col_range);
-        let spans = format_row_spans(&bytes, &theme.theme.sequence, render_mode);
-        lines.push(Line::from(spans));
-    }
+    emit_band_rows(
+        &mut lines,
+        alignment,
+        window,
+        &band_layout,
+        area.width,
+        theme,
+        &mut |absolute_row| {
+            let projected_row = alignment.view().project_absolute_row(absolute_row)?;
+            let bytes = visible_bytes(projected_row, &window.col_range);
+            let spans = format_row_spans(&bytes, &theme.theme.sequence, render_mode);
+            Some(Line::from(spans))
+        },
+    );
 
     lines
 }

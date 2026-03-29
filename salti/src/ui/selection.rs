@@ -3,25 +3,14 @@ use std::ops::Range;
 use ratatui::layout::Rect;
 
 use crate::{
-    core::{Viewport, model::AlignmentModel},
+    core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},
     ui::{layout::pinned_section_layout, ui_state::MouseSelection},
 };
 
-pub fn codon_span_for_absolute_column(
-    absolute_col: usize,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> Option<Range<usize>> {
-    let offset = frame.offset();
-    if absolute_col < offset {
-        return None;
-    }
-
-    let codon_start = offset + ((absolute_col - offset) / 3) * 3;
-    let codon_end = codon_start + 3;
-    (codon_end <= nucleotide_len).then_some(codon_start..codon_end)
-}
-
+/// Maps a screen-space mouse position to `(absolute_row, absolute_column)`.
+///
+/// Returns `None` when the click falls outside `sequence_rows_area`, on the
+/// pinned-row divider, or beyond the alignment bounds.
 pub fn selection_point_crosshair(
     alignment: &AlignmentModel,
     viewport: &Viewport,
@@ -68,15 +57,21 @@ pub fn selection_row_bounds(selection: MouseSelection) -> (usize, usize) {
     (start.min(end), start.max(end))
 }
 
+/// Converts a selection (absolute columns) to a visible-column range clipped
+/// to `visible_col_range`. In translation mode, expands to full codon
+/// boundaries. Returns `None` when the selection does not overlap the viewport.
 pub fn selection_visible_col_range(
     selection: MouseSelection,
     alignment: &AlignmentModel,
     visible_col_range: &Range<usize>,
 ) -> Option<Range<usize>> {
-    match alignment.translation() {
-        Some(frame) => {
-            translated_selection_visible_col_range(selection, alignment, visible_col_range, frame)
-        }
+    match alignment.translation_overlay() {
+        Some(overlay) => translated_selection_visible_col_range(
+            selection,
+            alignment,
+            visible_col_range,
+            &overlay,
+        ),
         None => raw_selection_visible_col_range(selection, alignment, visible_col_range),
     }
 }
@@ -112,12 +107,11 @@ fn translated_selection_visible_col_range(
     selection: MouseSelection,
     alignment: &AlignmentModel,
     visible_col_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
+    overlay: &TranslationOverlay,
 ) -> Option<Range<usize>> {
     let selection_start = selection.column.min(selection.end_column);
     let selection_end = selection.column.max(selection.end_column) + 1;
     let view = alignment.view();
-    let nucleotide_len = view.column_count();
 
     let mut rel_start: Option<usize> = None;
     let mut rel_end: Option<usize> = None;
@@ -127,7 +121,7 @@ fn translated_selection_visible_col_range(
         let Some(abs) = view.absolute_column_id(rel) else {
             continue;
         };
-        let Some(codon_span) = codon_span_for_absolute_column(abs, frame, nucleotide_len) else {
+        let Some(codon_span) = overlay.codon_span(abs) else {
             continue;
         };
         if previous_codon_start == Some(codon_span.start) {
@@ -141,13 +135,15 @@ fn translated_selection_visible_col_range(
 
         let clipped_start = codon_span.start.max(visible_col_range.start);
         let clipped_end = codon_span.end.min(visible_col_range.end);
-        let start = view
-            .relative_column_id(clipped_start)
-            .expect("translated mode requires a full visible column set");
-        let end = view
+        let Some(start) = view.relative_column_id(clipped_start) else {
+            continue;
+        };
+        let Some(end) = view
             .relative_column_id(clipped_end - 1)
-            .expect("translated mode requires a full visible column set")
-            + 1;
+            .map(|relative_col| relative_col + 1)
+        else {
+            continue;
+        };
         rel_start = Some(rel_start.map_or(start, |current| current.min(start)));
         rel_end = Some(rel_end.map_or(end, |current| current.max(end)));
     }
@@ -159,6 +155,7 @@ fn translated_selection_visible_col_range(
 mod tests {
     use super::*;
     use crate::core::Viewport;
+    use crate::core::codon::codon_span_for_absolute_column;
     use crate::core::model::AlignmentModel;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {

@@ -1,21 +1,26 @@
-use crate::{
-    core::{model::AlignmentModel, stats_cache::ColumnStatsCache, viewport::ViewportWindow},
-    ui::{
-        layout::AppLayout,
-        rows::{
-            RowRenderMode, TranslatedByteRange, format_row_spans,
-            format_translated_byte_range_spans, format_translated_row_spans, visible_bytes,
-            visible_protein_range,
-        },
-        ui_state::ThemeState,
-    },
-};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Styled, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
+
+use crate::{
+    core::{
+        codon::{TranslatedByteRange, TranslationOverlay, nuc_start},
+        model::AlignmentModel,
+        stats_cache::ColumnStatsCache,
+        viewport::ViewportWindow,
+    },
+    ui::{
+        layout::AppLayout,
+        rows::{
+            RowRenderMode, format_row_spans, format_translated_byte_range_spans,
+            format_translated_row_spans, visible_bytes,
+        },
+        ui_state::ThemeState,
+    },
+};
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -36,16 +41,13 @@ fn blank_line(width: usize) -> Line<'static> {
 
 fn translated_reference_line(
     alignment: &AlignmentModel,
+    overlay: &TranslationOverlay,
     window: &ViewportWindow,
     theme: &ThemeState,
 ) -> Line<'static> {
     let Some(translated) = alignment.translated_view() else {
         return Line::from("No reference selected".fg(theme.theme.text_dim).italic());
     };
-    let frame = alignment
-        .translation()
-        .expect("translated view requires an active frame");
-    let nucleotide_len = alignment.view().column_count();
 
     alignment.rows().reference().map_or_else(
         || Line::from("No reference selected".fg(theme.theme.text_dim).italic()),
@@ -56,8 +58,7 @@ fn translated_reference_line(
             let spans = format_translated_row_spans(
                 sequence,
                 &window.col_range,
-                nucleotide_len,
-                frame,
+                overlay,
                 &theme.theme.sequence,
                 None,
             );
@@ -67,28 +68,20 @@ fn translated_reference_line(
 }
 
 fn translated_consensus_line(
-    alignment: &AlignmentModel,
+    overlay: &TranslationOverlay,
     window: &ViewportWindow,
     metrics: &ColumnStatsCache,
     theme: &ThemeState,
 ) -> Line<'static> {
-    let Some(_translated) = alignment.translated_view() else {
-        return Line::from("Calculating consensus...".fg(theme.theme.text_dim).italic());
-    };
-    let frame = alignment
-        .translation()
-        .expect("translated view requires an active frame");
-    let nucleotide_len = alignment.view().column_count();
-    let Some(protein_range) = visible_protein_range(&window.col_range, frame, nucleotide_len)
-    else {
+    let Some(protein_range) = overlay.visible_protein_range(&window.col_range) else {
         return blank_line(window.col_range.len());
     };
 
     let consensus_bytes: Option<Vec<u8>> = protein_range
         .clone()
-        .map(|protein_col| {
+        .map(|protein_col: usize| {
             metrics
-                .translated_summary_at(frame, protein_col)
+                .translated_summary_at(overlay.frame, protein_col)
                 .map(|summary| summary.consensus.unwrap_or(b' '))
         })
         .collect();
@@ -98,8 +91,7 @@ fn translated_consensus_line(
     let spans = format_translated_byte_range_spans(
         TranslatedByteRange::new(protein_range.start, &consensus_bytes),
         &window.col_range,
-        nucleotide_len,
-        frame,
+        overlay,
         &theme.theme.sequence,
         None,
     );
@@ -107,29 +99,20 @@ fn translated_consensus_line(
 }
 
 fn translated_conservation_line(
-    alignment: &AlignmentModel,
+    overlay: &TranslationOverlay,
     window: &ViewportWindow,
     metrics: &ColumnStatsCache,
     theme: &ThemeState,
 ) -> Line<'static> {
-    let Some(frame) = alignment.translation() else {
-        return Line::from(
-            "Calculating conservation..."
-                .fg(theme.theme.text_dim)
-                .italic(),
-        );
-    };
-    let nucleotide_len = alignment.view().column_count();
     let width = window.col_range.len();
     let mut spans = vec![ratatui::text::Span::styled(" ", theme.styles.accent_alt); width];
 
-    let Some(protein_range) = visible_protein_range(&window.col_range, frame, nucleotide_len)
-    else {
+    let Some(protein_range) = overlay.visible_protein_range(&window.col_range) else {
         return Line::from(spans);
     };
 
     for protein_col in protein_range {
-        let Some(summary) = metrics.translated_summary_at(frame, protein_col) else {
+        let Some(summary) = metrics.translated_summary_at(overlay.frame, protein_col) else {
             return Line::from(
                 "Calculating conservation..."
                     .fg(theme.theme.text_dim)
@@ -140,9 +123,9 @@ fn translated_conservation_line(
             .conservation
             .filter(|value| value.is_finite())
             .map_or(" ", conservation_to_spark);
-        let nuc_start = frame.offset() + protein_col * 3;
+        let codon_nuc_start = nuc_start(protein_col, overlay.frame);
 
-        for absolute_col in nuc_start..=nuc_start + 2 {
+        for absolute_col in codon_nuc_start..=codon_nuc_start + 2 {
             let Some(window_offset) = absolute_col.checked_sub(window.col_range.start) else {
                 continue;
             };
@@ -163,11 +146,11 @@ fn consensus_alignment_lines(
     metrics: &ColumnStatsCache,
     theme: &ThemeState,
 ) -> Vec<Line<'static>> {
-    if alignment.translation().is_some() {
+    if let Some(overlay) = alignment.translation_overlay() {
         return vec![
-            translated_reference_line(alignment, window, theme),
-            translated_consensus_line(alignment, window, metrics, theme),
-            translated_conservation_line(alignment, window, metrics, theme),
+            translated_reference_line(alignment, &overlay, window, theme),
+            translated_consensus_line(&overlay, window, metrics, theme),
+            translated_conservation_line(&overlay, window, metrics, theme),
         ];
     }
 
@@ -357,7 +340,6 @@ mod tests {
                 gap_fraction: 0.0,
             })
             .collect();
-        let view = view;
         let generation = cache.generation;
         let chunk_idx = 0;
         let stored = cache.store(StatsJobResult {

@@ -45,11 +45,19 @@ impl From<StartupState> for MetaState {
     }
 }
 
+/// Mouse selection stored in absolute row and absolute column coordinates.
+///
+/// These survive filter and view changes because they refer to the underlying
+/// alignment data, not the current projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseSelection {
+    /// Absolute row index of the selection anchor.
     pub sequence_id: usize,
+    /// Absolute column index of the selection anchor.
     pub column: usize,
+    /// Absolute row index of the selection end-point.
     pub end_sequence_id: usize,
+    /// Absolute column index of the selection end-point.
     pub end_column: usize,
 }
 

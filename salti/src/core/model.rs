@@ -1,5 +1,7 @@
 use std::{fmt, ops::Range, str::FromStr};
 
+use crate::core::codon::{TranslationOverlay, complete_protein_len, visible_protein_range};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatsView {
     Raw,
@@ -332,6 +334,15 @@ impl AlignmentModel {
         self.view.translated(frame).ok()
     }
 
+    /// Returns translation-space viewport metadata for the active frame.
+    pub(crate) fn translation_overlay(&self) -> Option<TranslationOverlay> {
+        let frame = self.translation()?;
+        Some(TranslationOverlay {
+            frame,
+            nucleotide_len: self.view().column_count(),
+        })
+    }
+
     pub fn stats_context(&self, visible_col_range: Range<usize>) -> Option<StatsContext> {
         if let Some(frame) = self.translation() {
             let nucleotide_len = self.view().column_count();
@@ -402,34 +413,6 @@ fn validate_row_id(abs_row: usize, row_count: usize) -> Result<(), libmsa::Align
         index: abs_row,
         row_count,
     })
-}
-
-const fn complete_protein_len(frame: libmsa::ReadingFrame, nucleotide_len: usize) -> usize {
-    nucleotide_len.saturating_sub(frame.offset()) / 3
-}
-
-fn visible_protein_range(
-    visible_nucleotide_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> Option<Range<usize>> {
-    let last_visible_col = visible_nucleotide_range.end.checked_sub(1)?;
-    if last_visible_col < frame.offset() {
-        return None;
-    }
-
-    let protein_len = complete_protein_len(frame, nucleotide_len);
-    if protein_len == 0 {
-        return None;
-    }
-
-    let start = visible_nucleotide_range
-        .start
-        .saturating_sub(frame.offset())
-        / 3;
-    let end = ((last_visible_col - frame.offset()) / 3 + 1).min(protein_len);
-
-    (start < end).then_some(start..end)
 }
 
 #[cfg(test)]

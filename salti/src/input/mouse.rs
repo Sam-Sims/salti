@@ -6,13 +6,20 @@ use crate::input::route::{MouseRoute, route_mouse};
 use crate::overlay::minimap::MinimapState;
 use crate::overlay::overlay_state::ActiveOverlay;
 use crate::ui::layout::{AppLayout, FrameLayout};
-use crate::ui::selection::{codon_span_for_absolute_column, selection_point_crosshair};
+use crate::ui::selection::selection_point_crosshair;
 use crate::ui::ui_state::{MouseSelection, UiState};
 
+/// Snapshot of a mouse click position in absolute coordinates.
+///
+/// In translation mode, `column` and `end_column` span the full codon
+/// (three nucleotide columns). In raw mode they are identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MouseAnchor {
+    /// Absolute row index.
     sequence_id: usize,
+    /// Absolute column of the codon/cell start.
     column: usize,
+    /// Absolute column of the codon/cell end (inclusive).
     end_column: usize,
 }
 
@@ -194,15 +201,14 @@ fn anchor_from_crosshair(
     sequence_id: usize,
     column: usize,
 ) -> Option<MouseAnchor> {
-    let Some(frame) = alignment.translation() else {
+    let Some(overlay) = alignment.translation_overlay() else {
         return Some(MouseAnchor {
             sequence_id,
             column,
             end_column: column,
         });
     };
-    let codon_span =
-        codon_span_for_absolute_column(column, frame, alignment.view().column_count())?;
+    let codon_span = overlay.codon_span(column)?;
     Some(MouseAnchor {
         sequence_id,
         column: codon_span.start,
