@@ -8,6 +8,14 @@ use crate::model::Alignment;
 use crate::projection::Projection;
 use crate::translation::{ReadingFrame, TranslationTable, translated_byte_at};
 
+/// Calculated values for a single alignment column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnSummary {
+    pub position: usize,
+    pub consensus: Option<u8>,
+    pub conservation: Option<f32>,
+}
+
 /// Selects how consensus bytes are chosen for alignment columns.
 ///
 /// Different methods vary in whether gap characters are considered when
@@ -52,127 +60,7 @@ impl std::str::FromStr for ConsensusMethod {
     }
 }
 
-/// Calculated values for a single alignment column.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ColumnSummary {
-    pub position: usize,
-    pub consensus: Option<u8>,
-    pub conservation: Option<f32>,
-    pub gap_fraction: f32,
-}
-
-pub(crate) struct CountedColumn {
-    pub position: usize,
-    pub counts: [u32; 256],
-}
-
-// alignment metrics
 impl Alignment {
-    /// Returns the consensus byte for each requested relative column.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains one
-    /// consensus byte for each visible column named in `positions`.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
-    /// valid index in the current column projection.
-    pub fn consensus_positions(
-        &self,
-        positions: &[usize],
-        method: ConsensusMethod,
-    ) -> Result<Vec<(usize, Option<u8>)>, AlignmentError> {
-        let columns = counted_columns_positions(&self.data, &self.rows, &self.columns, positions)?;
-        let mut rng = rand::rng();
-        Ok(consensus_from_columns(&columns, method, &mut rng))
-    }
-
-    /// Returns the conservation score for each requested relative column.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains one
-    /// conservation score for each visible column named in `positions`.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
-    /// valid index in the current column projection.
-    ///
-    /// [`AlignmentError::ConservationUndefined`] if the active alignment kind does not
-    /// define a conservation alphabet size.
-    pub fn conservation_positions(
-        &self,
-        positions: &[usize],
-    ) -> Result<Vec<(usize, f32)>, AlignmentError> {
-        let columns = counted_columns_positions(&self.data, &self.rows, &self.columns, positions)?;
-        conservation_from_columns(&columns, self.active_type().conservation_alphabet_size())
-    }
-
-    /// Returns the gap fraction for each requested relative column.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains one
-    /// gap fraction for each visible column named in `positions`.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
-    /// valid index in the current column projection.
-    pub fn gap_fraction_positions(
-        &self,
-        positions: &[usize],
-    ) -> Result<Vec<(usize, f32)>, AlignmentError> {
-        let columns = counted_columns_positions(&self.data, &self.rows, &self.columns, positions)?;
-        Ok(gap_fraction_from_columns(&columns))
-    }
-
-    /// Returns the gap fraction for each relative column in `range`.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains one
-    /// gap fraction for each visible column in `range`.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::EmptyRange`] if `range` is empty.
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than the
-    /// current column projection width.
-    pub fn gap_fraction_range(
-        &self,
-        range: Range<usize>,
-    ) -> Result<Vec<(usize, f32)>, AlignmentError> {
-        let columns = counted_columns_range(&self.data, &self.rows, &self.columns, range)?;
-        Ok(gap_fraction_from_columns(&columns))
-    }
-
-    /// Returns a derived summary for each requested relative column.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains a
-    /// [`ColumnSummary`] with consensus, gap fraction, and conservation when that
-    /// measure is defined for the active alignment kind.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
-    /// valid index in the current column projection.
-    pub fn column_summaries_positions(
-        &self,
-        positions: &[usize],
-        method: ConsensusMethod,
-    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
-        let columns = counted_columns_positions(&self.data, &self.rows, &self.columns, positions)?;
-        let mut rng = rand::rng();
-        Ok(summaries_from_columns(
-            &columns,
-            method,
-            self.active_type().conservation_alphabet_size(),
-            &mut rng,
-        ))
-    }
-
     /// Returns a derived summary for each column in `range`.
     ///
     /// Each position is resolved against the alignment's current column projection.
@@ -206,29 +94,9 @@ impl Alignment {
     }
 }
 
-pub(crate) fn counted_columns_positions(
-    data: &AlignmentData,
-    rows: &Projection,
-    columns: &Projection,
-    relative_positions: &[usize],
-) -> Result<Vec<CountedColumn>, AlignmentError> {
-    relative_positions
-        .iter()
-        .copied()
-        .map(|rel_col| {
-            let abs_col = columns
-                .absolute(rel_col)
-                .ok_or(AlignmentError::ColumnOutOfBounds {
-                    index: rel_col,
-                    length: columns.len(),
-                })?;
-
-            Ok(CountedColumn {
-                position: rel_col,
-                counts: column_byte_counts(data, rows, abs_col),
-            })
-        })
-        .collect()
+pub(crate) struct CountedColumn {
+    pub position: usize,
+    pub counts: [u32; 256],
 }
 
 pub(crate) fn counted_columns_range(
@@ -243,7 +111,7 @@ pub(crate) fn counted_columns_range(
 
     if range.end > columns.len() {
         return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end,
+            index: range.end - 1,
             length: columns.len(),
         });
     }
@@ -262,34 +130,6 @@ pub(crate) fn counted_columns_range(
         .collect())
 }
 
-pub(crate) fn counted_translated_columns_positions(
-    data: &AlignmentData,
-    rows: &Projection,
-    positions: &[usize],
-    frame: ReadingFrame,
-    table: &TranslationTable,
-) -> Result<Vec<CountedColumn>, AlignmentError> {
-    let translated_len = frame.translated_length(data.length);
-
-    positions
-        .iter()
-        .copied()
-        .map(|protein_col| {
-            if protein_col >= translated_len {
-                return Err(AlignmentError::ColumnOutOfBounds {
-                    index: protein_col,
-                    length: translated_len,
-                });
-            }
-
-            Ok(CountedColumn {
-                position: protein_col,
-                counts: translated_column_byte_counts(data, rows, protein_col, frame, table),
-            })
-        })
-        .collect()
-}
-
 pub(crate) fn counted_translated_columns_range(
     data: &AlignmentData,
     rows: &Projection,
@@ -304,7 +144,7 @@ pub(crate) fn counted_translated_columns_range(
     let translated_len = frame.translated_length(data.length);
     if range.end > translated_len {
         return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end,
+            index: range.end - 1,
             length: translated_len,
         });
     }
@@ -315,48 +155,6 @@ pub(crate) fn counted_translated_columns_range(
             counts: translated_column_byte_counts(data, rows, protein_col, frame, table),
         })
         .collect())
-}
-
-pub(crate) fn consensus_from_columns(
-    columns: &[CountedColumn],
-    method: ConsensusMethod,
-    rng: &mut impl rand::Rng,
-) -> Vec<(usize, Option<u8>)> {
-    columns
-        .iter()
-        .map(|column| {
-            (
-                column.position,
-                consensus_from_counts(&column.counts, method, rng),
-            )
-        })
-        .collect()
-}
-
-pub(crate) fn conservation_from_columns(
-    columns: &[CountedColumn],
-    alphabet_size: Option<NonZeroU8>,
-) -> Result<Vec<(usize, f32)>, AlignmentError> {
-    let max_entropy = alphabet_size
-        .map(|value| f64::from(value.get()).log2())
-        .ok_or(AlignmentError::ConservationUndefined)?;
-
-    Ok(columns
-        .iter()
-        .map(|column| {
-            (
-                column.position,
-                conservation_from_counts(&column.counts, max_entropy),
-            )
-        })
-        .collect())
-}
-
-pub(crate) fn gap_fraction_from_columns(columns: &[CountedColumn]) -> Vec<(usize, f32)> {
-    columns
-        .iter()
-        .map(|column| (column.position, gap_fraction_from_counts(&column.counts)))
-        .collect()
 }
 
 #[inline]
@@ -379,7 +177,6 @@ pub(crate) fn summaries_from_columns(
             consensus: consensus_from_counts(&column.counts, method, rng),
             conservation: max_entropy
                 .map(|max_entropy| conservation_from_counts(&column.counts, max_entropy)),
-            gap_fraction: gap_fraction_from_counts(&column.counts),
         })
         .collect()
 }
@@ -526,7 +323,7 @@ fn column_byte_counts(data: &AlignmentData, rows: &Projection, abs_col: usize) -
             .sequences
             .get(abs_row)
             .expect("selected row must exist");
-        counts[usize::from(sequence.sequence()[abs_col])] += 1;
+        counts[usize::from(sequence.sequence[abs_col])] += 1;
     }
 
     counts
@@ -546,7 +343,7 @@ fn translated_column_byte_counts(
             .sequences
             .get(abs_row)
             .expect("selected row must exist");
-        let byte = translated_byte_at(sequence.sequence(), protein_col, frame, table)
+        let byte = translated_byte_at(&sequence.sequence, protein_col, frame, table)
             .expect("validated translated range");
         counts[usize::from(byte)] += 1;
     }
@@ -623,7 +420,7 @@ mod derived_column_tests {
 
     use rand::{SeedableRng, rngs::StdRng};
 
-    use super::{ConsensusMethod, CountedColumn, consensus_from_columns, summaries_from_columns};
+    use super::{ConsensusMethod, CountedColumn, summaries_from_columns};
 
     fn counted_column(position: usize, symbols: &[u8]) -> CountedColumn {
         let mut counts = [0u32; 256];
@@ -632,33 +429,6 @@ mod derived_column_tests {
         }
 
         CountedColumn { position, counts }
-    }
-
-    #[test]
-    fn consensus_from_columns_returns_known_consensus() {
-        let columns = vec![counted_column(2, b"AAAA"), counted_column(4, b"CCCC")];
-        let mut rng = StdRng::seed_from_u64(6);
-
-        assert_eq!(
-            consensus_from_columns(&columns, ConsensusMethod::MajorityNonGap, &mut rng),
-            vec![(2, Some(b'A')), (4, Some(b'C'))]
-        );
-    }
-
-    #[test]
-    fn consensus_from_columns_respects_gap_handling() {
-        let columns = vec![counted_column(1, b"--A")];
-        let mut majority_rng = StdRng::seed_from_u64(7);
-        let mut nongap_rng = StdRng::seed_from_u64(7);
-
-        assert_eq!(
-            consensus_from_columns(&columns, ConsensusMethod::Majority, &mut majority_rng),
-            vec![(1, Some(b'-'))]
-        );
-        assert_eq!(
-            consensus_from_columns(&columns, ConsensusMethod::MajorityNonGap, &mut nongap_rng,),
-            vec![(1, Some(b'A'))]
-        );
     }
 
     #[test]
@@ -676,7 +446,6 @@ mod derived_column_tests {
         assert_eq!(summaries[0].position, 3);
         assert_eq!(summaries[0].consensus, None);
         assert_eq!(summaries[0].conservation, Some(0.0));
-        assert_eq!(summaries[0].gap_fraction, 1.0);
     }
 
     #[test]
@@ -694,11 +463,9 @@ mod derived_column_tests {
         assert_eq!(summaries[0].position, 0);
         assert_eq!(summaries[0].consensus, Some(b'A'));
         assert_eq!(summaries[0].conservation, Some(1.0));
-        assert_eq!(summaries[0].gap_fraction, 0.0);
         assert_eq!(summaries[1].position, 1);
         assert_eq!(summaries[1].consensus, None);
         assert_eq!(summaries[1].conservation, Some(0.0));
-        assert_eq!(summaries[1].gap_fraction, 1.0);
     }
 }
 
@@ -804,87 +571,13 @@ mod constant_fraction_count_tests {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Alignment, AlignmentError, AlignmentType, ConsensusMethod, RawSequence};
+    use crate::{Alignment, AlignmentType, ConsensusMethod, RawSequence};
 
     fn raw(id: &str, sequence: &[u8]) -> RawSequence {
         RawSequence {
             id: id.to_string(),
             sequence: sequence.to_vec(),
         }
-    }
-
-    #[test]
-    fn consensus_positions_returns_single_column() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"ACGT"), raw("s2", b"ACGT")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        assert_eq!(
-            alignment
-                .consensus_positions(&[1], ConsensusMethod::MajorityNonGap)
-                .unwrap(),
-            vec![(1, Some(b'C'))]
-        );
-    }
-
-    #[test]
-    fn consensus_positions_returns_correct_positions() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"ACGT"), raw("s2", b"ACGT")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        assert_eq!(
-            alignment
-                .consensus_positions(&[1, 2], ConsensusMethod::MajorityNonGap)
-                .unwrap(),
-            vec![(1, Some(b'C')), (2, Some(b'G'))]
-        );
-    }
-
-    #[test]
-    fn translated_consensus_range_returns_protein_positions() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"ATGAAA"), raw("s2", b"ATGAAG")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        assert_eq!(
-            alignment
-                .translated(crate::ReadingFrame::Frame1)
-                .unwrap()
-                .consensus_range(0..2, ConsensusMethod::MajorityNonGap)
-                .unwrap(),
-            vec![(0, Some(b'M')), (1, Some(b'K'))]
-        );
-    }
-
-    #[test]
-    fn translated_column_summaries_positions_return_protein_metrics() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"GCT"), raw("s2", b"GCC")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        let raw_summary = alignment
-            .column_summaries_positions(&[2], ConsensusMethod::MajorityNonGap)
-            .unwrap();
-        let translated_summary = alignment
-            .translated(crate::ReadingFrame::Frame1)
-            .unwrap()
-            .column_summaries_positions(&[0], ConsensusMethod::MajorityNonGap)
-            .unwrap();
-
-        assert_eq!(translated_summary.len(), 1);
-        assert_eq!(translated_summary[0].position, 0);
-        assert_eq!(translated_summary[0].consensus, Some(b'A'));
-        assert_eq!(translated_summary[0].conservation, Some(1.0));
-        assert!(raw_summary[0].conservation.unwrap() < 1.0);
     }
 
     #[test]
@@ -902,79 +595,5 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 1]
         );
-    }
-
-    #[test]
-    fn conservation_positions_returns_score() {
-        let alignment =
-            Alignment::new_with_type(vec![raw("s1", b"A"), raw("s2", b"A")], AlignmentType::Dna)
-                .unwrap();
-
-        assert_eq!(
-            alignment.conservation_positions(&[0]).unwrap(),
-            vec![(0, 1.0)]
-        );
-    }
-
-    #[test]
-    fn gap_fraction_range_returns_requested_positions() {
-        let alignment =
-            Alignment::new_with_type(vec![raw("s1", b"A-"), raw("s2", b"--")], AlignmentType::Dna)
-                .unwrap();
-
-        assert_eq!(
-            alignment.gap_fraction_range(0..2).unwrap(),
-            vec![(0, 0.5), (1, 1.0)]
-        );
-    }
-
-    #[test]
-    fn conservation_positions_is_undefined_for_generic() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"A"), raw("s2", b"A")],
-            AlignmentType::Generic,
-        )
-        .unwrap();
-
-        assert_eq!(
-            alignment.conservation_positions(&[0]),
-            Err(AlignmentError::ConservationUndefined)
-        );
-    }
-
-    #[test]
-    fn gap_fraction_positions_returns_values() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"A-"), raw("s2", b"--"), raw("s3", b"AA")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        let fractions = alignment.gap_fraction_positions(&[0, 1]).unwrap();
-        assert!((fractions[0].1 - (1.0 / 3.0)).abs() < f32::EPSILON);
-        assert!((fractions[1].1 - (2.0 / 3.0)).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn column_summaries_positions_returns_all_metrics() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("s1", b"A-"), raw("s2", b"--"), raw("s3", b"AA")],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-
-        let summaries = alignment
-            .column_summaries_positions(&[0, 1], ConsensusMethod::MajorityNonGap)
-            .unwrap();
-
-        assert_eq!(summaries.len(), 2);
-        assert_eq!(summaries[0].position, 0);
-        assert_eq!(summaries[0].consensus, Some(b'A'));
-        assert!(summaries[0].conservation.is_some());
-        assert!((summaries[0].gap_fraction - (1.0 / 3.0)).abs() < f32::EPSILON);
-        assert_eq!(summaries[1].position, 1);
-        assert_eq!(summaries[1].consensus, Some(b'A'));
-        assert!(summaries[1].conservation.is_some());
-        assert!((summaries[1].gap_fraction - (2.0 / 3.0)).abs() < f32::EPSILON);
     }
 }
