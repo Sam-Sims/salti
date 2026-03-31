@@ -1,6 +1,8 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use rand::{SeedableRng, rngs::StdRng};
+
 use crate::alignment_type::AlignmentType;
 use crate::data::{AlignmentData, RawSequence};
 use crate::detection::{DetectionOptions, detect_alignment_type};
@@ -8,6 +10,8 @@ use crate::error::AlignmentError;
 use crate::filter::FilterBuilder;
 use crate::projection::Projection;
 use crate::translation::{ReadingFrame, TranslatedAlignment, TranslationTable};
+
+const DETECTION_SEED: u64 = u64::from_be_bytes(*b"REDRIGHT");
 
 /// A multiple sequence alignment.
 ///
