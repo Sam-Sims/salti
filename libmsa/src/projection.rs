@@ -19,10 +19,6 @@ impl Projection {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     pub(crate) fn absolute(&self, relative: usize) -> Option<usize> {
         match self {
             Self::Full { len } => (relative < *len).then_some(relative),
@@ -77,7 +73,6 @@ mod tests {
     fn full_projection_basics() {
         let proj = Projection::Full { len: 5 };
         assert_eq!(proj.len(), 5);
-        assert!(!proj.is_empty());
         assert!(proj.is_full());
         assert_eq!(proj.absolute(0), Some(0));
         assert_eq!(proj.absolute(4), Some(4));
@@ -88,7 +83,6 @@ mod tests {
     fn filtered_projection_basics() {
         let proj = Projection::Filtered(Arc::from([1, 3, 7].as_slice()));
         assert_eq!(proj.len(), 3);
-        assert!(!proj.is_empty());
         assert!(!proj.is_full());
         assert_eq!(proj.absolute(0), Some(1));
         assert_eq!(proj.absolute(1), Some(3));
@@ -99,11 +93,9 @@ mod tests {
     #[test]
     fn empty_projections() {
         let full = Projection::Full { len: 0 };
-        assert!(full.is_empty());
         assert_eq!(full.iter().count(), 0);
 
         let filtered = Projection::Filtered(Arc::from([].as_slice()));
-        assert!(filtered.is_empty());
         assert_eq!(filtered.iter().count(), 0);
     }
     #[test]
