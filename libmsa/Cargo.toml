@@ -12,5 +12,6 @@ categories = ["command-line-utilities", "science"]
 
 [dependencies]
 rand = "0.9"
+rayon = "1.11"
 regex = "1.12.3"
 thiserror = "2.0.18"

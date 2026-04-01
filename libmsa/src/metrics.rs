@@ -1,4 +1,5 @@
 use rand::seq::IndexedRandom;
+use rayon::prelude::*;
 use std::{num::NonZeroU8, ops::Range};
 
 use crate::AlignmentType;
@@ -117,6 +118,7 @@ pub(crate) fn counted_columns_range(
     }
 
     Ok(range
+        .into_par_iter()
         .map(|rel_col| CountedColumn {
             position: rel_col,
             counts: column_byte_counts(
@@ -150,6 +152,7 @@ pub(crate) fn counted_translated_columns_range(
     }
 
     Ok(range
+        .into_par_iter()
         .map(|protein_col| CountedColumn {
             position: protein_col,
             counts: translated_column_byte_counts(data, rows, protein_col, frame, table),

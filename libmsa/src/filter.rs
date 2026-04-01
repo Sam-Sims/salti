@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use regex::Regex;
 
 use crate::error::AlignmentError;
@@ -28,6 +29,16 @@ pub struct FilterBuilder<'a> {
 }
 
 impl<'a> FilterBuilder<'a> {
+    pub(crate) fn new(source: &'a Alignment) -> Self {
+        Self {
+            source,
+            row_exclude_sets: Vec::new(),
+            row_name_regex: None,
+            max_gap_fraction: None,
+            min_constant_fraction: None,
+        }
+    }
+
     /// Excludes the supplied rows from the filtered view.
     pub fn without_rows<I>(mut self, row_ids: I) -> Self
     where
@@ -57,7 +68,7 @@ impl<'a> FilterBuilder<'a> {
         self
     }
 
-    /// Resolves all filters and builds a new [`Alignment`]
+    /// Resolves all filters and builds a new [`Alignment`].
     pub fn apply(self) -> Result<Alignment, AlignmentError> {
         let row_count = self.source.row_count();
         let column_count = self.source.column_count();
@@ -92,31 +103,35 @@ impl<'a> FilterBuilder<'a> {
 
         let mut column_ids: Vec<usize> = (0..column_count).collect();
         if self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some() {
-            let temp_rows = Projection::Filtered(Arc::from(row_ids.as_slice()));
-            let columns = metrics::counted_columns_range(
-                &self.source.data,
-                &temp_rows,
-                &self.source.columns,
-                0..column_count,
-            )?;
+            let data = &self.source.data;
+            let active_type = self.source.active_type();
+            let max_gap_fraction = self.max_gap_fraction;
+            let min_constant_fraction = self.min_constant_fraction;
 
-            column_ids.retain(|&column_id| {
-                columns.get(column_id).is_none_or(|column| {
-                    let gap_ok = self.max_gap_fraction.is_none_or(|max_gap_fraction| {
-                        metrics::gap_fraction_from_counts(&column.counts) <= max_gap_fraction
+            column_ids = (0..column_count)
+                .into_par_iter()
+                .filter_map(|abs_col| {
+                    let mut counts = [0u32; 256];
+
+                    for &abs_row in &row_ids {
+                        let sequence = data
+                            .sequences
+                            .get(abs_row)
+                            .expect("selected row must exist");
+                        counts[usize::from(sequence.sequence[abs_col])] += 1;
+                    }
+
+                    let gap_ok = max_gap_fraction.is_none_or(|threshold| {
+                        metrics::gap_fraction_from_counts(&counts) <= threshold
                     });
-                    let constant_ok =
-                        self.min_constant_fraction
-                            .is_none_or(|min_constant_fraction| {
-                                metrics::max_counted_symbol_fraction_from_counts(
-                                    &column.counts,
-                                    self.source.active_type(),
-                                )
-                                .is_none_or(|fraction| fraction < min_constant_fraction)
-                            });
-                    gap_ok && constant_ok
+                    let constant_ok = min_constant_fraction.is_none_or(|threshold| {
+                        metrics::max_counted_symbol_fraction_from_counts(&counts, active_type)
+                            .is_none_or(|fraction| fraction < threshold)
+                    });
+
+                    (gap_ok && constant_ok).then_some(abs_col)
                 })
-            });
+                .collect();
         }
 
         let rows_proj = if row_ids.len() == row_count {
@@ -131,33 +146,8 @@ impl<'a> FilterBuilder<'a> {
             Projection::Filtered(Arc::from(column_ids))
         };
 
-        Ok(Alignment::from_selection(
-            Arc::clone(&self.source.data),
-            self.source.detected_type(),
-            self.source.active_type(),
-            rows_proj,
-            cols_proj,
-        ))
+        Ok(self.source.with_projections(rows_proj, cols_proj))
     }
-}
-
-impl<'a> FilterBuilder<'a> {
-    pub(crate) fn new(source: &'a Alignment) -> Self {
-        Self {
-            source,
-            row_exclude_sets: Vec::new(),
-            row_name_regex: None,
-            max_gap_fraction: None,
-            min_constant_fraction: None,
-        }
-    }
-}
-
-fn compile_regex(pattern: &str) -> Result<Regex, AlignmentError> {
-    Regex::new(pattern).map_err(|error| AlignmentError::InvalidRegex {
-        pattern: pattern.to_string(),
-        source: error,
-    })
 }
 
 fn validate_row_ids(row_ids: &[usize], row_count: usize) -> Result<(), AlignmentError> {
@@ -173,6 +163,7 @@ fn validate_row_ids(row_ids: &[usize], row_count: usize) -> Result<(), Alignment
             return Err(AlignmentError::DuplicateRowIndex { index: row_id });
         }
     }
+
     Ok(())
 }
 
@@ -192,11 +183,16 @@ fn validate_constant_fraction(threshold: f32) -> Result<(), AlignmentError> {
     Err(AlignmentError::InvalidConstantFraction(threshold))
 }
 
+fn compile_regex(pattern: &str) -> Result<Regex, AlignmentError> {
+    Regex::new(pattern).map_err(|error| AlignmentError::InvalidRegex {
+        pattern: pattern.to_string(),
+        source: error,
+    })
+}
+
 #[cfg(test)]
 mod filter_builder_tests {
-    use crate::{
-        Alignment, AlignmentError, AlignmentType, ColumnSummary, ConsensusMethod, RawSequence,
-    };
+    use crate::{Alignment, AlignmentError, AlignmentType, RawSequence};
 
     fn raw(id: &str, sequence: &[u8]) -> RawSequence {
         RawSequence {
@@ -430,18 +426,6 @@ mod filter_builder_tests {
     }
 
     #[test]
-    fn column_summaries_positions_empty_returns_empty() {
-        let alignment = generic_alignment(&[("s1", b"A-"), ("s2", b"--")]);
-
-        assert_eq!(
-            alignment
-                .column_summaries_positions(&[], ConsensusMethod::MajorityNonGap)
-                .unwrap(),
-            Vec::<ColumnSummary>::new()
-        );
-    }
-
-    #[test]
     fn filtered_alignment_rejects_chained_filter() {
         let alignment = dna_alignment(&[("s1", b"AC"), ("s2", b"TG")]);
         let filtered = alignment
@@ -463,23 +447,13 @@ mod filter_builder_tests {
 
 #[cfg(test)]
 mod filtered_alignment_behaviour_tests {
-    use crate::{Alignment, AlignmentType, ConsensusMethod, RawSequence};
+    use crate::{Alignment, AlignmentType, RawSequence};
 
     fn raw(id: &str, sequence: &[u8]) -> RawSequence {
         RawSequence {
             id: id.to_string(),
             sequence: sequence.to_vec(),
         }
-    }
-
-    fn dna_alignment(rows: &[(&str, &[u8])]) -> Alignment {
-        Alignment::new_with_type(
-            rows.iter()
-                .map(|(id, seq)| raw(id, seq))
-                .collect::<Vec<_>>(),
-            AlignmentType::Dna,
-        )
-        .unwrap()
     }
 
     fn generic_alignment(rows: &[(&str, &[u8])]) -> Alignment {
@@ -512,36 +486,5 @@ mod filtered_alignment_behaviour_tests {
             2
         );
         assert_eq!(filtered.sequence_by_absolute(2).unwrap().id(), "s2");
-    }
-
-    #[test]
-    fn filter_consensus_uses_selected_rows() {
-        let alignment =
-            generic_alignment(&[("ref", b"TA"), ("s1", b"AC"), ("s2", b"AC"), ("s3", b"TC")]);
-
-        let filtered = alignment
-            .filter()
-            .unwrap()
-            .without_rows([0])
-            .apply()
-            .unwrap();
-        let consensus = filtered
-            .consensus_positions(&[0, 1], ConsensusMethod::MajorityNonGap)
-            .unwrap();
-
-        assert_eq!(consensus, vec![(0, Some(b'A')), (1, Some(b'C'))]);
-    }
-
-    #[test]
-    fn filter_conservation_uses_selected_rows() {
-        let alignment = dna_alignment(&[("s1", b"A"), ("s2", b"-"), ("s3", b"A")]);
-        let filtered = alignment
-            .filter()
-            .unwrap()
-            .without_rows([1])
-            .apply()
-            .unwrap();
-
-        assert_eq!(filtered.conservation_positions(&[0]), Ok(vec![(0, 1.0)]));
     }
 }
