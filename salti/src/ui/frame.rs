@@ -30,30 +30,44 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
     let theme = &ui.theme.styles;
     let mut parts = Vec::new();
 
-    if let Some(alignment) = alignment.filter(|alignment| alignment.filter().is_active()) {
-        let visible_rows = alignment.view().row_count();
-        let mut filter_text = String::from("Filters:");
-        let mut counts = format!(" ({visible_rows} rows)");
-        if let Some(pattern) = alignment.filter().pattern() {
-            filter_text.push_str(&format!(" [rows: {pattern}]"));
+    if let Some(alignment) = alignment {
+        if alignment.filter().is_active() {
+            let visible_rows = alignment.view().row_count();
+            let mut filter_text = String::from("Filters:");
+            let mut counts = format!(" ({visible_rows} rows)");
+            if let Some(pattern) = alignment.filter().pattern() {
+                filter_text.push_str(&format!(" [rows: {pattern}]"));
+            }
+            if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
+                filter_text.push_str(&format!(
+                    " [gaps: <= {}%]",
+                    format_percent(max_gap_fraction)
+                ));
+            }
+            if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
+                filter_text.push_str(&format!(
+                    " [constant: >= {}%]",
+                    format_percent(min_constant_fraction)
+                ));
+            }
+            if alignment.filter().has_column_filter() {
+                let visible_cols = alignment.view().column_count();
+                counts.push_str(&format!(" ({visible_cols} cols)"));
+            }
+            parts.push(format!("{filter_text}{counts}").set_style(theme.warning));
         }
-        if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
-            filter_text.push_str(&format!(
-                " [gaps: <= {}%]",
-                format_percent(max_gap_fraction)
-            ));
+
+        let translation_active =
+            alignment.translation().is_some() || alignment.is_reloaded_as_protein();
+        if translation_active {
+            if !parts.is_empty() {
+                parts.push(Span::raw(" | "));
+            }
+            parts.push(
+                format!("Translation frame: {}", alignment.translation_frame())
+                    .set_style(theme.text),
+            );
         }
-        if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
-            filter_text.push_str(&format!(
-                " [constant: >= {}%]",
-                format_percent(min_constant_fraction)
-            ));
-        }
-        if alignment.filter().has_column_filter() {
-            let visible_cols = alignment.view().column_count();
-            counts.push_str(&format!(" ({visible_cols} cols)"));
-        }
-        parts.push(format!("{filter_text}{counts}").set_style(theme.warning));
     }
 
     // optional selection info building

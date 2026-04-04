@@ -358,12 +358,14 @@ impl<'a> RowView<'a> {
         if range.is_empty() {
             return Err(AlignmentError::EmptyRange);
         }
+
         if range.end > self.columns.len() {
             return Err(AlignmentError::ColumnOutOfBounds {
                 index: range.end - 1,
                 length: self.columns.len(),
             });
         }
+
         let columns = self.columns;
         let data = self.data;
         Ok(range.map(move |rel_col| {

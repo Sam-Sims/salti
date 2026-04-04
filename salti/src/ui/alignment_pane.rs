@@ -425,12 +425,10 @@ fn build_ruler(
                 ".".set_style(theme.styles.text_dim)
             };
 
-            let should_label = if let Some(run_starts) = &run_starts {
-                run_starts.contains(&index)
-            } else {
-                is_major_tick || display_pos == 1
-            };
-            if should_label {
+            let is_run_start = run_starts
+                .as_ref()
+                .is_some_and(|run_starts| run_starts.contains(&index));
+            if is_major_tick || display_pos == 1 || is_run_start {
                 let _ = add_number_to_ruler(&mut number_line, index, display_pos, theme);
             }
         }

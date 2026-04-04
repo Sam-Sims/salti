@@ -177,7 +177,7 @@ fn format_translated_spans(
 }
 
 /// Collects visible bytes from a sequence view for the given relative column range.
-pub fn visible_bytes(sequence: libmsa::SequenceView<'_>, col_range: &Range<usize>) -> Vec<u8> {
+pub fn visible_bytes(sequence: libmsa::RowView<'_>, col_range: &Range<usize>) -> Vec<u8> {
     if col_range.is_empty() {
         return Vec::new();
     }
