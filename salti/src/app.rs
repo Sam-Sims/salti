@@ -57,6 +57,7 @@ pub(crate) struct App {
     layout_area: Rect,
     frame_layout: FrameLayout,
     app_layout: AppLayout,
+    reloaded_nucleotide_phase: usize,
 }
 
 impl App {
@@ -77,6 +78,7 @@ impl App {
             layout_area,
             frame_layout,
             app_layout,
+            reloaded_nucleotide_phase: 0,
         }
     }
 
@@ -480,10 +482,23 @@ impl App {
                 self.invalidate_all_stats();
                 return Ok(());
             }
+            Command::ReloadAsProtein { frame } => {
+                let viewport_target = self.reload_as_protein_viewport_target(frame);
+                self.alignment_mut()?.toggle_reload_as_protein(frame)?;
+                self.clear_mouse_selection();
+                self.on_view_rebuilt();
+                self.jump_to_reloaded_viewport_target(viewport_target);
+                return Ok(());
+            }
             Command::SetTranslationFrame(frame) => {
                 let alignment = self.alignment_mut()?;
                 let was_enabled = alignment.translation().is_some();
+                let was_reloaded = alignment.is_reloaded_as_protein();
                 alignment.set_translation_frame(frame)?;
+                if was_reloaded {
+                    self.on_view_rebuilt();
+                    return Ok(());
+                }
                 if was_enabled {
                     self.invalidate_translated_stats();
                 }
@@ -516,6 +531,45 @@ impl App {
     fn on_view_rebuilt(&mut self) {
         self.refresh_viewport_bounds();
         self.invalidate_all_stats();
+    }
+
+    fn reload_as_protein_viewport_target(
+        &mut self,
+        frame: Option<libmsa::ReadingFrame>,
+    ) -> Option<usize> {
+        let alignment = self.alignment.as_ref()?;
+        let frame = frame.unwrap_or(alignment.translation_frame());
+        let relative_col = self.ui.viewport.window().col_range.start;
+        let absolute_col = alignment.view().absolute_column_id(relative_col)?;
+
+        if alignment.is_reloaded_as_protein() {
+            let nucleotide_col = absolute_col
+                .checked_mul(3)
+                .and_then(|scaled| frame.offset().checked_add(scaled))?
+                .saturating_add(self.reloaded_nucleotide_phase);
+            return Some(nucleotide_col);
+        }
+
+        self.reloaded_nucleotide_phase = match absolute_col.checked_sub(frame.offset()) {
+            Some(offset_col) => offset_col % 3,
+            None => 0,
+        };
+        Some(frame.protein_col(absolute_col).unwrap_or(0))
+    }
+
+    fn jump_to_reloaded_viewport_target(&mut self, target_absolute_col: Option<usize>) {
+        let Some(target_absolute_col) = target_absolute_col else {
+            return;
+        };
+        let Some(alignment) = self.alignment.as_ref() else {
+            return;
+        };
+        let Some(relative_col) =
+            nearest_visible_relative_column(alignment.view(), target_absolute_col)
+        else {
+            return;
+        };
+        self.ui.viewport.jump_to_position(relative_col);
     }
 
     fn clear_mouse_selection(&mut self) {
@@ -704,6 +758,25 @@ impl App {
     }
 }
 
+fn nearest_visible_relative_column(
+    view: &libmsa::Alignment,
+    target_absolute_col: usize,
+) -> Option<usize> {
+    if let Some(relative_col) = view.relative_column_id(target_absolute_col) {
+        return Some(relative_col);
+    }
+
+    let mut previous_relative_col = None;
+    for (relative_col, absolute_col) in view.absolute_column_ids().enumerate() {
+        if target_absolute_col <= absolute_col {
+            return Some(relative_col);
+        }
+        previous_relative_col = Some(relative_col);
+    }
+
+    previous_relative_col
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,8 +797,8 @@ mod tests {
             initial_position: 0,
         };
         let mut app = App::new(startup);
-        let alignment = libmsa::Alignment::new(sequences).expect("alignment should load");
-        let model = AlignmentModel::new(alignment).expect("alignment model should build");
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        let model = AlignmentModel::new(alignment).unwrap();
         app.stats_cache.init(model.view().column_count());
         app.alignment = Some(model);
         app.ui.meta.loading_state = LoadingState::Loaded;
@@ -749,19 +822,19 @@ mod tests {
     }
 
     #[test]
-    fn translated_click_selects_a_full_codon_span() {
+    fn translated_click_selects_whole_codon() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.alignment
             .as_mut()
             .unwrap()
             .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .expect("setting translation frame should succeed");
+            .unwrap();
         app.alignment
             .as_mut()
             .unwrap()
             .toggle_translation_view()
-            .expect("translation should enable");
+            .unwrap();
 
         let area = app.app_layout.alignment_pane_sequence_rows;
         app.handle_mouse_event(left_mouse_event(
@@ -771,26 +844,26 @@ mod tests {
             0,
         ));
 
-        let selection = app.ui.selection.expect("selection should be created");
+        let selection = app.ui.selection.unwrap();
         assert_eq!(selection.sequence_id, 0);
         assert_eq!(selection.column, 0);
         assert_eq!(selection.end_column, 2);
     }
 
     #[test]
-    fn translated_drag_extends_selection_in_whole_codons() {
+    fn translated_drag_extends_selection_in_codons() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.alignment
             .as_mut()
             .unwrap()
             .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .expect("setting translation frame should succeed");
+            .unwrap();
         app.alignment
             .as_mut()
             .unwrap()
             .toggle_translation_view()
-            .expect("translation should enable");
+            .unwrap();
 
         let area = app.app_layout.alignment_pane_sequence_rows;
         app.handle_mouse_event(left_mouse_event(
@@ -812,7 +885,7 @@ mod tests {
             0,
         ));
 
-        let selection = app.ui.selection.expect("selection should be created");
+        let selection = app.ui.selection.unwrap();
         assert_eq!(selection.sequence_id, 0);
         assert_eq!(selection.column, 0);
         assert_eq!(selection.end_sequence_id, 0);
@@ -820,9 +893,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn toggling_translation_preserves_the_stored_nucleotide_selection() {
+    async fn toggling_translation_keeps_stored_nucleotide_selection() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         let selection = MouseSelection {
             sequence_id: 0,
             column: 4,
@@ -839,17 +912,101 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn filter_gaps_shows_notification_when_translation_is_active() {
+    async fn reload_as_protein_clears_selection() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        app.ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 0,
+            end_sequence_id: 0,
+            end_column: 2,
+        });
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert!(app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert_eq!(
+            app.alignment.as_ref().unwrap().base().active_type(),
+            libmsa::AlignmentType::Protein
+        );
+        assert_eq!(app.ui.selection, None);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert!(!app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert_eq!(
+            app.alignment.as_ref().unwrap().base().active_type(),
+            libmsa::AlignmentType::Dna
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_as_protein_maps_nt_viewport_to_matching_aa_column() {
+        let sequence = vec![b'C'; 360];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.ui.viewport.jump_to_position(200);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert_eq!(app.ui.viewport.window().col_range.start, 66);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_as_protein_maps_back_to_nt_from_current_aa_locus() {
+        let sequence = vec![b'C'; 360];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.ui.viewport.jump_to_position(200);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.ui.viewport.jump_to_position(70);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert_eq!(app.ui.viewport.window().col_range.start, 212);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_translation_frame_retranslates_reloaded_protein_alignment() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"ATGCCCTAA")]);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        assert_eq!(
+            app.alignment
+                .as_ref()
+                .unwrap()
+                .base()
+                .sequence(0)
+                .unwrap()
+                .byte_at(0),
+            Some(b'M')
+        );
+
+        app.execute_commands([Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2)]);
+
+        assert_eq!(
+            app.alignment.as_ref().unwrap().translation_frame(),
+            libmsa::ReadingFrame::Frame2
+        );
+        assert_eq!(
+            app.alignment
+                .as_ref()
+                .unwrap()
+                .base()
+                .sequence(0)
+                .unwrap()
+                .byte_at(0),
+            Some(b'C')
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn filter_gaps_shows_notification_in_translation() {
+        let mut app =
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
         app.execute_commands([Command::SetGapFilter(Some(0.25))]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
             "filter-gaps is unavailable while translation is active"
@@ -857,17 +1014,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn filter_constant_shows_notification_when_translation_is_active() {
+    async fn filter_constant_shows_notification_in_translation() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
         app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
             "filter-constant is unavailable while translation is active"
@@ -875,16 +1028,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn translation_shows_notification_when_gap_filter_is_active() {
-        let mut app = app_with_alignment(vec![raw("row1", b"ATG---"), raw("row2", b"ATG---")]);
+    async fn translation_shows_notification_with_gap_filter() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
         app.execute_commands([Command::SetGapFilter(Some(0.0))]);
         app.execute_commands([Command::ToggleTranslationView]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
             "translation is unavailable while a column filter is active"
@@ -892,16 +1041,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn translation_shows_notification_when_constant_filter_is_active() {
-        let mut app = app_with_alignment(vec![raw("row1", b"ATGAAA"), raw("row2", b"ATGAAA")]);
+    async fn translation_shows_notification_with_constant_filter() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
         app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
         app.execute_commands([Command::ToggleTranslationView]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
             "translation is unavailable while a column filter is active"
@@ -909,8 +1054,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn key_events_are_forwarded_to_command_execution() {
-        let mut app = app_with_alignment(vec![raw("row1", b"ACGT"), raw("row2", b"ACGT")]);
+    async fn key_events_forward_to_command_execution() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")]);
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
 
         app.handle_key_event(key);
