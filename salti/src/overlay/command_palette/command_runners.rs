@@ -65,6 +65,27 @@ pub(super) fn run_toggle_translation(
     })
 }
 
+pub(super) fn run_reload_as_protein(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> anyhow::Result<Command> {
+    run_command("reload-as-protein", arguments, || {
+        let frame = match parse_argument(arguments) {
+            Some(arg) => Some(
+                arg.parse()
+                    .map_err(|_| format_err!("Invalid argument for reload-as-protein: {arg}"))?,
+            ),
+            None => None,
+        };
+        if state.active_type != libmsa::AlignmentType::Dna && !state.is_reloaded_as_protein {
+            return Err(format_err!(
+                "reload-as-protein is only available for DNA alignments",
+            ));
+        }
+        Ok(Command::ReloadAsProtein { frame })
+    })
+}
+
 fn next_visible_column_index(visible_columns: &[usize], absolute_target: usize) -> Option<usize> {
     match visible_columns.binary_search(&absolute_target) {
         Ok(visible_index) => Some(visible_index),
@@ -309,6 +330,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             libmsa::AlignmentType::Dna,
+            false,
             visible_columns,
         )
     }
@@ -430,6 +452,20 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Invalid argument for set-sequence-type: rna"
+        );
+    }
+
+    #[test]
+    fn reload_as_protein_accepts_optional_frame() {
+        let state = palette_state_with_columns(Vec::new());
+
+        let action = run_reload_as_protein(&state, "2").expect("frame should parse");
+
+        assert_eq!(
+            action,
+            Command::ReloadAsProtein {
+                frame: Some(libmsa::ReadingFrame::Frame2),
+            }
         );
     }
 }

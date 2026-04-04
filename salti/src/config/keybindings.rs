@@ -30,6 +30,30 @@ const KEY_BINDINGS: &[Binding] = &[
         help: "Toggle NT to AA translation view",
     },
     Binding {
+        code: KeyCode::Char('T'),
+        modifiers: KeyModifiers::SHIFT,
+        action: Command::ReloadAsProtein { frame: None },
+        help: "Reload alignment as protein",
+    },
+    Binding {
+        code: KeyCode::Char('1'),
+        modifiers: KeyModifiers::ALT,
+        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame1),
+        help: "Set translation frame 1",
+    },
+    Binding {
+        code: KeyCode::Char('2'),
+        modifiers: KeyModifiers::ALT,
+        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2),
+        help: "Set translation frame 2",
+    },
+    Binding {
+        code: KeyCode::Char('3'),
+        modifiers: KeyModifiers::ALT,
+        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame3),
+        help: "Set translation frame 3",
+    },
+    Binding {
         code: KeyCode::Char('m'),
         modifiers: KeyModifiers::NONE,
         action: Command::ToggleMinimap,

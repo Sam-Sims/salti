@@ -35,4 +35,5 @@ pub enum Command {
     SetTranslationFrame(libmsa::ReadingFrame),
     SetDiffMode(DiffMode),
     ToggleTranslationView,
+    ReloadAsProtein { frame: Option<libmsa::ReadingFrame> },
 }

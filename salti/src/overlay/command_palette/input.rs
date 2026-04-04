@@ -35,6 +35,7 @@ pub struct CommandPaletteState {
     pub(super) selectable_sequences: Vec<VisibleSequence>,
     pub(super) pinned_sequences: Vec<VisibleSequence>,
     pub(super) active_type: AlignmentType,
+    pub(super) is_reloaded_as_protein: bool,
     pub(super) visible_columns: Vec<usize>,
 }
 impl CommandPaletteState {
@@ -43,6 +44,7 @@ impl CommandPaletteState {
             Vec::new(),
             Vec::new(),
             libmsa::AlignmentType::Generic,
+            false,
             Vec::new(),
         )
     }
@@ -84,6 +86,7 @@ impl CommandPaletteState {
             selectable_sequences,
             pinned_sequences,
             alignment.base().active_type(),
+            alignment.is_reloaded_as_protein(),
             alignment.view().absolute_column_ids().collect(),
         )
     }
@@ -92,6 +95,7 @@ impl CommandPaletteState {
         selectable_sequences: Vec<VisibleSequence>,
         pinned_sequences: Vec<VisibleSequence>,
         active_type: AlignmentType,
+        is_reloaded_as_protein: bool,
         visible_columns: Vec<usize>,
     ) -> Self {
         let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
@@ -107,6 +111,7 @@ impl CommandPaletteState {
             selectable_sequences,
             pinned_sequences,
             active_type,
+            is_reloaded_as_protein,
             visible_columns,
         }
     }
@@ -386,6 +391,20 @@ impl CommandPaletteState {
     }
 }
 
+fn display_command_names() -> Vec<String> {
+    COMMAND_SPECS
+        .iter()
+        .map(|spec| spec.name().to_string())
+        .collect()
+}
+
+fn resolve_command(name: &str) -> Option<PaletteCommand> {
+    COMMAND_SPECS
+        .iter()
+        .copied()
+        .find(|spec| spec.name() == name || spec.aliases().contains(&name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +419,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             libmsa::AlignmentType::Dna,
+            false,
             vec![0, 3, 4],
         );
         palette.command_input = "jump-position 2".to_string();
@@ -440,18 +460,4 @@ mod tests {
             ]
         );
     }
-}
-
-fn display_command_names() -> Vec<String> {
-    COMMAND_SPECS
-        .iter()
-        .map(|spec| spec.name().to_string())
-        .collect()
-}
-
-fn resolve_command(name: &str) -> Option<PaletteCommand> {
-    COMMAND_SPECS
-        .iter()
-        .copied()
-        .find(|spec| spec.name() == name || spec.aliases().contains(&name))
 }
