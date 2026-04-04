@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 248
+expression: "status_text(&build_top_status_bar(None, &failed_ui))"
+---
+File: Unknown | Status: Failed | 0 alignments | Length: 0 | Positions: 0-0

@@ -219,8 +219,8 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
 
         let spans = format_translated_row_spans(
             sequence,
@@ -241,8 +241,8 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
         let diff_against = TranslatedDiffRange::new(0, b"MKF");
 
         let spans = format_translated_row_spans(
@@ -263,8 +263,8 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
         let diff_against = TranslatedDiffRange::new(0, b"MKF");
 
         let spans = format_translated_row_spans(
@@ -288,8 +288,8 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame2)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
 
         let spans = format_translated_row_spans(
             sequence,

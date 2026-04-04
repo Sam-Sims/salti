@@ -300,6 +300,10 @@ mod tests {
     use super::*;
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -308,11 +312,9 @@ mod tests {
         }
     }
 
-    fn line_text(line: &Line<'_>) -> String {
-        line.spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect()
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
     }
 
     fn metrics_with(
@@ -337,7 +339,6 @@ mod tests {
                 position,
                 consensus: Some(byte),
                 conservation,
-                gap_fraction: 0.0,
             })
             .collect();
         let generation = cache.generation;
@@ -352,76 +353,163 @@ mod tests {
         cache
     }
 
-    #[test]
-    fn translated_consensus_lines_use_codon_spread_rendering() {
-        let alignment =
-            libmsa::Alignment::new(vec![raw("ref", b"ATGAAATTT"), raw("row", b"ATGAAATTT")])
-                .expect("alignment should be valid");
-        let mut alignment =
-            AlignmentModel::new(alignment).expect("alignment model should be created");
-        alignment.set_reference(0).expect("reference should be set");
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-
+    fn render_consensus_pane_text(
+        alignment: &AlignmentModel,
+        metrics: &ColumnStatsCache,
+        area: Rect,
+    ) -> String {
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let layout = AppLayout::new(area);
         let window = ViewportWindow {
             row_range: 0..alignment.view().row_count(),
             col_range: 0..alignment.view().column_count(),
             name_range: 0..0,
         };
-        let lines = consensus_alignment_lines(
-            &alignment,
-            &window,
-            &metrics_with(
-                StatsView::Translated(libmsa::ReadingFrame::Frame1),
-                b"MKF",
-                Some(1.0),
-            ),
-            &ThemeState::default(),
-        );
 
-        assert_eq!(lines.len(), 3);
-        assert_eq!(line_text(&lines[0]), " M  K  F ");
-        assert_eq!(line_text(&lines[1]), " M  K  F ");
-        assert_eq!(line_text(&lines[2]), "█████████");
+        terminal
+            .draw(|frame| {
+                render_consensus_pane(
+                    frame,
+                    &layout,
+                    alignment,
+                    &window,
+                    metrics,
+                    &ThemeState::default(),
+                );
+            })
+            .unwrap();
+
+        buffer_text(terminal.backend().buffer())
+    }
+
+    fn buffer_text(buffer: &Buffer) -> String {
+        let area = buffer.area;
+        let mut lines = Vec::new();
+
+        for y in area.top()..area.bottom() {
+            let mut line = String::new();
+            for x in area.left()..area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                if symbol.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(symbol);
+                }
+            }
+            while line.ends_with(' ') {
+                line.pop();
+            }
+            lines.push(line);
+        }
+
+        while matches!(lines.last(), Some(last) if last.is_empty()) {
+            lines.pop();
+        }
+
+        lines.join("\n")
     }
 
     #[test]
-    fn translated_mode_keeps_conservation_label() {
-        let alignment =
-            libmsa::Alignment::new(vec![raw("ref", b"ATGAAATTT"), raw("row", b"ATGAAATTT")])
-                .expect("alignment should be valid");
-        let mut alignment =
-            AlignmentModel::new(alignment).expect("alignment model should be created");
+    fn raw_consensus_pane_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment.set_reference(0).unwrap();
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+
+        insta::assert_snapshot!(
+            "consensus_pane_raw",
+            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+        );
+    }
+
+    #[test]
+    fn raw_consensus_pane_no_reference_and_loading_snapshots() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+
+        insta::assert_snapshot!(
+            "consensus_pane_raw_no_reference",
+            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+        );
+
+        let mut loading_metrics = ColumnStatsCache::default();
+        loading_metrics.init(alignment.view().column_count());
+
+        insta::assert_snapshot!(
+            "consensus_pane_raw_loading",
+            render_consensus_pane_text(&alignment, &loading_metrics, Rect::new(0, 0, 100, 5))
+        );
+    }
+
+    #[test]
+    fn translated_consensus_pane_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment.set_reference(0).unwrap();
         alignment
             .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
+            .unwrap();
+        let metrics = metrics_with(
+            StatsView::Translated(libmsa::ReadingFrame::Frame1),
+            b"HHHHHH",
+            Some(1.0),
+        );
 
-        assert!(shows_conservation_line(&alignment));
+        insta::assert_snapshot!(
+            "consensus_pane_translated",
+            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+        );
     }
 
     #[test]
-    fn raw_consensus_lines_keep_conservation_row() {
-        let alignment = libmsa::Alignment::new(vec![raw("ref", b"ACGT"), raw("row", b"ACGT")])
-            .expect("alignment should be valid");
-        let mut alignment =
-            AlignmentModel::new(alignment).expect("alignment model should be created");
-        alignment.set_reference(0).expect("reference should be set");
-
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 0..0,
-        };
-        let lines = consensus_alignment_lines(
-            &alignment,
-            &window,
-            &metrics_with(StatsView::Raw, b"ACGT", Some(1.0)),
-            &ThemeState::default(),
+    fn translated_consensus_pane_no_reference_and_loading_snapshots() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .unwrap();
+        let metrics = metrics_with(
+            StatsView::Translated(libmsa::ReadingFrame::Frame1),
+            b"HHHHHH",
+            Some(1.0),
         );
 
-        assert_eq!(lines.len(), 3);
-        assert_eq!(line_text(&lines[0]), "ACGT");
-        assert_eq!(line_text(&lines[1]), "ACGT");
+        insta::assert_snapshot!(
+            "consensus_pane_translated_no_reference",
+            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+        );
+
+        let mut loading_metrics = ColumnStatsCache::default();
+        loading_metrics.init(alignment.view().column_count());
+
+        insta::assert_snapshot!(
+            "consensus_pane_translated_loading",
+            render_consensus_pane_text(&alignment, &loading_metrics, Rect::new(0, 0, 100, 5))
+        );
+    }
+
+    #[test]
+    fn generic_consensus_pane_hides_conservation_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"ACDEACDEACDE"),
+            raw("seq2", b"ACDEACDEACDE"),
+        ]);
+        alignment.set_reference(0).unwrap();
+        let metrics = metrics_with(StatsView::Raw, b"ACDEACDEACDE", Some(1.0));
+
+        insta::assert_snapshot!(
+            "consensus_pane_generic_without_conservation",
+            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 4))
+        );
     }
 }

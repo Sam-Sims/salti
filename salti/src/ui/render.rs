@@ -304,3 +304,265 @@ pub fn render(
         ui,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::StartupState;
+    use crate::core::model::{DiffMode, StatsView};
+    use crate::core::stats_cache::StatsJobResult;
+    use crate::overlay::command_palette::CommandPaletteState;
+    use crate::ui::notification::{Notification, NotificationLevel};
+    use crate::ui::ui_state::MouseSelection;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
+        libmsa::RawSequence {
+            id: id.to_string(),
+            sequence: sequence.to_vec(),
+        }
+    }
+
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
+    }
+
+    fn metrics_with(
+        view: StatsView,
+        consensus: &[u8],
+        conservation: Option<f32>,
+    ) -> ColumnStatsCache {
+        let mut cache = ColumnStatsCache::default();
+        match view {
+            StatsView::Raw => cache.init(consensus.len()),
+            StatsView::Translated(frame) => {
+                cache.init(consensus.len() * 3);
+                let _ =
+                    cache.translated_chunks_to_spawn(&(0..consensus.len()), frame, consensus.len());
+            }
+        }
+
+        let summaries = consensus
+            .iter()
+            .enumerate()
+            .map(|(position, &byte)| libmsa::ColumnSummary {
+                position,
+                consensus: Some(byte),
+                conservation,
+            })
+            .collect();
+        let generation = cache.generation;
+        let chunk_idx = 0;
+        let stored = cache.store(StatsJobResult {
+            generation,
+            chunk_idx,
+            view,
+            summaries: Ok(summaries),
+        });
+        assert!(stored);
+        cache
+    }
+
+    fn ui_state() -> UiState {
+        let mut ui = UiState::new(StartupState::default());
+        ui.meta.loading_state = LoadingState::Loaded;
+        ui
+    }
+
+    fn render_text(
+        alignment: Option<&AlignmentModel>,
+        ui: &UiState,
+        stats_cache: &ColumnStatsCache,
+        area: Rect,
+    ) -> String {
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let frame_layout = FrameLayout::new(area);
+        let layout = AppLayout::new(frame_layout.content_area);
+
+        terminal
+            .draw(|frame| {
+                render(frame, alignment, ui, stats_cache, &frame_layout, &layout);
+            })
+            .unwrap();
+
+        buffer_text(terminal.backend().buffer(), area)
+    }
+
+    fn buffer_text(buffer: &Buffer, area: Rect) -> String {
+        let mut lines = Vec::new();
+
+        for y in area.top()..area.bottom() {
+            let mut line = String::new();
+            for x in area.left()..area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                if symbol.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(symbol);
+                }
+            }
+            while line.ends_with(' ') {
+                line.pop();
+            }
+            lines.push(line);
+        }
+
+        while matches!(lines.last(), Some(last) if last.is_empty()) {
+            lines.pop();
+        }
+
+        lines.join("\n")
+    }
+
+    fn set_viewport(ui: &mut UiState, alignment: &AlignmentModel, area: Rect) {
+        let frame_layout = FrameLayout::new(area);
+        let layout = AppLayout::new(frame_layout.content_area);
+        ui.viewport.update_dimensions(
+            layout.alignment_pane_sequence_rows.width as usize,
+            layout.alignment_pane_sequence_rows.height as usize,
+            layout.sequence_id_pane.width.saturating_sub(2) as usize,
+        );
+        ui.viewport.set_bounds(
+            alignment.view().row_count(),
+            alignment.view().column_count(),
+            alignment.base().max_id_len(),
+        );
+    }
+
+    #[test]
+    fn render_empty_state_snapshots() {
+        let area = Rect::new(0, 0, 100, 24);
+
+        let idle_ui = UiState::new(StartupState::default());
+        insta::assert_snapshot!(
+            "render_empty_idle",
+            render_text(None, &idle_ui, &ColumnStatsCache::default(), area)
+        );
+
+        let mut failed_ui = UiState::new(StartupState::default());
+        failed_ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+        insta::assert_snapshot!(
+            "render_empty_failed",
+            render_text(None, &failed_ui, &ColumnStatsCache::default(), area)
+        );
+
+        let mut loading_ui = UiState::new(StartupState::default());
+        loading_ui.meta.loading_state = LoadingState::Loading;
+        insta::assert_snapshot!(
+            "render_empty_loading",
+            render_text(None, &loading_ui, &ColumnStatsCache::default(), area)
+        );
+    }
+
+    #[test]
+    fn render_loaded_alignment_snapshots() {
+        let area = Rect::new(0, 0, 100, 24);
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+            raw("seq4", b"CATCATCATCATCATCAT"),
+        ]);
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let mut ui = ui_state();
+        set_viewport(&mut ui, &alignment, area);
+
+        insta::assert_snapshot!("render_loaded_basic", render_text(Some(&alignment), &ui, &metrics, area));
+
+        let mut selection_ui = ui_state();
+        set_viewport(&mut selection_ui, &alignment, area);
+        selection_ui.selection = Some(MouseSelection {
+            sequence_id: 1,
+            column: 2,
+            end_sequence_id: 2,
+            end_column: 8,
+        });
+        insta::assert_snapshot!(
+            "render_loaded_with_selection_status",
+            render_text(Some(&alignment), &selection_ui, &metrics, area)
+        );
+    }
+
+    #[test]
+    fn render_loaded_translation_snapshot() {
+        let area = Rect::new(0, 0, 100, 24);
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.set_reference(0).unwrap();
+        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+        alignment.diff_mode = DiffMode::Reference;
+        let metrics = metrics_with(StatsView::Translated(libmsa::ReadingFrame::Frame1), b"HHHHHH", Some(1.0));
+        let mut ui = ui_state();
+        set_viewport(&mut ui, &alignment, area);
+
+        insta::assert_snapshot!(
+            "render_loaded_translation",
+            render_text(Some(&alignment), &ui, &metrics, area)
+        );
+    }
+
+    #[test]
+    fn render_notification_snapshot() {
+        let area = Rect::new(0, 0, 100, 24);
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let mut ui = ui_state();
+        set_viewport(&mut ui, &alignment, area);
+        ui.notification = Some(Notification {
+            level: NotificationLevel::Info,
+            message: "Loaded alignment".to_string(),
+        });
+
+        insta::assert_snapshot!(
+            "render_notification",
+            render_text(Some(&alignment), &ui, &metrics, area)
+        );
+    }
+
+    #[test]
+    fn render_command_palette_snapshot() {
+        let area = Rect::new(0, 0, 100, 24);
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+        ]);
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let mut ui = ui_state();
+        set_viewport(&mut ui, &alignment, area);
+        ui.overlay.open_palette(CommandPaletteState::empty());
+
+        insta::assert_snapshot!(
+            "render_command_palette",
+            render_text(Some(&alignment), &ui, &metrics, area)
+        );
+    }
+
+    #[test]
+    fn render_minimap_snapshot() {
+        let area = Rect::new(0, 0, 100, 24);
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+        ]);
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCATCATCATCATCATCATCAT", Some(1.0));
+        let mut ui = ui_state();
+        set_viewport(&mut ui, &alignment, area);
+        ui.overlay.toggle_minimap();
+
+        insta::assert_snapshot!(
+            "render_minimap",
+            render_text(Some(&alignment), &ui, &metrics, area)
+        );
+    }
+}

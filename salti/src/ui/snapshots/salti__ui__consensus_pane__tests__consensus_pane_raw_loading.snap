@@ -1,0 +1,10 @@
+---
+source: salti/src/ui/consensus_pane.rs
+assertion_line: 444
+expression: "render_consensus_pane_text(&alignment, &loading_metrics,\nRect::new(0, 0, 100, 5))"
+---
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│Reference Sequence│No reference selected                                                          │
+│Consensus Sequence│Calculating consensus...                                                       │
+│Conservation:     │Calculating conservation...                                                    │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

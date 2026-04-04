@@ -238,12 +238,11 @@ mod tests {
             position: 0,
             consensus: Some(consensus),
             conservation: Some(1.0),
-            gap_fraction: 0.0,
         }
     }
 
     #[test]
-    fn chunks_for_range_handles_chunk_boundaries() {
+    fn chunks_for_range_boundaries() {
         let cache = ChunkedCache::new(CHUNK_SIZE * 3);
 
         assert_eq!(cache.chunks_for_range(&(0..0)), 0..0);
@@ -258,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn fill_chunk_writes_summaries_into_the_chunk_range() {
+    fn fill_chunk() {
         let mut cache = ChunkedCache::new(CHUNK_SIZE + 3);
 
         cache.fill_chunk(1, vec![summary(b'A'), summary(b'C'), summary(b'G')]);
@@ -285,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_chunks_to_spawn_returns_only_empty_chunks() {
+    fn raw_chunks_to_spawn_skips_pending_and_filled() {
         let mut cache = ColumnStatsCache::default();
         cache.init(CHUNK_SIZE * 3);
         cache.mark_raw_pending(1);
@@ -295,7 +294,21 @@ mod tests {
     }
 
     #[test]
-    fn store_discards_generation_mismatch() {
+    fn translated_chunks_to_spawn_resets_cache_on_frame_change() {
+        let mut cache = ColumnStatsCache::default();
+        cache.init(10);
+        let _ = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame1, 2);
+        cache.mark_translated_pending(0);
+
+        let chunks = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame2, 2);
+
+        assert_eq!(chunks, vec![0]);
+        assert_eq!(cache.translated_frame, Some(libmsa::ReadingFrame::Frame2));
+        assert_eq!(cache.translated.chunks[0], ChunkState::Empty);
+    }
+
+    #[test]
+    fn store_rejects_generation_mismatch() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
 
@@ -311,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn store_discards_translated_frame_mismatch() {
+    fn store_rejects_translated_frame_mismatch() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
         let _ = cache.translated_chunks_to_spawn(&(0..2), libmsa::ReadingFrame::Frame1, 2);
@@ -332,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn store_fills_chunk_and_marks_it_filled() {
+    fn store_fills_raw_chunk() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
         cache.mark_raw_pending(0);
@@ -353,7 +366,25 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_all_resets_both_caches_and_bumps_generation() {
+    fn store_error_respawns_chunk() {
+        let mut cache = ColumnStatsCache::default();
+        cache.init(10);
+        cache.mark_raw_pending(0);
+
+        let stored = cache.store(StatsJobResult {
+            generation: cache.generation,
+            chunk_idx: 0,
+            view: StatsView::Raw,
+            summaries: Err("crashbangwallop".to_string()),
+        });
+
+        assert!(!stored);
+        assert_eq!(cache.raw.chunks[0], ChunkState::Empty);
+        assert_eq!(cache.raw_chunks_to_spawn(&(0..10)), vec![0]);
+    }
+
+    #[test]
+    fn invalidate_all_resets_raw_and_translated() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
         let previous_generation = cache.generation;
@@ -368,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_translated_preserves_raw_cache_and_bumps_generation() {
+    fn invalidate_translated_keeps_raw() {
         let mut cache = ColumnStatsCache::default();
         cache.init(10);
         cache.store(StatsJobResult {

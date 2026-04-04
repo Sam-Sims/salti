@@ -157,69 +157,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn visible_protein_range_includes_complete_codons_overlapping_window() {
-        let range = visible_protein_range(&(1..8), ReadingFrame::Frame1, 9);
-        assert_eq!(range, Some(0..3));
+    fn visible_protein_range_is_correct() {
+        let cases = [
+            ((0..1), ReadingFrame::Frame2, 8, None),
+            ((1..2), ReadingFrame::Frame2, 8, Some(0..1)),
+            ((2..7), ReadingFrame::Frame2, 8, Some(0..2)),
+            ((6..8), ReadingFrame::Frame2, 8, Some(1..2)),
+            ((7..8), ReadingFrame::Frame2, 8, None),
+        ];
 
-        let range = visible_protein_range(&(0..2), ReadingFrame::Frame3, 9);
-        assert!(range.is_none());
+        for (visible_nuc_range, frame, nucleotide_len, expected) in cases {
+            let actual = visible_protein_range(&visible_nuc_range, frame, nucleotide_len);
+            assert_eq!(actual, expected, "range {visible_nuc_range:?} in {frame:?}");
+        }
     }
 
     #[test]
-    fn codon_span_maps_any_column_in_the_same_codon() {
-        let frame = ReadingFrame::Frame1;
+    fn visible_codons_absolute_positions() {
+        let codons: Vec<VisibleCodon> = visible_codons(&(2..7), ReadingFrame::Frame2, 8).collect();
 
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(1, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(2, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(3, frame, 9), Some(3..6));
+        assert_eq!(
+            codons,
+            vec![
+                VisibleCodon {
+                    protein_col: 0,
+                    nuc_start: 1,
+                    centre: 2,
+                },
+                VisibleCodon {
+                    protein_col: 1,
+                    nuc_start: 4,
+                    centre: 5,
+                },
+            ]
+        );
     }
 
     #[test]
-    fn codon_span_returns_none_for_partial_frame_edges() {
+    fn codon_span_maps_column_to_codon() {
         let frame = ReadingFrame::Frame2;
 
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), None);
-        assert_eq!(codon_span_for_absolute_column(8, frame, 9), None);
-    }
+        let cases = [
+            (0, None),
+            (1, Some(1..4)),
+            (2, Some(1..4)),
+            (3, Some(1..4)),
+            (4, Some(4..7)),
+            (6, Some(4..7)),
+            (7, None),
+        ];
 
-    #[test]
-    fn nuc_start_is_frame_offset_plus_triple() {
-        assert_eq!(nuc_start(0, ReadingFrame::Frame1), 0);
-        assert_eq!(nuc_start(1, ReadingFrame::Frame1), 3);
-        assert_eq!(nuc_start(0, ReadingFrame::Frame2), 1);
-        assert_eq!(nuc_start(1, ReadingFrame::Frame2), 4);
-        assert_eq!(nuc_start(0, ReadingFrame::Frame3), 2);
-    }
-
-    #[test]
-    fn visible_codons_yields_correct_codons() {
-        let codons: Vec<VisibleCodon> = visible_codons(&(0..9), ReadingFrame::Frame1, 9).collect();
-        assert_eq!(codons.len(), 3);
-        assert_eq!(
-            codons[0],
-            VisibleCodon {
-                protein_col: 0,
-                nuc_start: 0,
-                centre: 1,
-            }
-        );
-        assert_eq!(
-            codons[1],
-            VisibleCodon {
-                protein_col: 1,
-                nuc_start: 3,
-                centre: 4,
-            }
-        );
-        assert_eq!(
-            codons[2],
-            VisibleCodon {
-                protein_col: 2,
-                nuc_start: 6,
-                centre: 7,
-            }
-        );
+        for (absolute_col, expected) in cases {
+            let actual = codon_span_for_absolute_column(absolute_col, frame, 8);
+            assert_eq!(actual, expected, "column {absolute_col}");
+        }
     }
 
     #[test]

@@ -1,0 +1,29 @@
+---
+source: salti/src/ui/render.rs
+assertion_line: 526
+expression: "render_text(Some(&alignment), &ui, &metrics, area)"
+---
+                        File: Unknown | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
+┌Sequence Name─────┬Alignment──────────────────────────────────────────────────────────────────────┐
+│                  │1       10                                                                     │
+│                  │.   .    |    .                                                                │
+│1 seq1            │CATCATCATCATCATCAT                                                             │
+│2 seq2            │CATCATCATCATCATCAT                                                             │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+├──────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+│Reference Sequence│No reference selected                                                          │
+│Consensus Sequence│CATCATCATCATCATCAT                                                             │
+│Conservation:     │██████████████████                                                             │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘
+
+Loaded alignment

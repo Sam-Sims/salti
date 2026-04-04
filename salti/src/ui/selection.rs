@@ -155,7 +155,6 @@ fn translated_selection_visible_col_range(
 mod tests {
     use super::*;
     use crate::core::Viewport;
-    use crate::core::codon::codon_span_for_absolute_column;
     use crate::core::model::AlignmentModel;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
@@ -217,24 +216,6 @@ mod tests {
 
         let range = selection_visible_col_range(selection, &model, &(0..4));
         assert!(range.is_none());
-    }
-
-    #[test]
-    fn codon_span_maps_any_column_in_the_same_codon() {
-        let frame = libmsa::ReadingFrame::Frame1;
-
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(1, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(2, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(3, frame, 9), Some(3..6));
-    }
-
-    #[test]
-    fn codon_span_returns_none_for_partial_frame_edges() {
-        let frame = libmsa::ReadingFrame::Frame2;
-
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), None);
-        assert_eq!(codon_span_for_absolute_column(8, frame, 9), None);
     }
 
     #[test]

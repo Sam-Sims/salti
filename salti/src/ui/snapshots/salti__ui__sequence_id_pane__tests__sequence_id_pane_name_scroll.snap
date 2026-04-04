@@ -1,0 +1,12 @@
+---
+source: salti/src/ui/sequence_id_pane.rs
+expression: "render_sequence_id_pane_text(&alignment, &window)"
+---
+┌Sequence Name───────────────┐
+│                            │
+│                            │
+│1 loooooooooooong-na        │
+│2 loooooooooooong-na        │
+│3 loooooooooooong-na        │
+│                            │
+└────────────────────────────┘

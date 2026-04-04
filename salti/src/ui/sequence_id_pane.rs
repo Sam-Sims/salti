@@ -128,3 +128,127 @@ pub fn render_sequence_id_pane(
 
     render_sequence_id_rows(f, alignment, window, theme, inner_area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
+
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
+        libmsa::RawSequence {
+            id: id.to_string(),
+            sequence: sequence.to_vec(),
+        }
+    }
+
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
+    }
+
+    fn render_sequence_id_pane_text(alignment: &AlignmentModel, window: &ViewportWindow) -> String {
+        let area = Rect::new(0, 0, 150, 12);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let layout = AppLayout::new(area);
+
+        terminal
+            .draw(|frame| {
+                render_sequence_id_pane(frame, &layout, alignment, window, &ThemeState::default());
+            })
+            .unwrap();
+
+        buffer_text(terminal.backend().buffer())
+    }
+
+    fn buffer_text(buffer: &Buffer) -> String {
+        let area = buffer.area;
+        let mut lines = Vec::new();
+
+        for y in area.top()..area.bottom() {
+            let mut line = String::new();
+            for x in area.left()..area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                if symbol.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(symbol);
+                }
+            }
+            while line.ends_with(' ') {
+                line.pop();
+            }
+            lines.push(line);
+        }
+
+        while matches!(lines.last(), Some(last) if last.is_empty()) {
+            lines.pop();
+        }
+
+        lines.join("\n")
+    }
+
+    #[test]
+    fn sequence_id_pane_basic_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+        let window = ViewportWindow {
+            row_range: 0..alignment.view().row_count(),
+            col_range: 0..alignment.view().column_count(),
+            name_range: 0..18,
+        };
+
+        insta::assert_snapshot!(
+            "sequence_id_pane_basic",
+            render_sequence_id_pane_text(&alignment, &window)
+        );
+    }
+
+    #[test]
+    fn sequence_id_pane_pinned_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+            raw("seq4", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment.pin(1).unwrap();
+        alignment.pin(3).unwrap();
+
+        let window = ViewportWindow {
+            row_range: 0..alignment.view().row_count(),
+            col_range: 0..alignment.view().column_count(),
+            name_range: 0..18,
+        };
+
+        insta::assert_snapshot!(
+            "sequence_id_pane_pinned",
+            render_sequence_id_pane_text(&alignment, &window)
+        );
+    }
+
+    #[test]
+    fn sequence_id_pane_name_scroll_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1-loooooooooooong-name", b"CATCATCATCATCATCAT"),
+            raw("seq2-loooooooooooong-name", b"CATCATCATCATCATCAT"),
+            raw("seq3-loooooooooooong-name", b"CATCATCATCATCATCAT"),
+        ]);
+        let window = ViewportWindow {
+            row_range: 0..alignment.view().row_count(),
+            col_range: 0..alignment.view().column_count(),
+            name_range: 5..23,
+        };
+
+        insta::assert_snapshot!(
+            "sequence_id_pane_name_scroll",
+            render_sequence_id_pane_text(&alignment, &window)
+        );
+    }
+}

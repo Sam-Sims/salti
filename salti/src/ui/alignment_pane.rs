@@ -528,3 +528,357 @@ pub fn render_alignment_pane(
         layout.alignment_pane,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::model::StatsView;
+    use crate::core::stats_cache::StatsJobResult;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
+        libmsa::RawSequence {
+            id: id.to_string(),
+            sequence: sequence.to_vec(),
+        }
+    }
+
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
+    }
+
+    fn metrics_with(
+        view: StatsView,
+        consensus: &[u8],
+        conservation: Option<f32>,
+    ) -> ColumnStatsCache {
+        let mut cache = ColumnStatsCache::default();
+        match view {
+            StatsView::Raw => cache.init(consensus.len()),
+            StatsView::Translated(frame) => {
+                cache.init(consensus.len() * 3);
+                let _ =
+                    cache.translated_chunks_to_spawn(&(0..consensus.len()), frame, consensus.len());
+            }
+        }
+
+        let summaries = consensus
+            .iter()
+            .enumerate()
+            .map(|(position, &byte)| libmsa::ColumnSummary {
+                position,
+                consensus: Some(byte),
+                conservation,
+            })
+            .collect();
+        let generation = cache.generation;
+        let chunk_idx = 0;
+        let stored = cache.store(StatsJobResult {
+            generation,
+            chunk_idx,
+            view,
+            summaries: Ok(summaries),
+        });
+        assert!(stored);
+        cache
+    }
+
+    fn render_alignment_pane_text(
+        alignment: &AlignmentModel,
+        stats_cache: &ColumnStatsCache,
+        area: Rect,
+        row_offset: usize,
+        col_offset: usize,
+    ) -> String {
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let layout = AppLayout::new(area);
+        let mut viewport = Viewport::default();
+        viewport.update_dimensions(
+            layout.alignment_pane_sequence_rows.width as usize,
+            layout.alignment_pane_sequence_rows.height as usize,
+            0,
+        );
+        viewport.set_bounds(
+            alignment.view().row_count(),
+            alignment.view().column_count(),
+            alignment.base().max_id_len(),
+        );
+        viewport.offsets.rows = row_offset;
+        viewport.offsets.cols = col_offset;
+
+        terminal
+            .draw(|frame| {
+                render_alignment_pane(
+                    frame,
+                    &layout,
+                    alignment,
+                    &viewport,
+                    stats_cache,
+                    &ThemeState::default(),
+                );
+            })
+            .unwrap();
+
+        buffer_text(terminal.backend().buffer(), layout.alignment_pane)
+    }
+
+    fn buffer_text(buffer: &Buffer, area: Rect) -> String {
+        let mut lines = Vec::new();
+
+        for y in area.top()..area.bottom() {
+            let mut line = String::new();
+            for x in area.left()..area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                if symbol.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(symbol);
+                }
+            }
+            while line.ends_with(' ') {
+                line.pop();
+            }
+            lines.push(line);
+        }
+
+        while matches!(lines.last(), Some(last) if last.is_empty()) {
+            lines.pop();
+        }
+
+        lines.join("\n")
+    }
+
+    #[test]
+    fn alignment_pane_basic_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+
+        insta::assert_snapshot!(
+            "alignment_pane_basic",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_pinned_and_fragmented_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CAT---CATCATCATCAT"),
+            raw("seq2", b"CAT---CATCATCATCAT"),
+            raw("seq3", b"CAT---CATCATCATCAT"),
+            raw("seq4", b"CAT---CATCATCATCAT"),
+        ]);
+        alignment.pin(1).unwrap();
+        alignment.pin(3).unwrap();
+        alignment.set_gap_filter(Some(0.5)).unwrap();
+
+        insta::assert_snapshot!(
+            "alignment_pane_pinned_and_fragmented",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_translated_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+
+        insta::assert_snapshot!(
+            "alignment_pane_translated",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_raw_diff_reference_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.set_reference(0).unwrap();
+        alignment.diff_mode = DiffMode::Reference;
+
+        insta::assert_snapshot!(
+            "alignment_pane_raw_diff_reference",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_translated_diff_reference_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.set_reference(0).unwrap();
+        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+        alignment.diff_mode = DiffMode::Reference;
+
+        insta::assert_snapshot!(
+            "alignment_pane_translated_diff_reference",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_raw_diff_reference_without_reference_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.diff_mode = DiffMode::Reference;
+
+        insta::assert_snapshot!(
+            "alignment_pane_raw_diff_reference_without_reference",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_raw_diff_consensus_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.diff_mode = DiffMode::Consensus;
+        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+
+        insta::assert_snapshot!(
+            "alignment_pane_raw_diff_consensus",
+            render_alignment_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 12), 0, 0,)
+        );
+    }
+
+    #[test]
+    fn alignment_pane_raw_diff_consensus_loading_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATGATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATGATCAT"),
+        ]);
+        alignment.diff_mode = DiffMode::Consensus;
+        let mut metrics = ColumnStatsCache::default();
+        metrics.init(alignment.view().column_count());
+
+        insta::assert_snapshot!(
+            "alignment_pane_raw_diff_consensus_loading",
+            render_alignment_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 12), 0, 0,)
+        );
+    }
+
+    #[test]
+    fn alignment_pane_scrolled_with_scrollbar_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
+        ]);
+
+        insta::assert_snapshot!(
+            "alignment_pane_scrolled_with_scrollbar",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 60, 12),
+                0,
+                10,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_pinned_with_vertical_scroll_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+            raw("seq4", b"CATCATCATCATCATCAT"),
+            raw("seq5", b"CATCATCATCATCATCAT"),
+            raw("seq6", b"CATCATCATCATCATCAT"),
+        ]);
+        alignment.pin(1).unwrap();
+        alignment.pin(4).unwrap();
+
+        insta::assert_snapshot!(
+            "alignment_pane_pinned_with_vertical_scroll",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 10),
+                2,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_dense_fragmented_ruler_snapshot() {
+        let mut alignment = alignment_model(vec![
+            raw("seq1", b"CA-CA-CA-CA-CA-CA-CA-CA"),
+            raw("seq2", b"CA-CA-CA-CA-CA-CA-CA-CA"),
+            raw("seq3", b"CA-CA-CA-CA-CA-CA-CA-CA"),
+        ]);
+        alignment.set_gap_filter(Some(0.5)).unwrap();
+
+        insta::assert_snapshot!(
+            "alignment_pane_dense_fragmented_ruler",
+            render_alignment_pane_text(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+}

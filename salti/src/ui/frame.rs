@@ -182,7 +182,7 @@ pub fn render_frame(
 mod tests {
     use super::*;
     use crate::cli::StartupState;
-    use crate::core::model::AlignmentModel;
+    use crate::ui::ui_state::MouseSelection;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -195,8 +195,9 @@ mod tests {
         spans.iter().map(|span| span.content.as_ref()).collect()
     }
 
-    fn top_status_text(alignment: Option<&AlignmentModel>, ui: &UiState) -> String {
-        status_text(&build_top_status_bar(alignment, ui))
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
     }
 
     fn ui_state() -> UiState {
@@ -206,111 +207,103 @@ mod tests {
     }
 
     #[test]
-    fn bottom_status_bar_formats_row_filter_summary() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("alpha", b"ACGT"),
-            raw("beta", b"ACGT"),
-            raw("gamma", b"ACGT"),
-        ])
-        .expect("alignment should be valid");
-        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
-        alignment
-            .set_filter("alpha|beta".to_string())
-            .expect("row filter should apply");
-        let ui = ui_state();
+    fn top_status_bar_snapshots() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"ACGTACGT"),
+            raw("seq2", b"ACGTAC-T"),
+            raw("seq3", b"ACGTACGA"),
+        ]);
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Filters: [rows: alpha|beta] (2 rows)"
-        );
-    }
-
-    #[test]
-    fn bottom_status_bar_formats_row_and_gap_filter_summary() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("alpha", b"A--T"),
-            raw("beta", b"A--T"),
-            raw("gamma", b"ACGT"),
-        ])
-        .expect("alignment should be valid");
-        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
-        alignment
-            .set_filter("alpha|beta".to_string())
-            .expect("row filter should apply");
-        alignment
-            .set_gap_filter(Some(0.0))
-            .expect("gap filter should apply");
-        let ui = ui_state();
-
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Filters: [rows: alpha|beta] [gaps: <= 0%] (2 rows) (2 cols)"
-        );
-    }
-
-    #[test]
-    fn bottom_status_bar_formats_constant_filter_summary() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("alpha", b"AN-T"),
-            raw("beta", b"A--T"),
-            raw("gamma", b"ATGT"),
-        ])
-        .expect("alignment should be valid");
-        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
-        alignment
-            .set_constant_filter(Some(1.0))
-            .expect("constant filter should apply");
-        let ui = ui_state();
-
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Filters: [constant: >= 100%] (3 rows) (2 cols)"
-        );
-    }
-
-    #[test]
-    fn bottom_status_bar_formats_combined_column_filter_summary() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("alpha", b"AN-T"),
-            raw("beta", b"A--T"),
-            raw("gamma", b"ATGT"),
-        ])
-        .expect("alignment should be valid");
-        let mut alignment = AlignmentModel::new(alignment).expect("alignment model should build");
-        alignment
-            .set_gap_filter(Some(0.5))
-            .expect("gap filter should apply");
-        alignment
-            .set_constant_filter(Some(1.0))
-            .expect("constant filter should apply");
-        let ui = ui_state();
-
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Filters: [gaps: <= 50%] [constant: >= 100%] (3 rows) (2 cols)"
-        );
-    }
-
-    #[test]
-    fn top_status_bar_shows_alignment_length() {
-        let alignment = libmsa::Alignment::new(vec![
-            raw("alpha", b"ACGT"),
-            raw("beta", b"ACGT"),
-            raw("gamma", b"ACGT"),
-        ])
-        .expect("alignment should be valid");
-        let alignment = AlignmentModel::new(alignment).expect("alignment model should build");
-        let mut ui = ui_state();
-        ui.viewport.update_dimensions(4, 3, 0);
-        ui.viewport.set_bounds(
+        let mut loaded_ui = ui_state();
+        loaded_ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
+        loaded_ui.viewport.update_dimensions(5, 3, 0);
+        loaded_ui.viewport.set_bounds(
             alignment.view().row_count(),
             alignment.view().column_count(),
             alignment.base().max_id_len(),
         );
 
-        assert_eq!(
-            top_status_text(Some(&alignment), &ui),
-            "File: Unknown | Status: Loaded | 3 alignments | Length: 4 | Positions: 1-4"
+        insta::assert_snapshot!(
+            "frame_top_status_loaded_alignment",
+            status_text(&build_top_status_bar(Some(&alignment), &loaded_ui))
+        );
+
+        let mut failed_ui = UiState::new(StartupState::default());
+        failed_ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+
+        insta::assert_snapshot!(
+            "frame_top_status_failed_load",
+            status_text(&build_top_status_bar(None, &failed_ui))
+        );
+    }
+
+    #[test]
+    fn bottom_status_bar_snapshots() {
+        let mut filtered_alignment = alignment_model(vec![
+            raw("seq1", b"ATGAAATTT"),
+            raw("seq2", b"ATG---TTT"),
+            raw("seq3", b"ATGAAGTTT"),
+        ]);
+        filtered_alignment
+            .set_filter("seq1|seq2".to_string())
+            .unwrap();
+        filtered_alignment
+            .set_gap_filter(Some(0.5))
+            .unwrap();
+        filtered_alignment
+            .set_translation(Some(libmsa::ReadingFrame::Frame2))
+            .unwrap();
+
+        insta::assert_snapshot!(
+            "frame_bottom_status_filters_translation",
+            status_text(&build_bottom_status_bar(Some(&filtered_alignment), &ui_state()))
+        );
+
+        let mut constant_filter_alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCAT"),
+            raw("seq2", b"CATCATCATCAT"),
+            raw("seq3", b"CATCATCATCAT"),
+        ]);
+        constant_filter_alignment
+            .set_constant_filter(Some(1.0))
+            .unwrap();
+
+        insta::assert_snapshot!(
+            "frame_bottom_status_constant_filter",
+            status_text(&build_bottom_status_bar(
+                Some(&constant_filter_alignment),
+                &ui_state(),
+            ))
+        );
+
+        let selected_alignment = alignment_model(vec![
+            raw("seq1", b"ACGTACGT"),
+            raw("seq2", b"ACGTACGT"),
+        ]);
+        let mut single_selection_ui = ui_state();
+        single_selection_ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 5,
+            end_sequence_id: 0,
+            end_column: 5,
+        });
+
+        insta::assert_snapshot!(
+            "frame_bottom_status_single_selection",
+            status_text(&build_bottom_status_bar(Some(&selected_alignment), &single_selection_ui))
+        );
+
+        let mut multi_selection_ui = ui_state();
+        multi_selection_ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 1,
+            end_sequence_id: 2,
+            end_column: 4,
+        });
+
+        insta::assert_snapshot!(
+            "frame_bottom_status_multi_selection",
+            status_text(&build_bottom_status_bar(None, &multi_selection_ui))
         );
     }
 }

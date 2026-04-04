@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 240
+expression: "status_text(&build_top_status_bar(Some(&alignment), &loaded_ui))"
+---
+File: iamnotreal.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5
