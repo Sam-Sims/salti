@@ -36,4 +36,5 @@ pub enum Command {
     SetDiffMode(DiffMode),
     ToggleTranslationView,
     ReloadAsProtein { frame: Option<libmsa::ReadingFrame> },
+    LoadGff { path: String },
 }

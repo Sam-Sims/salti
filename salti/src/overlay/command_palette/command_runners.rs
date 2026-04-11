@@ -321,6 +321,13 @@ pub(super) fn run_quit(_: &CommandPaletteState, arguments: &str) -> anyhow::Resu
     })
 }
 
+pub(super) fn run_load_gff(_: &CommandPaletteState, arguments: &str) -> anyhow::Result<Command> {
+    run_command("load-gff", arguments, || {
+        let path = require_argument(arguments)?;
+        Ok(Command::LoadGff { path })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
