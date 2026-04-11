@@ -220,11 +220,14 @@ impl<'a> TranslatedAlignment<'a> {
     /// Returns any [`AlignmentError`] encountered while materialising the
     /// translated rows into a concrete alignment.
     pub fn to_alignment(&self) -> Result<Alignment, AlignmentError> {
-        let absolute_rows = self.source.absolute_row_ids().collect::<Vec<_>>();
-
-        let translated = absolute_rows
-            .par_iter()
-            .map(|&absolute_row| {
+        let translated = (0..self.source.rows.len())
+            .into_par_iter()
+            .map(|relative_row| {
+                let absolute_row = self
+                    .source
+                    .rows
+                    .absolute(relative_row)
+                    .expect("out of bounds relative row index");
                 let sequence = self.source.data.sequences.get(absolute_row).ok_or(
                     AlignmentError::RowOutOfBounds {
                         index: absolute_row,
@@ -395,26 +398,23 @@ fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationT
     let translated_len = translated_length(sequence.len(), frame);
     let complete_codons = frame.complete_codons(sequence.len());
     let complete_end = offset + (complete_codons * 3);
+    let has_incomplete_terminal_codon = complete_codons < translated_len;
 
-    let mut translated = vec![0; translated_len];
+    sequence[offset..complete_end]
+        .chunks_exact(3)
+        .map(|codon| {
+            let first = nucleotide_index(codon[0]);
+            let second = nucleotide_index(codon[1]);
+            let third = nucleotide_index(codon[2]);
 
-    for (protein_col, codon) in sequence[offset..complete_end].chunks_exact(3).enumerate() {
-        let first = nucleotide_index(codon[0]);
-        let second = nucleotide_index(codon[1]);
-        let third = nucleotide_index(codon[2]);
-
-        translated[protein_col] = if first == 4 || second == 4 || third == 4 {
-            b'X'
-        } else {
-            table.codons[first as usize][second as usize][third as usize]
-        };
-    }
-
-    if complete_codons < translated_len {
-        translated[complete_codons] = b'X';
-    }
-
-    translated
+            if first == 4 || second == 4 || third == 4 {
+                b'X'
+            } else {
+                table.codons[usize::from(first)][usize::from(second)][usize::from(third)]
+            }
+        })
+        .chain(has_incomplete_terminal_codon.then_some(b'X'))
+        .collect()
 }
 
 pub(crate) fn translated_byte_at(

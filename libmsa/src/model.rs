@@ -209,6 +209,7 @@ impl Alignment {
     }
 
     /// Returns an iterator over the visible rows absolute index.
+    #[cfg(test)]
     pub(crate) fn absolute_row_ids(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         self.rows.iter()
     }
