@@ -110,9 +110,7 @@ impl App {
         self.event_tx = Some(event_tx);
         let mut needs_redraw = true;
         if Self::startup_update_check_enabled() {
-            self.execute_commands([Command::CheckForUpdate {
-                show_success_message: false,
-            }]);
+            self.execute_commands([Command::CheckForUpdate]);
         } else {
             debug!(
                 env_var = UPDATE_CHECK_ENV_VAR,
@@ -356,10 +354,11 @@ impl App {
                 self.clear_mouse_selection();
                 self.start_load_job(input);
             }
-            Command::CheckForUpdate {
-                show_success_message,
-            } => {
-                self.spawn_update_check(show_success_message);
+            Command::CheckForUpdate => {
+                self.spawn_update_check(false);
+            }
+            Command::CheckForUpdateAndNotify => {
+                self.spawn_update_check(true);
             }
 
             Command::ScrollDown { amount } => self.ui.viewport.scroll_down(amount),

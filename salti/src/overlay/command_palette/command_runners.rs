@@ -308,9 +308,7 @@ pub(super) fn run_check_update(
 ) -> anyhow::Result<Command> {
     run_command("check-update", arguments, || {
         ensure_no_argument(arguments)?;
-        Ok(Command::CheckForUpdate {
-            show_success_message: true,
-        })
+        Ok(Command::CheckForUpdateAndNotify)
     })
 }
 
