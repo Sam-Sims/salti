@@ -36,15 +36,9 @@ conda install -c bioconda salti
 ### Fast
 
 `salti` is built for fast browsing and loading of large alignments, using [tokio](https://github.com/tokio-rs/tokio) for
-async processing. This is in part achieved by:
+async processing.
 
-- Background threads handle tasks such as consensus/conservation calculation and file loading, allowing these to
-  complete dynamically without blocking the UI.
-- Rendering only the visible portion of the alignment, updating the view on state changes rather than every frame tick,
-  and caching consensus and conservation calculations in a window around the currently visible region.
-
-It can handle alignments with thousands of sequences and >200,000 positions without lag (tested with ~3k mpox
-alignments)
+It can handle alignments with thousands of sequences and positions without slowdown.
 
 ### Transparent support for HTTP/SSH/Compressed files
 
@@ -170,6 +164,14 @@ even in smaller windows.
 `salti` is primarily developed and benchmarked in [Ghostty](https://ghostty.org/). I have tested it on several other
 terminals and it works well in most cases, though performance may vary. If you have responsiveness issues, please open
 an issue and include your terminal emulator and font information.
+
+Note: If you're using Ghostty 1.3.0+ and the middle mouse button isn't working, check that gtk-enable-primary-paste is enabled:
+```
+gsettings set org.gnome.desktop.interface gtk-enable-primary-paste true
+```
+See [here](https://github.com/ghostty-org/ghostty/discussions/12181) for details.
+
+### How to run
 
 ```bash
 salti <alignment.fasta>
