@@ -505,7 +505,6 @@ pub fn render_alignment_pane(
     theme: &ThemeState,
 ) {
     let block = Block::bordered()
-        .title(Line::from("Alignment".set_style(theme.styles.accent)))
         .border_style(theme.styles.border)
         .style(theme.styles.base_block)
         .merge_borders(MergeStrategy::Exact);
@@ -532,9 +531,9 @@ mod tests {
     use super::*;
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
-    use ratatui::Terminal;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -593,7 +592,7 @@ mod tests {
     ) -> String {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
-        let layout = AppLayout::new(area);
+        let layout = AppLayout::new(area, 0);
         let mut viewport = Viewport::default();
         viewport.update_dimensions(
             layout.alignment_pane_sequence_rows.width as usize,
@@ -701,7 +700,9 @@ mod tests {
             raw("seq2", b"CATCATCATCATCATCAT"),
             raw("seq3", b"CATCATCATCATCATCAT"),
         ]);
-        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+        alignment
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .unwrap();
 
         insta::assert_snapshot!(
             "alignment_pane_translated",
@@ -745,7 +746,9 @@ mod tests {
             raw("seq3", b"CATCATCATCATGATCAT"),
         ]);
         alignment.set_reference(0).unwrap();
-        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+        alignment
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .unwrap();
         alignment.diff_mode = DiffMode::Reference;
 
         insta::assert_snapshot!(

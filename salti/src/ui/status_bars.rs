@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use crate::{
     core::model::AlignmentModel,
     ui::{
@@ -36,23 +38,25 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
             let mut filter_text = String::from("Filters:");
             let mut counts = format!(" ({visible_rows} rows)");
             if let Some(pattern) = alignment.filter().pattern() {
-                filter_text.push_str(&format!(" [rows: {pattern}]"));
+                let _ = write!(filter_text, " [rows: {pattern}]");
             }
             if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
-                filter_text.push_str(&format!(
+                let _ = write!(
+                    filter_text,
                     " [gaps: <= {}%]",
                     format_percent(max_gap_fraction)
-                ));
+                );
             }
             if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
-                filter_text.push_str(&format!(
+                let _ = write!(
+                    filter_text,
                     " [constant: >= {}%]",
                     format_percent(min_constant_fraction)
-                ));
+                );
             }
             if alignment.filter().has_column_filter() {
                 let visible_cols = alignment.view().column_count();
-                counts.push_str(&format!(" ({visible_cols} cols)"));
+                let _ = write!(counts, " ({visible_cols} cols)");
             }
             parts.push(format!("{filter_text}{counts}").set_style(theme.warning));
         }
@@ -261,16 +265,17 @@ mod tests {
         filtered_alignment
             .set_filter("seq1|seq2".to_string())
             .unwrap();
-        filtered_alignment
-            .set_gap_filter(Some(0.5))
-            .unwrap();
+        filtered_alignment.set_gap_filter(Some(0.5)).unwrap();
         filtered_alignment
             .set_translation(Some(libmsa::ReadingFrame::Frame2))
             .unwrap();
 
         insta::assert_snapshot!(
             "frame_bottom_status_filters_translation",
-            status_text(&build_bottom_status_bar(Some(&filtered_alignment), &ui_state()))
+            status_text(&build_bottom_status_bar(
+                Some(&filtered_alignment),
+                &ui_state()
+            ))
         );
 
         let mut constant_filter_alignment = alignment_model(vec![
@@ -290,10 +295,8 @@ mod tests {
             ))
         );
 
-        let selected_alignment = alignment_model(vec![
-            raw("seq1", b"ACGTACGT"),
-            raw("seq2", b"ACGTACGT"),
-        ]);
+        let selected_alignment =
+            alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
         let mut single_selection_ui = ui_state();
         single_selection_ui.selection = Some(MouseSelection {
             sequence_id: 0,
@@ -304,7 +307,10 @@ mod tests {
 
         insta::assert_snapshot!(
             "frame_bottom_status_single_selection",
-            status_text(&build_bottom_status_bar(Some(&selected_alignment), &single_selection_ui))
+            status_text(&build_bottom_status_bar(
+                Some(&selected_alignment),
+                &single_selection_ui
+            ))
         );
 
         let mut multi_selection_ui = ui_state();

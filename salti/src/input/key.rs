@@ -3,13 +3,13 @@ use crossterm::event::KeyEvent;
 use crate::command::Command;
 use crate::config::keybindings;
 use crate::input::route::{KeyRoute, route_key};
-use crate::overlay::overlay_state::ActiveOverlay;
+use crate::ui::layers::state::ActiveLayer;
 use crate::ui::ui_state::UiState;
 
 pub(crate) fn handle_key_event(ui: &mut UiState, key: KeyEvent) -> Vec<Command> {
     match route_key(ui) {
-        KeyRoute::Palette => match ui.overlay.active_overlay.as_mut() {
-            Some(ActiveOverlay::Palette(palette)) => palette.handle_key_event(key),
+        KeyRoute::Palette => match ui.layers.active.as_mut() {
+            Some(ActiveLayer::Palette(palette)) => palette.handle_key_event(key),
             _ => Vec::new(),
         },
         KeyRoute::Global => match keybindings::lookup(key.code, key.modifiers) {
@@ -25,7 +25,7 @@ mod tests {
 
     use super::*;
     use crate::cli::StartupState;
-    use crate::overlay::command_palette::CommandPaletteState;
+    use crate::ui::layers::palette::CommandPaletteState;
 
     fn ui_state() -> UiState {
         UiState::new(StartupState {
@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn palette_keys_are_routed_to_palette_state() {
         let mut ui = ui_state();
-        ui.overlay.open_palette(CommandPaletteState::empty());
+        ui.layers.open_palette(CommandPaletteState::empty());
 
         let commands = handle_key_event(&mut ui, KeyEvent::from(KeyCode::Esc));
 

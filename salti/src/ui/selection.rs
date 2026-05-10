@@ -1,11 +1,21 @@
 use std::ops::Range;
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::Color::Rgb;
+use ratatui::widgets::Block;
 
 use crate::{
     core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},
-    ui::{layout::pinned_section_layout, ui_state::MouseSelection},
+    ui::{
+        layout::{AppLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
+        ui_state::{MouseSelection, UiState},
+    },
 };
+
+const SELECTION_ROW_HIGHLIGHT_ALPHA: f32 = 0.3;
+const SELECTION_ROW_TINT_ALPHA: f32 = 0.22;
+const SELECTION_COL_HIGHLIGHT_ALPHA: f32 = 0.28;
 
 /// Maps a screen-space mouse position to `(absolute_row, absolute_column)`.
 ///
@@ -57,6 +67,132 @@ pub fn selection_row_bounds(selection: MouseSelection) -> (usize, usize) {
     (start.min(end), start.max(end))
 }
 
+pub fn render_mouse_selection(
+    f: &mut Frame,
+    layout: &AppLayout,
+    alignment: &AlignmentModel,
+    ui: &UiState,
+    viewport: &Viewport,
+) {
+    let Some(selection) = ui.selection else {
+        return;
+    };
+
+    let window = viewport.window();
+    let id_inner_area = Block::bordered().inner(layout.sequence_id_pane);
+    let sequence_rows_area = layout.alignment_pane_sequence_rows;
+    let id_content_y = id_inner_area.y + RULER_HEIGHT_ROWS;
+    let id_end_x = id_inner_area.x.saturating_add(id_inner_area.width);
+    let sequence_end_x = sequence_rows_area
+        .x
+        .saturating_add(sequence_rows_area.width);
+    let band_layout = pinned_section_layout(
+        alignment.rows().pinned().len(),
+        sequence_rows_area.height as usize,
+    );
+    let (row_min, row_max) = selection_row_bounds(selection);
+
+    for (row_offset, &absolute_row) in alignment
+        .rows()
+        .pinned()
+        .iter()
+        .take(band_layout.pinned_rendered)
+        .enumerate()
+    {
+        if !(row_min..=row_max).contains(&absolute_row) {
+            continue;
+        }
+
+        let row_y = sequence_rows_area.y + row_offset as u16;
+        shader(
+            f,
+            id_inner_area,
+            Rect::new(
+                id_inner_area.x,
+                id_content_y + row_offset as u16,
+                id_end_x.saturating_sub(id_inner_area.x),
+                1,
+            ),
+            ui.theme.theme.accent,
+            SELECTION_ROW_HIGHLIGHT_ALPHA,
+        );
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                sequence_rows_area.x,
+                row_y,
+                sequence_end_x.saturating_sub(sequence_rows_area.x),
+                1,
+            ),
+            ui.theme.theme.surface_bg,
+            SELECTION_ROW_TINT_ALPHA,
+        );
+    }
+
+    let scroll_start_y = sequence_rows_area.y
+        + band_layout.pinned_rendered as u16
+        + band_layout.divider_height as u16;
+    for (row_offset, relative_row) in window.row_range.clone().enumerate() {
+        let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
+            continue;
+        };
+        if !(row_min..=row_max).contains(&absolute_row) {
+            continue;
+        }
+
+        let row_y = scroll_start_y + row_offset as u16;
+        shader(
+            f,
+            id_inner_area,
+            Rect::new(
+                id_inner_area.x,
+                id_content_y
+                    + band_layout.pinned_rendered as u16
+                    + band_layout.divider_height as u16
+                    + row_offset as u16,
+                id_end_x.saturating_sub(id_inner_area.x),
+                1,
+            ),
+            ui.theme.theme.accent,
+            SELECTION_ROW_HIGHLIGHT_ALPHA,
+        );
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                sequence_rows_area.x,
+                row_y,
+                sequence_end_x.saturating_sub(sequence_rows_area.x),
+                1,
+            ),
+            ui.theme.theme.surface_bg,
+            SELECTION_ROW_TINT_ALPHA,
+        );
+    }
+
+    if let Some(visible_col_range) =
+        selection_visible_col_range(selection, alignment, &window.col_range)
+    {
+        let start_x =
+            sequence_rows_area.x + (visible_col_range.start - window.col_range.start) as u16;
+        let end_x_exclusive =
+            sequence_rows_area.x + (visible_col_range.end - window.col_range.start) as u16;
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                start_x,
+                sequence_rows_area.y,
+                end_x_exclusive.saturating_sub(start_x),
+                sequence_rows_area.height,
+            ),
+            ui.theme.theme.panel_bg,
+            SELECTION_COL_HIGHLIGHT_ALPHA,
+        );
+    }
+}
+
 /// Converts a selection (absolute columns) to a visible-column range clipped
 /// to `visible_col_range`. In translation mode, expands to full codon
 /// boundaries. Returns `None` when the selection does not overlap the viewport.
@@ -73,6 +209,62 @@ pub fn selection_visible_col_range(
             &overlay,
         ),
         None => raw_selection_visible_col_range(selection, alignment, visible_col_range),
+    }
+}
+
+fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
+    let from = f32::from(from);
+    let to = f32::from(to);
+    (from + (to - from) * alpha).round().clamp(0.0, 255.0) as u8
+}
+
+fn blend_background(
+    base: ratatui::style::Color,
+    tint: ratatui::style::Color,
+    alpha: f32,
+) -> ratatui::style::Color {
+    match (base, tint) {
+        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Rgb(
+            interpolate(red, red_tint, alpha),
+            interpolate(green, green_tint, alpha),
+            interpolate(blue, blue_tint, alpha),
+        ),
+        _ => tint,
+    }
+}
+
+fn shader(
+    f: &mut Frame,
+    clip_area: Rect,
+    tint_area: Rect,
+    tint: ratatui::style::Color,
+    alpha: f32,
+) {
+    if alpha <= 0.0 || clip_area.width == 0 || clip_area.height == 0 {
+        return;
+    }
+
+    let x_start = tint_area.x.max(clip_area.x);
+    let x_end = tint_area
+        .x
+        .saturating_add(tint_area.width)
+        .min(clip_area.x.saturating_add(clip_area.width));
+    let y_start = tint_area.y.max(clip_area.y);
+    let y_end = tint_area
+        .y
+        .saturating_add(tint_area.height)
+        .min(clip_area.y.saturating_add(clip_area.height));
+    if x_start >= x_end || y_start >= y_end {
+        return;
+    }
+
+    let buffer = f.buffer_mut();
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                cell.set_bg(blend_background(cell.bg, tint, alpha));
+            }
+        }
     }
 }
 

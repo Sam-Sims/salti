@@ -1,6 +1,5 @@
 ---
 source: salti/src/ui/render.rs
-assertion_line: 544
 expression: "render_text(Some(&alignment), &ui, &metrics, area)"
 ---
                         File: Unknown | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
@@ -20,10 +19,10 @@ expression: "render_text(Some(&alignment), &ui, &metrics, area)"
 │                  │                                                                               │
 │                  │                                                                               │
 │                  │                                                                               │
-├──────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-jump-position            clear-filter             toggle-translate         load-alignment
-jump-sequence            filter-gaps              reload-as-protein        set-consensus-method
-pin-sequence             filter-constant          check-update             set-translation-frame
-unpin-sequence           set-reference            quit                     set-theme
-filter-rows              clear-reference          set-diff-mode            set-sequence-type
+jump-position            filter-gaps              check-update             set-theme
+jump-sequence            filter-constant          quit                     set-sequence-type
+pin-sequence             set-reference            set-diff-mode            load-gff
+unpin-sequence           clear-reference          load-alignment
+filter-rows              toggle-translate         set-consensus-method
+clear-filter             reload-as-protein        set-translation-frame
 :█

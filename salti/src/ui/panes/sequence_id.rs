@@ -119,7 +119,6 @@ pub fn render_sequence_id_pane(
     theme: &ThemeState,
 ) {
     let block = Block::bordered()
-        .title(Line::from("Sequence Name".set_style(theme.styles.accent)))
         .border_style(theme.styles.border)
         .style(theme.styles.base_block)
         .merge_borders(MergeStrategy::Exact);
@@ -132,10 +131,10 @@ pub fn render_sequence_id_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use ratatui::Terminal;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -153,7 +152,7 @@ mod tests {
         let area = Rect::new(0, 0, 150, 12);
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
-        let layout = AppLayout::new(area);
+        let layout = AppLayout::new(area, 0);
 
         terminal
             .draw(|frame| {

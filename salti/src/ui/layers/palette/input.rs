@@ -7,7 +7,7 @@ use libmsa::AlignmentType;
 use crate::command::Command;
 use crate::core::model::AlignmentModel;
 use crate::core::search::{Direction, FilterMode, SearchableList};
-use crate::ui::notification::{Notification, NotificationLevel};
+use crate::ui::layers::notification::{Notification, NotificationLevel};
 
 use super::command_definitions::COMMAND_SPECS;
 use super::command_spec::{PaletteCommand, TypableCommand};

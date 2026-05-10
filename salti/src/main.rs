@@ -5,7 +5,6 @@ mod config;
 mod core;
 mod input;
 mod logging;
-mod overlay;
 mod ui;
 mod update;
 

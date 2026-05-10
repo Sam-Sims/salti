@@ -1,12 +1,11 @@
 use crate::core::model::AlignmentModel;
-use crate::ui::notification::render_notification;
+use crate::ui::layers::minimap::Minimap;
+use crate::ui::layers::notification::render_notification;
+use crate::ui::layers::state::ActiveLayer;
 use crate::ui::ui_state::UiState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::Block;
-
-use super::minimap::Minimap;
-use super::overlay_state::ActiveOverlay;
 
 pub fn render_overlays(
     f: &mut Frame,
@@ -15,19 +14,19 @@ pub fn render_overlays(
     alignment: Option<&AlignmentModel>,
     ui: &UiState,
 ) {
-    match &ui.overlay.active_overlay {
-        Some(ActiveOverlay::Minimap(_)) => {
+    match &ui.layers.active {
+        Some(ActiveLayer::Minimap(_)) => {
             if let Some(alignment) = alignment {
                 f.render_widget(Minimap::new(input_area, alignment, ui), content_area);
             }
         }
-        Some(ActiveOverlay::Palette(palette)) => {
+        Some(ActiveLayer::Palette(palette)) => {
             palette.render(f, content_area, input_area, &ui.theme.styles);
         }
         None => (),
     }
 
-    if ui.overlay.active_overlay.is_none() {
+    if ui.layers.active.is_none() {
         match ui.notification.as_ref() {
             Some(notification) => {
                 render_notification(f, input_area, notification, &ui.theme.styles);

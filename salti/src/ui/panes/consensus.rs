@@ -300,10 +300,10 @@ mod tests {
     use super::*;
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use ratatui::Terminal;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -360,7 +360,7 @@ mod tests {
     ) -> String {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
-        let layout = AppLayout::new(area);
+        let layout = AppLayout::new(area, 0);
         let window = ViewportWindow {
             row_range: 0..alignment.view().row_count(),
             col_range: 0..alignment.view().column_count(),
