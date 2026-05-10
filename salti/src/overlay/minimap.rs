@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::MouseEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Widget};
 use crate::command::Command;
 use crate::config::theme::Theme;
 use crate::core::model::AlignmentModel;
+use crate::input::movement::HorizontalDrag;
 use crate::ui::ui_state::UiState;
 
 /// maximum height of the minimap in rows
@@ -29,12 +30,12 @@ pub struct MinimapLayout {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MinimapState {
-    anchor_columns: Option<usize>,
+    pan_drag: HorizontalDrag,
 }
 
 impl MinimapState {
     pub fn is_dragging(&self) -> bool {
-        self.anchor_columns.is_some()
+        self.pan_drag.is_dragging()
     }
 
     pub fn contains_mouse(&self, mouse: MouseEvent, overlay_area: Rect) -> bool {
@@ -43,21 +44,10 @@ impl MinimapState {
     }
 
     fn position_from_mouse(mouse_x: u16, track_area: Rect, total_columns: usize) -> usize {
-        let offset = usize::from(mouse_x - track_area.x);
+        let offset = usize::from(mouse_x.saturating_sub(track_area.x));
         let width = usize::from(track_area.width);
-        let column = offset * total_columns / width;
-        column.min(total_columns - 1)
-    }
-
-    fn pan_action(
-        mouse_x: u16,
-        track_area: Rect,
-        total_columns: usize,
-        drag_anchor: usize,
-    ) -> Command {
-        let column = Self::position_from_mouse(mouse_x, track_area, total_columns);
-        let visible_target = column.saturating_sub(drag_anchor);
-        Command::JumpToPosition(visible_target)
+        let column = offset.saturating_mul(total_columns) / width;
+        column.min(total_columns.saturating_sub(1))
     }
 
     pub fn handle_mouse(
@@ -67,57 +57,14 @@ impl MinimapState {
         viewport_column_range: &Range<usize>,
         total_columns: usize,
     ) -> Option<Command> {
-        if total_columns == 0 {
-            return None;
-        }
-
-        let viewport_cols = viewport_column_range
-            .end
-            .saturating_sub(viewport_column_range.start);
         let track_area = layout(overlay_area).track_area;
-        let in_track = self.contains_mouse(mouse, overlay_area);
-
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) if in_track => {
-                let column = Self::position_from_mouse(mouse.column, track_area, total_columns);
-                let drag_anchor = if viewport_column_range.contains(&column) {
-                    column - viewport_column_range.start
-                } else {
-                    viewport_cols / 2
-                };
-
-                self.anchor_columns = Some(drag_anchor);
-                Some(Self::pan_action(
-                    mouse.column,
-                    track_area,
-                    total_columns,
-                    drag_anchor,
-                ))
-            }
-            MouseEventKind::Drag(MouseButton::Left) if in_track => {
-                let drag_anchor = self.anchor_columns?;
-                Some(Self::pan_action(
-                    mouse.column,
-                    track_area,
-                    total_columns,
-                    drag_anchor,
-                ))
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                let drag_anchor = self.anchor_columns.take()?;
-                if in_track {
-                    Some(Self::pan_action(
-                        mouse.column,
-                        track_area,
-                        total_columns,
-                        drag_anchor,
-                    ))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
+        self.pan_drag.handle_mouse(
+            mouse,
+            track_area,
+            viewport_column_range,
+            total_columns,
+            Self::position_from_mouse,
+        )
     }
 }
 
