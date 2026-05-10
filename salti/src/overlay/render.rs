@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::Block;
 
-use super::minimap;
+use super::minimap::Minimap;
 use super::overlay_state::ActiveOverlay;
 
 pub fn render_overlays(
@@ -18,7 +18,7 @@ pub fn render_overlays(
     match &ui.overlay.active_overlay {
         Some(ActiveOverlay::Minimap(_)) => {
             if let Some(alignment) = alignment {
-                minimap::render(f, content_area, input_area, alignment, ui);
+                f.render_widget(Minimap::new(input_area, alignment, ui), content_area);
             }
         }
         Some(ActiveOverlay::Palette(palette)) => {

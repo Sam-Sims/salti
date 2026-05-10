@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crossterm::event::MouseEvent;
-use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
@@ -26,6 +26,56 @@ const MINIMAP_ROW_SAMPLES_PER_CELL: usize = 10;
 pub struct MinimapLayout {
     pub area: Rect,
     pub track_area: Rect,
+}
+
+pub struct Minimap<'a> {
+    input_area: Rect,
+    alignment: &'a AlignmentModel,
+    ui: &'a UiState,
+}
+
+impl<'a> Minimap<'a> {
+    pub fn new(input_area: Rect, alignment: &'a AlignmentModel, ui: &'a UiState) -> Self {
+        Self {
+            input_area,
+            alignment,
+            ui,
+        }
+    }
+}
+
+impl Widget for Minimap<'_> {
+    fn render(self, area: Rect, buffer: &mut Buffer) {
+        let minimap_layout = layout(area);
+        let theme = &self.ui.theme.theme;
+        let styles = &self.ui.theme.styles;
+        let total_columns = self.alignment.view().column_count();
+
+        Clear.render(minimap_layout.area, buffer);
+        Block::bordered()
+            .border_style(styles.border)
+            .style(styles.panel_block)
+            .render(minimap_layout.area, buffer);
+        render_minimap_track(
+            buffer,
+            minimap_layout.track_area,
+            self.alignment,
+            theme,
+            total_columns,
+        );
+
+        if let Some(viewport_box) = highlight_box(
+            minimap_layout.track_area,
+            self.ui.viewport.window().col_range,
+            total_columns,
+        ) {
+            shade_highlight_box(buffer, viewport_box, theme);
+        }
+
+        Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
+            .style(styles.base_block)
+            .render(self.input_area, buffer);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -119,8 +169,7 @@ fn calculate_block_colour(
         .unwrap_or(theme.panel_bg_dim)
 }
 
-fn shade_highlight_box(f: &mut Frame, viewport_box: Rect, theme: &Theme) {
-    let buffer = f.buffer_mut();
+fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
     for position in viewport_box.positions() {
         if let Some(cell) = buffer.cell_mut(position) {
             cell.set_char('▒');
@@ -150,14 +199,13 @@ pub fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usiz
 }
 
 fn render_minimap_track(
-    f: &mut Frame,
+    buffer: &mut Buffer,
     area: Rect,
     alignment: &AlignmentModel,
     theme: &Theme,
     total_columns: usize,
 ) {
     let total_width = usize::from(area.width);
-    let buffer = f.buffer_mut();
 
     // render empty block if alignment is empty
     if total_columns == 0 {
@@ -194,46 +242,4 @@ pub fn layout(overlay_area: Rect) -> MinimapLayout {
     let area = Rect::new(overlay_area.x, top, overlay_area.width, height);
     let track_area = Block::bordered().inner(area);
     MinimapLayout { area, track_area }
-}
-
-pub fn render(
-    f: &mut Frame,
-    overlay_area: Rect,
-    input_area: Rect,
-    alignment: &AlignmentModel,
-    ui: &UiState,
-) {
-    let minimap_layout = layout(overlay_area);
-    let theme = &ui.theme.theme;
-    let styles = &ui.theme.styles;
-    let total_columns = alignment.view().column_count();
-
-    Clear.render(minimap_layout.area, f.buffer_mut());
-    f.render_widget(
-        Block::bordered()
-            .border_style(styles.border)
-            .style(styles.panel_block),
-        minimap_layout.area,
-    );
-    render_minimap_track(
-        f,
-        minimap_layout.track_area,
-        alignment,
-        theme,
-        total_columns,
-    );
-
-    if let Some(viewport_box) = highlight_box(
-        minimap_layout.track_area,
-        ui.viewport.window().col_range,
-        total_columns,
-    ) {
-        shade_highlight_box(f, viewport_box, theme);
-    }
-
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
-            .style(styles.base_block),
-        input_area,
-    );
 }
