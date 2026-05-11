@@ -6,7 +6,7 @@ use crate::{
         panes::alignment::render_alignment_pane,
         panes::consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
         panes::gff::{FeatureMap, render as render_gff_pane},
-        panes::sequence_id::render_sequence_id_pane,
+        panes::sequence_id::SequenceIdPane,
         panes::status_bars::render_frame,
         selection::render_mouse_selection,
         ui_state::{LoadingState, UiState},
@@ -290,7 +290,15 @@ pub fn render(
     };
 
     let window = ui.viewport.window();
-    render_sequence_id_pane(f, layout, alignment, &window, &ui.theme);
+
+    f.render_widget(
+        SequenceIdPane {
+            alignment,
+            window: &window,
+            theme: &ui.theme,
+        },
+        layout.sequence_id_pane,
+    );
 
     render_alignment_pane(f, layout, alignment, &ui.viewport, stats_cache, &ui.theme);
 

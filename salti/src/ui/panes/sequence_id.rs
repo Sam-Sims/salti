@@ -1,15 +1,36 @@
 use crate::{
     core::{model::AlignmentModel, viewport::ViewportWindow},
     ui::{
-        layout::{AppLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
+        layout::{RULER_HEIGHT_ROWS, pinned_section_layout},
         ui_state::ThemeState,
     },
 };
-use ratatui::Frame;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::style::{Style, Styled};
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Widget};
+
+pub(crate) struct SequenceIdPane<'a> {
+    pub(crate) alignment: &'a AlignmentModel,
+    pub(crate) window: &'a ViewportWindow,
+    pub(crate) theme: &'a ThemeState,
+}
+
+impl Widget for SequenceIdPane<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let block = Block::bordered()
+            .title("Sequence Name")
+            .border_style(self.theme.styles.border)
+            .style(self.theme.styles.base_block)
+            .merge_borders(MergeStrategy::Exact);
+        let inner_area = block.inner(area);
+        block.render(area, buf);
+
+        render_sequence_id_rows(self.alignment, self.window, self.theme, inner_area, buf);
+    }
+}
 
 fn build_sequence_id_line(
     theme: &ThemeState,
@@ -35,11 +56,11 @@ fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
 }
 
 fn render_sequence_id_rows(
-    f: &mut Frame,
     alignment: &AlignmentModel,
     window: &ViewportWindow,
     theme: &ThemeState,
-    area: ratatui::layout::Rect,
+    area: Rect,
+    buf: &mut Buffer,
 ) {
     let ruler_height = usize::from(RULER_HEIGHT_ROWS);
     let available_content_height = area.height.saturating_sub(RULER_HEIGHT_ROWS) as usize;
@@ -103,34 +124,16 @@ fn render_sequence_id_rows(
         ));
     }
 
-    f.render_widget(
-        Paragraph::new(lines)
-            .alignment(ratatui::layout::HorizontalAlignment::Left)
-            .style(theme.styles.base_block),
-        area,
-    );
-}
-
-pub fn render_sequence_id_pane(
-    f: &mut Frame,
-    layout: &AppLayout,
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    theme: &ThemeState,
-) {
-    let block = Block::bordered()
-        .border_style(theme.styles.border)
+    Paragraph::new(lines)
+        .alignment(ratatui::layout::HorizontalAlignment::Left)
         .style(theme.styles.base_block)
-        .merge_borders(MergeStrategy::Exact);
-    let inner_area = block.inner(layout.sequence_id_pane);
-    f.render_widget(block, layout.sequence_id_pane);
-
-    render_sequence_id_rows(f, alignment, window, theme, inner_area);
+        .render(area, buf);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::layout::AppLayout;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -156,7 +159,15 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                render_sequence_id_pane(frame, &layout, alignment, window, &ThemeState::default());
+                let theme = ThemeState::default();
+                frame.render_widget(
+                    SequenceIdPane {
+                        alignment,
+                        window,
+                        theme: &theme,
+                    },
+                    layout.sequence_id_pane,
+                );
             })
             .unwrap();
 
