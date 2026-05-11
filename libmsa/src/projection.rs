@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Projection {
@@ -31,6 +31,18 @@ impl Projection {
             Self::Full { len } => (absolute < *len).then_some(absolute),
             Self::Filtered(ids) => ids.binary_search(&absolute).ok(),
         }
+    }
+
+    pub(crate) fn relative_range_intersecting(&self, range: Range<usize>) -> Option<Range<usize>> {
+        let range = match self {
+            Self::Full { len } => range.start.min(*len)..range.end.min(*len),
+            Self::Filtered(ids) => {
+                let start = ids.partition_point(|&column| column < range.start);
+                let end = ids.partition_point(|&column| column < range.end);
+                start..end
+            }
+        };
+        (!range.is_empty()).then_some(range)
     }
 
     pub(crate) fn iter(&self) -> ProjectionIter<'_> {
@@ -149,6 +161,24 @@ mod tests {
 
         let filtered = Projection::Filtered(Arc::from([].as_slice()));
         assert_eq!(filtered.relative(0), None);
+    }
+
+    #[test]
+    fn full_projection_relative_range_intersecting() {
+        let proj = Projection::Full { len: 5 };
+        assert_eq!(proj.relative_range_intersecting(2..5), Some(2..5));
+        assert_eq!(proj.relative_range_intersecting(2..99), Some(2..5));
+        assert_eq!(proj.relative_range_intersecting(5..8), None);
+        assert_eq!(proj.relative_range_intersecting(3..3), None);
+    }
+
+    #[test]
+    fn filtered_projection_relative_range_intersecting() {
+        let proj = Projection::Filtered(Arc::from([1, 3, 4, 7].as_slice()));
+        assert_eq!(proj.relative_range_intersecting(2..6), Some(1..3));
+        assert_eq!(proj.relative_range_intersecting(1..8), Some(0..4));
+        assert_eq!(proj.relative_range_intersecting(5..6), None);
+        assert_eq!(proj.relative_range_intersecting(3..3), None);
     }
 
     #[test]

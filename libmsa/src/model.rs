@@ -229,6 +229,19 @@ impl Alignment {
         self.columns.relative(absolute)
     }
 
+    /// Returns the visible relative column range covered by `absolute_range`.
+    ///
+    /// The returned range uses this view's visible column indices and includes every visible
+    /// column whose absolute ID is inside `absolute_range`.
+    ///
+    /// Returns `None` when none of the columns in `absolute_range` are visible.
+    pub fn relative_column_range_intersecting(
+        &self,
+        absolute_range: Range<usize>,
+    ) -> Option<Range<usize>> {
+        self.columns.relative_range_intersecting(absolute_range)
+    }
+
     /// Returns the type currently used to interpret this alignment.
     pub fn active_type(&self) -> AlignmentType {
         self.active_type
@@ -654,6 +667,38 @@ mod alignment_projection_tests {
         assert_eq!(filtered.absolute_column_id(0), Some(1));
         assert_eq!(filtered.absolute_column_id(1), Some(3));
         assert_eq!(filtered.absolute_column_id(2), None);
+    }
+
+    #[test]
+    fn relative_column_range_intersecting_full() {
+        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
+
+        assert_eq!(
+            alignment.relative_column_range_intersecting(1..3),
+            Some(1..3)
+        );
+        assert_eq!(
+            alignment.relative_column_range_intersecting(2..99),
+            Some(2..4)
+        );
+        assert_eq!(alignment.relative_column_range_intersecting(4..8), None);
+    }
+
+    #[test]
+    fn relative_column_range_intersecting_filtered() {
+        let alignment = Alignment::new(vec![raw("s1", b"ACGTACGT")]).unwrap();
+        let filtered = alignment.with_projections(
+            Projection::Full {
+                len: alignment.row_count(),
+            },
+            Projection::Filtered(Arc::from(vec![1usize, 3, 4, 7])),
+        );
+
+        assert_eq!(
+            filtered.relative_column_range_intersecting(2..6),
+            Some(1..3)
+        );
+        assert_eq!(filtered.relative_column_range_intersecting(5..6), None);
     }
 
     #[test]
