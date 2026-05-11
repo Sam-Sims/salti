@@ -246,7 +246,8 @@ impl AlignmentModel {
         self.update_current_view()
     }
 
-    pub fn set_filter(&mut self, pattern: String) -> Result<(), libmsa::AlignmentError> {
+    pub fn set_filter(&mut self, pattern: impl Into<String>) -> Result<(), libmsa::AlignmentError> {
+        let pattern = pattern.into();
         let next_pattern = if pattern.is_empty() {
             None
         } else {
@@ -862,7 +863,10 @@ mod tests {
 
     #[test]
     fn reload_as_protein_preserves_filter_and_restores_dna() {
-        let mut model = alignment_model(vec![raw("seq1", b"CATCATCATCAT"), raw("seq2", b"CATCATCATCAT")]);
+        let mut model = alignment_model(vec![
+            raw("seq1", b"CATCATCATCAT"),
+            raw("seq2", b"CATCATCATCAT"),
+        ]);
         model.set_filter("seq1".to_string()).unwrap();
         model
             .set_translation(Some(libmsa::ReadingFrame::Frame2))
