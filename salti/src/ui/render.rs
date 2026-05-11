@@ -3,7 +3,7 @@ use crate::{
     overlay::render::render_overlays,
     ui::{
         layout::{AppLayout, FrameLayout},
-        panes::alignment::render_alignment_pane,
+        panes::alignment::AlignmentPane,
         panes::consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
         panes::gff::{FeatureMap, render as render_gff_pane},
         panes::sequence_id::SequenceIdPane,
@@ -300,7 +300,15 @@ pub fn render(
         layout.sequence_id_pane,
     );
 
-    render_alignment_pane(f, layout, alignment, &ui.viewport, stats_cache, &ui.theme);
+    f.render_widget(
+        AlignmentPane {
+            alignment,
+            viewport: &ui.viewport,
+            metrics: stats_cache,
+            theme: &ui.theme,
+        },
+        layout.alignment_pane,
+    );
 
     f.render_widget(
         ConsensusSequenceIdPane {

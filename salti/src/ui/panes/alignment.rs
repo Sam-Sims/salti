@@ -1,10 +1,10 @@
-use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::macros::vertical;
 use ratatui::style::Styled;
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Widget};
 
 use crate::{
     core::{
@@ -14,7 +14,7 @@ use crate::{
         viewport::{Viewport, ViewportWindow},
     },
     ui::{
-        layout::{AppLayout, PinnedSectionLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
+        layout::{PinnedSectionLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
         rows::{RowRenderMode, format_row_spans, format_translated_row_spans, visible_bytes},
         ui_state::ThemeState,
     },
@@ -22,6 +22,47 @@ use crate::{
 
 const SCROLLBAR_THUMB_WIDTH: usize = 3;
 const SCROLLBAR_THUMB_MIN_WIDTH: usize = 1;
+
+pub(crate) struct AlignmentPane<'a> {
+    pub(crate) alignment: &'a AlignmentModel,
+    pub(crate) viewport: &'a Viewport,
+    pub(crate) metrics: &'a ColumnStatsCache,
+    pub(crate) theme: &'a ThemeState,
+}
+
+impl Widget for AlignmentPane<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let block = Block::bordered()
+            .title("Alignment")
+            .border_style(self.theme.styles.border)
+            .style(self.theme.styles.base_block)
+            .merge_borders(MergeStrategy::Exact);
+        let inner_area = block.inner(area);
+        block.render(area, buf);
+
+        let [ruler_area, sequence_rows_area] =
+            inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
+        let window = self.viewport.window();
+
+        render_ruler(self.alignment, &window, ruler_area, self.theme, buf);
+        render_sequence_rows(
+            self.alignment,
+            &window,
+            self.metrics,
+            sequence_rows_area,
+            self.theme,
+            buf,
+        );
+        render_scrollbar(
+            self.alignment,
+            self.viewport,
+            &window,
+            self.theme,
+            area,
+            buf,
+        );
+    }
+}
 
 fn raw_render_mode<'a>(
     alignment: &AlignmentModel,
@@ -202,24 +243,26 @@ fn build_sequence_row_lines(
 }
 
 fn render_sequence_rows(
-    f: &mut Frame,
     alignment: &AlignmentModel,
     window: &ViewportWindow,
     metrics: &ColumnStatsCache,
     area: Rect,
     theme: &ThemeState,
+    buf: &mut Buffer,
 ) {
     let lines = build_sequence_row_lines(alignment, window, metrics, area, theme);
-    f.render_widget(Paragraph::new(lines).style(theme.styles.base_block), area);
+    Paragraph::new(lines)
+        .style(theme.styles.base_block)
+        .render(area, buf);
 }
 
 fn render_scrollbar(
-    f: &mut Frame,
     alignment: &AlignmentModel,
     viewport: &Viewport,
     window: &ViewportWindow,
     theme: &ThemeState,
     area: Rect,
+    buf: &mut Buffer,
 ) {
     if area.width < 2 || area.height == 0 {
         return;
@@ -262,7 +305,7 @@ fn render_scrollbar(
 
     for offset in thumb_start..thumb_end {
         let thumb_x = scrollbar_area.x + offset as u16;
-        if let Some(cell) = f.buffer_mut().cell_mut((thumb_x, thumb_y)) {
+        if let Some(cell) = buf.cell_mut((thumb_x, thumb_y)) {
             let track_colour = cell.fg;
             cell.set_char('▬');
             cell.set_fg(thumb_colour);
@@ -462,11 +505,11 @@ fn build_ruler(
 }
 
 fn render_ruler(
-    f: &mut Frame,
     alignment: &AlignmentModel,
     window: &ViewportWindow,
     area: Rect,
     theme: &ThemeState,
+    buf: &mut Buffer,
 ) {
     let absolute_columns: Vec<usize> = window
         .col_range
@@ -490,40 +533,9 @@ fn render_ruler(
         filtered_trailing,
         theme,
     );
-    f.render_widget(
-        Paragraph::new(vec![number_line, marker_line]).style(theme.styles.base_block),
-        area,
-    );
-}
-
-pub fn render_alignment_pane(
-    f: &mut Frame,
-    layout: &AppLayout,
-    alignment: &AlignmentModel,
-    viewport: &Viewport,
-    metrics: &ColumnStatsCache,
-    theme: &ThemeState,
-) {
-    let block = Block::bordered()
-        .border_style(theme.styles.border)
+    Paragraph::new(vec![number_line, marker_line])
         .style(theme.styles.base_block)
-        .merge_borders(MergeStrategy::Exact);
-    let inner_area = block.inner(layout.alignment_pane);
-    f.render_widget(block, layout.alignment_pane);
-
-    let [ruler_area, sequence_rows_area] = inner_area.layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
-    let window = viewport.window();
-
-    render_ruler(f, alignment, &window, ruler_area, theme);
-    render_sequence_rows(f, alignment, &window, metrics, sequence_rows_area, theme);
-    render_scrollbar(
-        f,
-        alignment,
-        viewport,
-        &window,
-        theme,
-        layout.alignment_pane,
-    );
+        .render(area, buf);
 }
 
 #[cfg(test)]
@@ -531,8 +543,7 @@ mod tests {
     use super::*;
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use crate::ui::layout::AppLayout;
     use ratatui::buffer::Buffer;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
@@ -590,8 +601,7 @@ mod tests {
         row_offset: usize,
         col_offset: usize,
     ) -> String {
-        let backend = TestBackend::new(area.width, area.height);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut buffer = Buffer::empty(area);
         let layout = AppLayout::new(area, 0);
         let mut viewport = Viewport::default();
         viewport.update_dimensions(
@@ -607,20 +617,16 @@ mod tests {
         viewport.offsets.rows = row_offset;
         viewport.offsets.cols = col_offset;
 
-        terminal
-            .draw(|frame| {
-                render_alignment_pane(
-                    frame,
-                    &layout,
-                    alignment,
-                    &viewport,
-                    stats_cache,
-                    &ThemeState::default(),
-                );
-            })
-            .unwrap();
+        let theme = ThemeState::default();
+        AlignmentPane {
+            alignment,
+            viewport: &viewport,
+            metrics: stats_cache,
+            theme: &theme,
+        }
+        .render(layout.alignment_pane, &mut buffer);
 
-        buffer_text(terminal.backend().buffer(), layout.alignment_pane)
+        buffer_text(&buffer, layout.alignment_pane)
     }
 
     fn buffer_text(buffer: &Buffer, area: Rect) -> String {
