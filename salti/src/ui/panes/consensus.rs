@@ -1,9 +1,9 @@
-use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Styled, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Widget};
 
 use crate::{
     core::{
@@ -13,7 +13,6 @@ use crate::{
         viewport::ViewportWindow,
     },
     ui::{
-        layout::AppLayout,
         rows::{
             RowRenderMode, format_row_spans, format_translated_byte_range_spans,
             format_translated_row_spans, visible_bytes,
@@ -23,6 +22,63 @@ use crate::{
 };
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+pub(crate) struct ConsensusAlignmentPane<'a> {
+    pub(crate) alignment: &'a AlignmentModel,
+    pub(crate) window: &'a ViewportWindow,
+    pub(crate) metrics: &'a ColumnStatsCache,
+    pub(crate) theme: &'a ThemeState,
+}
+
+impl Widget for ConsensusAlignmentPane<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let block = Block::bordered()
+            .border_style(self.theme.styles.border)
+            .style(self.theme.styles.base_block)
+            .merge_borders(MergeStrategy::Exact);
+        let inner_area = block.inner(area);
+        block.render(area, buf);
+
+        let lines =
+            consensus_alignment_lines(self.alignment, self.window, self.metrics, self.theme);
+        Paragraph::new(lines)
+            .style(self.theme.styles.base_block)
+            .render(inner_area, buf);
+    }
+}
+
+pub(crate) struct ConsensusSequenceIdPane<'a> {
+    pub(crate) alignment: &'a AlignmentModel,
+    pub(crate) theme: &'a ThemeState,
+}
+
+impl Widget for ConsensusSequenceIdPane<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let block = Block::bordered()
+            .border_style(self.theme.styles.border)
+            .style(self.theme.styles.base_block)
+            .merge_borders(MergeStrategy::Exact);
+        let inner_area = block.inner(area);
+        block.render(area, buf);
+
+        let lines = if shows_conservation_line(self.alignment) {
+            vec![
+                Line::from("Reference Sequence:".set_style(self.theme.styles.accent)),
+                Line::from("Consensus Sequence:".set_style(self.theme.styles.accent)),
+                Line::from("Conservation:".set_style(self.theme.styles.accent)),
+            ]
+        } else {
+            vec![
+                Line::from("Reference Sequence:".set_style(self.theme.styles.accent)),
+                Line::from("Consensus Sequence:".set_style(self.theme.styles.accent)),
+            ]
+        };
+
+        Paragraph::new(lines)
+            .style(self.theme.styles.base_block)
+            .render(inner_area, buf);
+    }
+}
 
 fn conservation_to_spark(value: f32) -> &'static str {
     let value = value.clamp(0.0, 1.0);
@@ -197,28 +253,6 @@ fn consensus_alignment_lines(
     }
 }
 
-fn render_consensus_alignment_pane(
-    f: &mut Frame,
-    area: Rect,
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
-    theme: &ThemeState,
-) {
-    let block = Block::bordered()
-        .border_style(theme.styles.border)
-        .style(theme.styles.base_block)
-        .merge_borders(MergeStrategy::Exact);
-    let inner_area = block.inner(area);
-    f.render_widget(block, area);
-
-    let lines = consensus_alignment_lines(alignment, window, metrics, theme);
-    f.render_widget(
-        Paragraph::new(lines).style(theme.styles.base_block),
-        inner_area,
-    );
-}
-
 fn build_conservation_line(
     metrics: &ColumnStatsCache,
     window: &ViewportWindow,
@@ -244,62 +278,12 @@ fn build_conservation_line(
     Line::from(sparkline).set_style(theme.styles.accent_alt)
 }
 
-fn render_consensus_sequence_id_pane(
-    f: &mut Frame,
-    area: Rect,
-    alignment: &AlignmentModel,
-    theme: &ThemeState,
-) {
-    let block = Block::bordered()
-        .border_style(theme.styles.border)
-        .style(theme.styles.base_block)
-        .merge_borders(MergeStrategy::Exact);
-    let inner_area = block.inner(area);
-    f.render_widget(block, area);
-
-    let lines = if shows_conservation_line(alignment) {
-        vec![
-            Line::from("Reference Sequence:".set_style(theme.styles.accent)),
-            Line::from("Consensus Sequence:".set_style(theme.styles.accent)),
-            Line::from("Conservation:".set_style(theme.styles.accent)),
-        ]
-    } else {
-        vec![
-            Line::from("Reference Sequence:".set_style(theme.styles.accent)),
-            Line::from("Consensus Sequence:".set_style(theme.styles.accent)),
-        ]
-    };
-
-    f.render_widget(
-        Paragraph::new(lines).style(theme.styles.base_block),
-        inner_area,
-    );
-}
-
-pub fn render_consensus_pane(
-    f: &mut Frame,
-    layout: &AppLayout,
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
-    theme: &ThemeState,
-) {
-    render_consensus_sequence_id_pane(f, layout.consensus_sequence_id_pane, alignment, theme);
-    render_consensus_alignment_pane(
-        f,
-        layout.consensus_alignment_pane,
-        alignment,
-        window,
-        metrics,
-        theme,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
+    use crate::ui::layout::AppLayout;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -369,13 +353,22 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                render_consensus_pane(
-                    frame,
-                    &layout,
-                    alignment,
-                    &window,
-                    metrics,
-                    &ThemeState::default(),
+                let theme = ThemeState::default();
+                frame.render_widget(
+                    ConsensusSequenceIdPane {
+                        alignment,
+                        theme: &theme,
+                    },
+                    layout.consensus_sequence_id_pane,
+                );
+                frame.render_widget(
+                    ConsensusAlignmentPane {
+                        alignment,
+                        window: &window,
+                        metrics,
+                        theme: &theme,
+                    },
+                    layout.consensus_alignment_pane,
                 );
             })
             .unwrap();

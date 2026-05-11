@@ -2,12 +2,13 @@ use crate::{
     core::{model::AlignmentModel, stats_cache::ColumnStatsCache},
     overlay::render::render_overlays,
     ui::{
-        alignment_pane::render_alignment_pane,
-        consensus_pane::render_consensus_pane,
-        frame::render_frame,
-        layout::{AppLayout, FrameLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
-        selection::{selection_row_bounds, selection_visible_col_range},
-        sequence_id_pane::render_sequence_id_pane,
+        layout::{AppLayout, FrameLayout},
+        panes::alignment::render_alignment_pane,
+        panes::consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
+        panes::gff::{FeatureMap, render as render_gff_pane},
+        panes::sequence_id::render_sequence_id_pane,
+        panes::status_bars::render_frame,
+        selection::render_mouse_selection,
         ui_state::{LoadingState, UiState},
     },
 };
@@ -293,7 +294,22 @@ pub fn render(
 
     render_alignment_pane(f, layout, alignment, &ui.viewport, stats_cache, &ui.theme);
 
-    render_consensus_pane(f, layout, alignment, &window, stats_cache, &ui.theme);
+    f.render_widget(
+        ConsensusSequenceIdPane {
+            alignment,
+            theme: &ui.theme,
+        },
+        layout.consensus_sequence_id_pane,
+    );
+    f.render_widget(
+        ConsensusAlignmentPane {
+            alignment,
+            window: &window,
+            metrics: stats_cache,
+            theme: &ui.theme,
+        },
+        layout.consensus_alignment_pane,
+    );
     render_mouse_selection(f, layout, alignment, ui, &ui.viewport);
 
     render_overlays(
