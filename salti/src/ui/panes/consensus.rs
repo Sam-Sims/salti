@@ -284,8 +284,6 @@ mod tests {
     use crate::core::model::StatsView;
     use crate::core::stats_cache::StatsJobResult;
     use crate::ui::layout::AppLayout;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
@@ -342,8 +340,7 @@ mod tests {
         metrics: &ColumnStatsCache,
         area: Rect,
     ) -> String {
-        let backend = TestBackend::new(area.width, area.height);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut buffer = Buffer::empty(area);
         let layout = AppLayout::new(area, 0);
         let window = ViewportWindow {
             row_range: 0..alignment.view().row_count(),
@@ -351,29 +348,21 @@ mod tests {
             name_range: 0..0,
         };
 
-        terminal
-            .draw(|frame| {
-                let theme = ThemeState::default();
-                frame.render_widget(
-                    ConsensusSequenceIdPane {
-                        alignment,
-                        theme: &theme,
-                    },
-                    layout.consensus_sequence_id_pane,
-                );
-                frame.render_widget(
-                    ConsensusAlignmentPane {
-                        alignment,
-                        window: &window,
-                        metrics,
-                        theme: &theme,
-                    },
-                    layout.consensus_alignment_pane,
-                );
-            })
-            .unwrap();
+        let theme = ThemeState::default();
+        ConsensusSequenceIdPane {
+            alignment,
+            theme: &theme,
+        }
+        .render(layout.consensus_sequence_id_pane, &mut buffer);
+        ConsensusAlignmentPane {
+            alignment,
+            window: &window,
+            metrics,
+            theme: &theme,
+        }
+        .render(layout.consensus_alignment_pane, &mut buffer);
 
-        buffer_text(terminal.backend().buffer())
+        buffer_text(&buffer)
     }
 
     fn buffer_text(buffer: &Buffer) -> String {

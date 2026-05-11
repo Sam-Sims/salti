@@ -134,8 +134,6 @@ fn render_sequence_id_rows(
 mod tests {
     use super::*;
     use crate::ui::layout::AppLayout;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
@@ -153,25 +151,18 @@ mod tests {
 
     fn render_sequence_id_pane_text(alignment: &AlignmentModel, window: &ViewportWindow) -> String {
         let area = Rect::new(0, 0, 150, 12);
-        let backend = TestBackend::new(area.width, area.height);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut buffer = Buffer::empty(area);
         let layout = AppLayout::new(area, 0);
+        let theme = ThemeState::default();
 
-        terminal
-            .draw(|frame| {
-                let theme = ThemeState::default();
-                frame.render_widget(
-                    SequenceIdPane {
-                        alignment,
-                        window,
-                        theme: &theme,
-                    },
-                    layout.sequence_id_pane,
-                );
-            })
-            .unwrap();
+        SequenceIdPane {
+            alignment,
+            window,
+            theme: &theme,
+        }
+        .render(layout.sequence_id_pane, &mut buffer);
 
-        buffer_text(terminal.backend().buffer())
+        buffer_text(&buffer)
     }
 
     fn buffer_text(buffer: &Buffer) -> String {
