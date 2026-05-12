@@ -188,6 +188,30 @@ pub(super) fn run_jump_sequence(
     })
 }
 
+pub(super) fn run_jump_feature(
+    state: &CommandPaletteState,
+    arguments: &str,
+) -> anyhow::Result<Command> {
+    run_command("jump-feature", arguments, || {
+        let feature_name = require_argument(arguments)?;
+        let Some(gff_feature_targets) = state.gff_feature_targets.as_ref() else {
+            return Err(format_err!("No GFF file loaded"));
+        };
+        let Some(feature_target) = gff_feature_targets
+            .iter()
+            .find(|feature_target| feature_target.feature_name.as_ref() == feature_name)
+        else {
+            return Err(format_err!("Feature not found: {feature_name}"));
+        };
+        let Some(target_col) = feature_target.target_col else {
+            return Err(format_err!(
+                "No visible column at or after the requested position",
+            ));
+        };
+        Ok(Command::JumpToPosition(target_col))
+    })
+}
+
 pub(super) fn run_pin_sequence(
     state: &CommandPaletteState,
     arguments: &str,
@@ -328,16 +352,145 @@ pub(super) fn run_load_gff(_: &CommandPaletteState, arguments: &str) -> anyhow::
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
+    use crate::core::gff::{Feature, FeatureType, Gff, Strand};
+    use crate::core::model::AlignmentModel;
+    use crate::ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};
+
     use super::*;
 
+    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
+        libmsa::RawSequence {
+            id: "seq".to_string(),
+            sequence: sequence.to_vec(),
+        }
+    }
+
+    fn gff_feature(name: &str, range: Range<usize>) -> Feature {
+        Feature {
+            name: name.to_string(),
+            kind: FeatureType::Gene,
+            range,
+            strand: Strand::Forward,
+        }
+    }
+
+    fn model_with_sequence(sequence: &[u8]) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(vec![raw(sequence)]).unwrap();
+        AlignmentModel::new(alignment).unwrap()
+    }
+
     fn palette_state_with_columns(visible_columns: Vec<usize>) -> CommandPaletteState {
-        CommandPaletteState::new(
-            Vec::new(),
-            Vec::new(),
-            libmsa::AlignmentType::Dna,
-            false,
+        CommandPaletteState::new(CommandPaletteSnapshot {
+            selectable_sequences: Vec::new(),
+            pinned_sequences: Vec::new(),
+            active_type: libmsa::AlignmentType::Dna,
+            is_reloaded_as_protein: false,
             visible_columns,
-        )
+            gff_feature_targets: None,
+        })
+    }
+
+    fn palette_state_with_gff_features(gff_features: Vec<GffFeatureTarget>) -> CommandPaletteState {
+        CommandPaletteState::new(CommandPaletteSnapshot {
+            selectable_sequences: Vec::new(),
+            pinned_sequences: Vec::new(),
+            active_type: libmsa::AlignmentType::Dna,
+            is_reloaded_as_protein: false,
+            visible_columns: vec![0, 1, 2],
+            gff_feature_targets: Some(gff_features),
+        })
+    }
+
+    #[test]
+    fn jump_feature_returns_the_first_matching_feature_target() {
+        let state = palette_state_with_gff_features(vec![
+            GffFeatureTarget {
+                feature_name: "gene-a".into(),
+                target_col: Some(2),
+            },
+            GffFeatureTarget {
+                feature_name: "gene-a".into(),
+                target_col: Some(1),
+            },
+        ]);
+
+        let action = run_jump_feature(&state, "gene-a")
+            .expect("jump-feature should use the first matching feature in GFF order");
+
+        assert_eq!(action, Command::JumpToPosition(2));
+    }
+
+    #[test]
+    fn jump_feature_errors_when_no_gff_is_loaded() {
+        let state = palette_state_with_columns(vec![0, 1, 2]);
+
+        let error =
+            run_jump_feature(&state, "gene-a").expect_err("jump-feature should require a GFF");
+
+        assert_eq!(error.to_string(), "No GFF file loaded");
+    }
+
+    #[test]
+    fn jump_feature_errors_when_the_feature_name_is_missing() {
+        let state = palette_state_with_gff_features(vec![GffFeatureTarget {
+            feature_name: "gene-a".into(),
+            target_col: Some(2),
+        }]);
+
+        let error = run_jump_feature(&state, "gene-b")
+            .expect_err("jump-feature should reject unknown feature names");
+
+        assert_eq!(error.to_string(), "Feature not found: gene-b");
+    }
+
+    #[test]
+    fn jump_feature_uses_the_first_visible_column_inside_the_feature() {
+        let mut model = model_with_sequence(b"-A-CC--G");
+        model.set_gap_filter(Some(0.0)).unwrap();
+        let gff = Gff {
+            features: vec![gff_feature("gene-a", 2..6)],
+        };
+        let state = CommandPaletteState::from_alignment(&model, Some(&gff));
+
+        let action = run_jump_feature(&state, "gene-a")
+            .expect("jump-feature should use the first visible feature column");
+
+        assert_eq!(action, Command::JumpToPosition(1));
+    }
+
+    #[test]
+    fn jump_feature_errors_when_all_feature_columns_are_hidden() {
+        let mut model = model_with_sequence(b"-A-CC--G");
+        model.set_gap_filter(Some(0.0)).unwrap();
+        let gff = Gff {
+            features: vec![gff_feature("gene-a", 5..7)],
+        };
+        let state = CommandPaletteState::from_alignment(&model, Some(&gff));
+
+        let error = run_jump_feature(&state, "gene-a")
+            .expect_err("jump-feature should not jump outside the requested feature");
+
+        assert_eq!(
+            error.to_string(),
+            "No visible column at or after the requested position"
+        );
+    }
+
+    #[test]
+    fn jump_feature_maps_nucleotide_coordinates_into_reloaded_protein_columns() {
+        let mut model = model_with_sequence(b"ATGAAATTT");
+        model.toggle_reload_as_protein(None).unwrap();
+        let gff = Gff {
+            features: vec![gff_feature("gene-a", 3..9)],
+        };
+        let state = CommandPaletteState::from_alignment(&model, Some(&gff));
+
+        let action = run_jump_feature(&state, "gene-a")
+            .expect("jump-feature should map into the current protein view");
+
+        assert_eq!(action, Command::JumpToPosition(1));
     }
 
     #[test]

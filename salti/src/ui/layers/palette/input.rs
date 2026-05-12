@@ -5,9 +5,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use libmsa::AlignmentType;
 
 use crate::command::Command;
+use crate::core::gff::Gff;
 use crate::core::model::AlignmentModel;
 use crate::core::search::{Direction, FilterMode, SearchableList};
 use crate::ui::layers::notification::{Notification, NotificationLevel};
+use crate::ui::panes::gff::FeatureMap;
 
 use super::command_definitions::COMMAND_SPECS;
 use super::command_spec::{PaletteCommand, TypableCommand};
@@ -25,6 +27,21 @@ pub struct VisibleSequence {
     pub sequence_name: Arc<str>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GffFeatureTarget {
+    pub(crate) feature_name: Arc<str>,
+    pub(crate) target_col: Option<usize>,
+}
+
+pub(crate) struct CommandPaletteSnapshot {
+    pub(crate) selectable_sequences: Vec<VisibleSequence>,
+    pub(crate) pinned_sequences: Vec<VisibleSequence>,
+    pub(crate) active_type: AlignmentType,
+    pub(crate) is_reloaded_as_protein: bool,
+    pub(crate) visible_columns: Vec<usize>,
+    pub(crate) gff_feature_targets: Option<Vec<GffFeatureTarget>>,
+}
+
 #[derive(Debug)]
 pub struct CommandPaletteState {
     pub(super) command_input: String,
@@ -37,19 +54,21 @@ pub struct CommandPaletteState {
     pub(super) active_type: AlignmentType,
     pub(super) is_reloaded_as_protein: bool,
     pub(super) visible_columns: Vec<usize>,
+    pub(super) gff_feature_targets: Option<Vec<GffFeatureTarget>>,
 }
 impl CommandPaletteState {
     pub fn empty() -> Self {
-        Self::new(
-            Vec::new(),
-            Vec::new(),
-            libmsa::AlignmentType::Generic,
-            false,
-            Vec::new(),
-        )
+        Self::new(CommandPaletteSnapshot {
+            selectable_sequences: Vec::new(),
+            pinned_sequences: Vec::new(),
+            active_type: libmsa::AlignmentType::Generic,
+            is_reloaded_as_protein: false,
+            visible_columns: Vec::new(),
+            gff_feature_targets: None,
+        })
     }
 
-    pub fn from_alignment(alignment: &AlignmentModel) -> Self {
+    pub fn from_alignment(alignment: &AlignmentModel, gff: Option<&Gff>) -> Self {
         let mut selectable_sequences: Vec<VisibleSequence> = (0..alignment.view().row_count())
             .filter_map(|rel| {
                 let sequence = alignment.view().sequence(rel)?;
@@ -82,22 +101,39 @@ impl CommandPaletteState {
             })
             .collect();
 
-        Self::new(
+        let gff_feature_targets = gff.map(|gff| {
+            let mapping = FeatureMap::for_alignment(alignment);
+            gff.features
+                .iter()
+                .map(|feature| GffFeatureTarget {
+                    feature_name: feature.name.as_str().into(),
+                    target_col: mapping
+                        .map_feature(alignment.view(), feature)
+                        .map(|range| range.start),
+                })
+                .collect()
+        });
+
+        Self::new(CommandPaletteSnapshot {
             selectable_sequences,
             pinned_sequences,
-            alignment.base().active_type(),
-            alignment.is_reloaded_as_protein(),
-            alignment.view().absolute_column_ids().collect(),
-        )
+            active_type: alignment.base().active_type(),
+            is_reloaded_as_protein: alignment.is_reloaded_as_protein(),
+            visible_columns: alignment.view().absolute_column_ids().collect(),
+            gff_feature_targets,
+        })
     }
 
-    pub fn new(
-        selectable_sequences: Vec<VisibleSequence>,
-        pinned_sequences: Vec<VisibleSequence>,
-        active_type: AlignmentType,
-        is_reloaded_as_protein: bool,
-        visible_columns: Vec<usize>,
-    ) -> Self {
+    pub(crate) fn new(init: CommandPaletteSnapshot) -> Self {
+        let CommandPaletteSnapshot {
+            selectable_sequences,
+            pinned_sequences,
+            active_type,
+            is_reloaded_as_protein,
+            visible_columns,
+            gff_feature_targets,
+        } = init;
+
         let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
         command_list.set_items(display_command_names());
         let completion_list = SearchableList::new(FilterMode::Fuzzy, None);
@@ -113,6 +149,7 @@ impl CommandPaletteState {
             active_type,
             is_reloaded_as_protein,
             visible_columns,
+            gff_feature_targets,
         }
     }
 
@@ -415,13 +452,14 @@ mod tests {
 
     #[test]
     fn submit_returns_expected_command() {
-        let mut palette = CommandPaletteState::new(
-            Vec::new(),
-            Vec::new(),
-            libmsa::AlignmentType::Dna,
-            false,
-            vec![0, 3, 4],
-        );
+        let mut palette = CommandPaletteState::new(CommandPaletteSnapshot {
+            selectable_sequences: Vec::new(),
+            pinned_sequences: Vec::new(),
+            active_type: libmsa::AlignmentType::Dna,
+            is_reloaded_as_protein: false,
+            visible_columns: vec![0, 3, 4],
+            gff_feature_targets: None,
+        });
         palette.command_input = "jump-position 2".to_string();
 
         let commands = palette.handle_key_event(key(KeyCode::Enter));
@@ -429,6 +467,29 @@ mod tests {
         assert_eq!(
             commands,
             vec![Command::JumpToPosition(1), Command::CloseOverlay]
+        );
+    }
+
+    #[test]
+    fn submit_jump_feature_alias_returns_the_expected_command() {
+        let mut palette = CommandPaletteState::new(CommandPaletteSnapshot {
+            selectable_sequences: Vec::new(),
+            pinned_sequences: Vec::new(),
+            active_type: libmsa::AlignmentType::Dna,
+            is_reloaded_as_protein: false,
+            visible_columns: vec![0, 1, 2],
+            gff_feature_targets: Some(vec![GffFeatureTarget {
+                feature_name: "gene-a".into(),
+                target_col: Some(2),
+            }]),
+        });
+        palette.command_input = "jf gene-a".to_string();
+
+        let commands = palette.handle_key_event(key(KeyCode::Enter));
+
+        assert_eq!(
+            commands,
+            vec![Command::JumpToPosition(2), Command::CloseOverlay]
         );
     }
 

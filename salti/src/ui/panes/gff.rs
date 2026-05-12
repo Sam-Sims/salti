@@ -147,8 +147,8 @@ impl GffPaneState {
     }
 }
 
-#[derive(Debug, Clone)]
-struct FeatureMap {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FeatureMap {
     total_columns: usize,
     absolute_total_columns: usize,
     offset: usize,
@@ -157,13 +157,15 @@ struct FeatureMap {
 }
 
 impl FeatureMap {
-    fn for_alignment(alignment: &AlignmentModel) -> Self {
+    pub(crate) fn for_alignment(alignment: &AlignmentModel) -> Self {
         let visible_columns = alignment.view().column_count();
         let absolute_total_columns = alignment.base().column_count();
-        let frame_offset = alignment.translation_frame().offset();
-
         if alignment.is_reloaded_as_protein() {
-            Self::protein(visible_columns, absolute_total_columns, frame_offset)
+            Self::protein(
+                visible_columns,
+                absolute_total_columns,
+                alignment.translation_frame().offset(),
+            )
         } else {
             Self::nucleotide(visible_columns, absolute_total_columns)
         }
@@ -187,22 +189,25 @@ impl FeatureMap {
         }
     }
 
-    fn map_feature(&self, view: &libmsa::Alignment, feature: &Feature) -> Option<Range<usize>> {
-        let start = if feature.range.start < self.offset {
-            0
-        } else {
-            (feature.range.start - self.offset) / self.positions_to_col
-        };
-        let end = if feature.range.end <= self.offset {
-            0
-        } else {
-            (feature.range.end - self.offset).div_ceil(self.positions_to_col)
-        };
+    pub(crate) fn map_feature(
+        &self,
+        view: &libmsa::Alignment,
+        feature: &Feature,
+    ) -> Option<Range<usize>> {
+        let absolute_range = self.map_feature_absolute_range(feature)?;
+        view.relative_column_range_intersecting(absolute_range)
+    }
+
+    fn map_feature_absolute_range(&self, feature: &Feature) -> Option<Range<usize>> {
+        let start = feature.range.start.saturating_sub(self.offset) / self.positions_to_col;
+        let end = feature
+            .range
+            .end
+            .saturating_sub(self.offset)
+            .div_ceil(self.positions_to_col);
         let clipped_range =
             start.min(self.absolute_total_columns)..end.min(self.absolute_total_columns);
-        (!clipped_range.is_empty()).then_some(())?;
-
-        view.relative_column_range_intersecting(clipped_range)
+        (!clipped_range.is_empty()).then_some(clipped_range)
     }
 }
 
@@ -251,7 +256,7 @@ fn gff_content_area(area: Rect, total_columns: usize) -> Rect {
 }
 
 fn format_tooltip(feature: &Feature) -> String {
-    let length = feature.range.end.saturating_sub(feature.range.start);
+    let length = feature.range.len();
     format!(
         "{} ({}) — {}\n{}-{} • {} nt",
         feature.name,
@@ -328,11 +333,23 @@ fn render_features(track: &FeatureTrack<'_>, inner: Rect, theme: &ThemeState, bu
     let lines: Vec<Line<'static>> = cells
         .chunks(width)
         .map(|row| {
-            Line::from(
-                row.iter()
-                    .map(|&(ch, style)| Span::styled(ch.to_string(), style))
-                    .collect::<Vec<_>>(),
-            )
+            let mut spans = Vec::new();
+            let mut text = String::new();
+            let mut current_style = row[0].1;
+
+            for &(ch, style) in row {
+                if style != current_style && !text.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut text), current_style));
+                    current_style = style;
+                }
+                text.push(ch);
+            }
+
+            if !text.is_empty() {
+                spans.push(Span::styled(text, current_style));
+            }
+
+            Line::from(spans)
         })
         .collect();
     Paragraph::new(lines)
@@ -405,7 +422,6 @@ fn placed_features<'a>(
     width: usize,
 ) -> Vec<PlacedFeature<'a>> {
     let mut res = Vec::new();
-    let mut previous_span = None;
     let mut alternating_row = 0;
     let mut stack_offset = 0;
 
@@ -414,18 +430,17 @@ fn placed_features<'a>(
             continue;
         };
 
-        let row = match previous_span {
-            Some(previous_span) if previous_span == span => {
-                stack_offset += 1;
-                alternating_row + stack_offset
-            }
-            Some(_) | None => {
-                alternating_row = res.len() % 2;
-                stack_offset = 0;
-                alternating_row
-            }
+        let same_as_previous = res
+            .last()
+            .is_some_and(|placed_feature: &PlacedFeature<'_>| placed_feature.span == span);
+        let row = if same_as_previous {
+            stack_offset += 1;
+            alternating_row + stack_offset
+        } else {
+            alternating_row = res.len() % 2;
+            stack_offset = 0;
+            alternating_row
         };
-        previous_span = Some(span.clone());
         res.push(PlacedFeature { feature, span, row });
     }
 
@@ -439,11 +454,7 @@ fn feature_drawn_span(
     width: usize,
 ) -> Option<Range<usize>> {
     let screen_span = feature_screen_span(feature, view, mapping, width)?;
-    let drawn_width = if 1 < screen_span.end - screen_span.start {
-        screen_span.end - screen_span.start - 1
-    } else {
-        screen_span.end - screen_span.start
-    };
+    let drawn_width = screen_span.len().saturating_sub(1).max(1);
     Some(screen_span.start..screen_span.start + drawn_width)
 }
 
@@ -589,6 +600,17 @@ mod tests {
         assert_eq!(
             mapping.map_feature(model.view(), &feature(3, 8)),
             Some(1..2)
+        );
+    }
+
+    #[test]
+    fn protein_mapping_clips_feature_before_frame_offset() {
+        let model = model_with_len(5);
+        let mapping = FeatureMap::protein(3, 5, 2);
+
+        assert_eq!(
+            mapping.map_feature(model.view(), &feature(0, 4)),
+            Some(0..1)
         );
     }
 

@@ -552,7 +552,7 @@ impl App {
         let palette = self
             .alignment
             .as_ref()
-            .map(CommandPaletteState::from_alignment)
+            .map(|alignment| CommandPaletteState::from_alignment(alignment, self.gff.as_ref()))
             .unwrap_or_else(CommandPaletteState::empty);
         self.ui.layers.open_palette(palette);
     }

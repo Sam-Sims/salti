@@ -384,6 +384,9 @@ mod tests {
         );
 
         assert!(commands.is_empty());
-        assert_eq!(ui.gff_tooltip.as_deref(), Some("gene (gene) — Forward →\n1-10 • 10 nt"));
+        assert_eq!(
+            ui.gff_tooltip.as_deref(),
+            Some("gene (gene) — Forward →\n1-10 • 10 nt")
+        );
     }
 }
