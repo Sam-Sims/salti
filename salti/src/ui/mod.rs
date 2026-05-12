@@ -1,4 +1,3 @@
-pub(crate) mod status_bars;
 pub(crate) mod layers;
 pub(crate) mod layout;
 pub(crate) mod panes;

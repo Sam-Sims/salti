@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{env, path::Path, time::Duration};
 
 use anyhow::{Result, format_err};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
@@ -14,14 +14,16 @@ use tracing::{debug, error, info, warn};
 
 use crate::cli::StartupState;
 use crate::command::Command;
+use crate::core::gff::{self, Gff};
 use crate::core::model::{AlignmentModel, StatsView};
 use crate::core::parser;
 use crate::core::stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult};
 use crate::input;
 use crate::input::MouseTracker;
-use crate::overlay::command_palette::CommandPaletteState;
-use crate::ui::layout::{AppLayout, FrameLayout, pinned_section_layout};
-use crate::ui::notification::{Notification, NotificationLevel};
+use crate::ui::layers::notification::{Notification, NotificationLevel};
+use crate::ui::layers::palette::CommandPaletteState;
+use crate::ui::layout::{AppLayout, FrameLayout, gff_pane_height, pinned_section_layout};
+use crate::ui::panes::gff::feature_row_count;
 use crate::ui::render::render;
 use crate::ui::ui_state::{LoadingState, UiState};
 use crate::update::UpdateResult;
@@ -46,6 +48,7 @@ struct AsyncJob<T> {
 #[derive(Debug)]
 pub(crate) struct App {
     alignment: Option<AlignmentModel>,
+    gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
     stats_cache: ColumnStatsCache,
@@ -64,9 +67,10 @@ impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
         let layout_area = Rect::default();
         let frame_layout = FrameLayout::new(layout_area);
-        let app_layout = AppLayout::new(frame_layout.content_area);
+        let app_layout = AppLayout::new(frame_layout.content_area, 0);
         Self {
             alignment: None,
+            gff: None,
             ui: UiState::new(startup),
             mouse_tracker: MouseTracker::default(),
             stats_cache: ColumnStatsCache::default(),
@@ -127,6 +131,7 @@ impl App {
                             render(
                                 frame,
                                 self.alignment.as_ref(),
+                                self.gff.as_ref(),
                                 &self.ui,
                                 &self.stats_cache,
                                 &self.frame_layout,
@@ -240,7 +245,19 @@ impl App {
 
         self.layout_area = area;
         self.frame_layout = FrameLayout::new(area);
-        self.app_layout = AppLayout::new(self.frame_layout.content_area);
+        // hides the gff pane if we dont have one loaded
+        // if loaded the height is dynamic to the number of rows the features spill on to
+        let gff_height = self.gff.as_ref().map_or(0, |gff| {
+            let Some(alignment) = self.alignment.as_ref() else {
+                return 0;
+            };
+            // create a temp applayout with a gff height of 1 to get a value for width
+            let probe_layout = AppLayout::new(self.frame_layout.content_area, gff_pane_height(1));
+            let width = usize::from(probe_layout.gff_pane_rows.width);
+            gff_pane_height(feature_row_count(gff, alignment, width).max(1))
+        });
+        // set the real layout once we know the height of the gff
+        self.app_layout = AppLayout::new(self.frame_layout.content_area, gff_height);
 
         let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
         let available_sequence_rows = self.app_layout.alignment_pane_sequence_rows.height as usize;
@@ -291,6 +308,7 @@ impl App {
         let commands = input::handle_mouse_event(
             &mut self.mouse_tracker,
             self.alignment.as_ref(),
+            self.gff.as_ref(),
             &mut self.ui,
             &self.frame_layout,
             &self.app_layout,
@@ -339,10 +357,10 @@ impl App {
                 self.open_command_palette();
             }
             Command::CloseOverlay => {
-                self.ui.overlay.close();
+                self.ui.layers.close_active();
             }
             Command::ToggleMinimap => {
-                self.ui.overlay.toggle_minimap();
+                self.ui.layers.toggle_minimap();
             }
             Command::SetTheme(theme_id) => {
                 self.ui.set_theme(theme_id);
@@ -354,6 +372,17 @@ impl App {
                 self.clear_mouse_selection();
                 self.start_load_job(input);
             }
+            Command::LoadGff { path } => match gff::parse_gff(Path::new(&path)) {
+                Ok(model) => {
+                    self.gff = Some(model);
+                    self.ui.gff_pane = Default::default();
+                    self.force_relayout();
+                    self.show_info(format!("Loaded GFF file: {path}"));
+                }
+                Err(error) => {
+                    return Err(error);
+                }
+            },
             Command::CheckForUpdate => {
                 self.spawn_update_check(false);
             }
@@ -485,8 +514,9 @@ impl App {
                 let viewport_target = self.reload_as_protein_viewport_target(frame);
                 self.alignment_mut()?.toggle_reload_as_protein(frame)?;
                 self.clear_mouse_selection();
-                self.on_view_rebuilt();
+                self.force_relayout();
                 self.jump_to_reloaded_viewport_target(viewport_target);
+                self.invalidate_all_stats();
                 return Ok(());
             }
             Command::SetTranslationFrame(frame) => {
@@ -524,11 +554,11 @@ impl App {
             .as_ref()
             .map(CommandPaletteState::from_alignment)
             .unwrap_or_else(CommandPaletteState::empty);
-        self.ui.overlay.open_palette(palette);
+        self.ui.layers.open_palette(palette);
     }
 
     fn on_view_rebuilt(&mut self) {
-        self.refresh_viewport_bounds();
+        self.force_relayout();
         self.invalidate_all_stats();
     }
 
@@ -592,6 +622,12 @@ impl App {
             alignment.view().column_count(),
             alignment.base().max_id_len(),
         );
+    }
+
+    fn force_relayout(&mut self) {
+        let area = self.layout_area;
+        self.layout_area = Rect::default();
+        self.update_layout(area);
     }
 
     fn alignment_mut(&mut self) -> Result<&mut AlignmentModel> {

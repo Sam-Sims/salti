@@ -1,11 +1,11 @@
 use crate::{
-    core::{model::AlignmentModel, stats_cache::ColumnStatsCache},
-    overlay::render::render_overlays,
+    core::{gff::Gff, model::AlignmentModel, stats_cache::ColumnStatsCache},
+    ui::layers::render::render_overlays,
     ui::{
         layout::{AppLayout, FrameLayout},
         panes::alignment::AlignmentPane,
         panes::consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
-        panes::gff::{FeatureMap, render as render_gff_pane},
+        panes::gff::{GffInfoPane, GffPane},
         panes::sequence_id::SequenceIdPane,
         panes::status_bars::render_frame,
         selection::render_mouse_selection,
@@ -14,196 +14,9 @@ use crate::{
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Color::Rgb;
 use ratatui::style::{Styled, Stylize};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
-
-const SELECTION_ROW_HIGHLIGHT_ALPHA: f32 = 0.3;
-const SELECTION_ROW_TINT_ALPHA: f32 = 0.22;
-const SELECTION_COL_HIGHLIGHT_ALPHA: f32 = 0.28;
-
-fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
-    let from = f32::from(from);
-    let to = f32::from(to);
-    (from + (to - from) * alpha).round().clamp(0.0, 255.0) as u8
-}
-
-fn blend_background(
-    base: ratatui::style::Color,
-    tint: ratatui::style::Color,
-    alpha: f32,
-) -> ratatui::style::Color {
-    match (base, tint) {
-        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Rgb(
-            interpolate(red, red_tint, alpha),
-            interpolate(green, green_tint, alpha),
-            interpolate(blue, blue_tint, alpha),
-        ),
-        _ => tint,
-    }
-}
-
-fn shader(
-    f: &mut Frame,
-    clip_area: Rect,
-    tint_area: Rect,
-    tint: ratatui::style::Color,
-    alpha: f32,
-) {
-    if alpha <= 0.0 || clip_area.width == 0 || clip_area.height == 0 {
-        return;
-    }
-
-    let x_start = tint_area.x.max(clip_area.x);
-    let x_end = tint_area
-        .x
-        .saturating_add(tint_area.width)
-        .min(clip_area.x.saturating_add(clip_area.width));
-    let y_start = tint_area.y.max(clip_area.y);
-    let y_end = tint_area
-        .y
-        .saturating_add(tint_area.height)
-        .min(clip_area.y.saturating_add(clip_area.height));
-    if x_start >= x_end || y_start >= y_end {
-        return;
-    }
-
-    let buffer = f.buffer_mut();
-    for y in y_start..y_end {
-        for x in x_start..x_end {
-            if let Some(cell) = buffer.cell_mut((x, y)) {
-                cell.set_bg(blend_background(cell.bg, tint, alpha));
-            }
-        }
-    }
-}
-
-fn render_mouse_selection(
-    f: &mut Frame,
-    layout: &AppLayout,
-    alignment: &AlignmentModel,
-    ui: &UiState,
-    viewport: &crate::core::Viewport,
-) {
-    let Some(selection) = ui.selection else {
-        return;
-    };
-
-    let window = viewport.window();
-    let id_inner_area = Block::bordered().inner(layout.sequence_id_pane);
-    let sequence_rows_area = layout.alignment_pane_sequence_rows;
-    let id_content_y = id_inner_area.y + RULER_HEIGHT_ROWS;
-    let id_end_x = id_inner_area.x.saturating_add(id_inner_area.width);
-    let sequence_end_x = sequence_rows_area
-        .x
-        .saturating_add(sequence_rows_area.width);
-    let band_layout = pinned_section_layout(
-        alignment.rows().pinned().len(),
-        sequence_rows_area.height as usize,
-    );
-    let (row_min, row_max) = selection_row_bounds(selection);
-
-    for (row_offset, &absolute_row) in alignment
-        .rows()
-        .pinned()
-        .iter()
-        .take(band_layout.pinned_rendered)
-        .enumerate()
-    {
-        if !(row_min..=row_max).contains(&absolute_row) {
-            continue;
-        }
-
-        let row_y = sequence_rows_area.y + row_offset as u16;
-        shader(
-            f,
-            id_inner_area,
-            Rect::new(
-                id_inner_area.x,
-                id_content_y + row_offset as u16,
-                id_end_x.saturating_sub(id_inner_area.x),
-                1,
-            ),
-            ui.theme.theme.accent,
-            SELECTION_ROW_HIGHLIGHT_ALPHA,
-        );
-        shader(
-            f,
-            sequence_rows_area,
-            Rect::new(
-                sequence_rows_area.x,
-                row_y,
-                sequence_end_x.saturating_sub(sequence_rows_area.x),
-                1,
-            ),
-            ui.theme.theme.surface_bg,
-            SELECTION_ROW_TINT_ALPHA,
-        );
-    }
-
-    let scroll_start_y = sequence_rows_area.y
-        + band_layout.pinned_rendered as u16
-        + band_layout.divider_height as u16;
-    for (row_offset, relative_row) in window.row_range.clone().enumerate() {
-        let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
-            continue;
-        };
-        if !(row_min..=row_max).contains(&absolute_row) {
-            continue;
-        }
-
-        let row_y = scroll_start_y + row_offset as u16;
-        shader(
-            f,
-            id_inner_area,
-            Rect::new(
-                id_inner_area.x,
-                id_content_y
-                    + band_layout.pinned_rendered as u16
-                    + band_layout.divider_height as u16
-                    + row_offset as u16,
-                id_end_x.saturating_sub(id_inner_area.x),
-                1,
-            ),
-            ui.theme.theme.accent,
-            SELECTION_ROW_HIGHLIGHT_ALPHA,
-        );
-        shader(
-            f,
-            sequence_rows_area,
-            Rect::new(
-                sequence_rows_area.x,
-                row_y,
-                sequence_end_x.saturating_sub(sequence_rows_area.x),
-                1,
-            ),
-            ui.theme.theme.surface_bg,
-            SELECTION_ROW_TINT_ALPHA,
-        );
-    }
-
-    if let Some(visible_col_range) =
-        selection_visible_col_range(selection, alignment, &window.col_range)
-    {
-        let start_x =
-            sequence_rows_area.x + (visible_col_range.start - window.col_range.start) as u16;
-        let end_x_exclusive =
-            sequence_rows_area.x + (visible_col_range.end - window.col_range.start) as u16;
-        shader(
-            f,
-            sequence_rows_area,
-            Rect::new(
-                start_x,
-                sequence_rows_area.y,
-                end_x_exclusive.saturating_sub(start_x),
-                sequence_rows_area.height,
-            ),
-            ui.theme.theme.panel_bg,
-            SELECTION_COL_HIGHLIGHT_ALPHA,
-        );
-    }
-}
+use ratatui::widgets::Paragraph;
 
 fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
     let theme = &ui.theme;
@@ -262,6 +75,7 @@ fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
 pub fn render(
     f: &mut Frame,
     alignment: Option<&AlignmentModel>,
+    gff: Option<&Gff>,
     ui: &UiState,
     stats_cache: &ColumnStatsCache,
     frame_layout: &FrameLayout,
@@ -290,6 +104,25 @@ pub fn render(
     };
 
     let window = ui.viewport.window();
+
+    if let Some(gff) = gff {
+        f.render_widget(
+            GffInfoPane {
+                tooltip: ui.gff_tooltip.as_deref(),
+                theme: &ui.theme,
+            },
+            layout.gff_info_pane,
+        );
+        f.render_widget(
+            GffPane {
+                gff,
+                alignment,
+                viewport_col_range: &window.col_range,
+                theme: &ui.theme,
+            },
+            layout.gff_pane,
+        );
+    }
 
     f.render_widget(
         SequenceIdPane {
@@ -343,12 +176,12 @@ mod tests {
     use crate::cli::StartupState;
     use crate::core::model::{DiffMode, StatsView};
     use crate::core::stats_cache::StatsJobResult;
-    use crate::overlay::command_palette::CommandPaletteState;
-    use crate::ui::notification::{Notification, NotificationLevel};
+    use crate::ui::layers::notification::{Notification, NotificationLevel};
+    use crate::ui::layers::palette::CommandPaletteState;
     use crate::ui::ui_state::MouseSelection;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
-    use ratatui::Terminal;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -413,11 +246,19 @@ mod tests {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
         let frame_layout = FrameLayout::new(area);
-        let layout = AppLayout::new(frame_layout.content_area);
+        let layout = AppLayout::new(frame_layout.content_area, 0);
 
         terminal
             .draw(|frame| {
-                render(frame, alignment, ui, stats_cache, &frame_layout, &layout);
+                render(
+                    frame,
+                    alignment,
+                    None,
+                    ui,
+                    stats_cache,
+                    &frame_layout,
+                    &layout,
+                );
             })
             .unwrap();
 
@@ -452,7 +293,7 @@ mod tests {
 
     fn set_viewport(ui: &mut UiState, alignment: &AlignmentModel, area: Rect) {
         let frame_layout = FrameLayout::new(area);
-        let layout = AppLayout::new(frame_layout.content_area);
+        let layout = AppLayout::new(frame_layout.content_area, 0);
         ui.viewport.update_dimensions(
             layout.alignment_pane_sequence_rows.width as usize,
             layout.alignment_pane_sequence_rows.height as usize,
@@ -503,7 +344,10 @@ mod tests {
         let mut ui = ui_state();
         set_viewport(&mut ui, &alignment, area);
 
-        insta::assert_snapshot!("render_loaded_basic", render_text(Some(&alignment), &ui, &metrics, area));
+        insta::assert_snapshot!(
+            "render_loaded_basic",
+            render_text(Some(&alignment), &ui, &metrics, area)
+        );
 
         let mut selection_ui = ui_state();
         set_viewport(&mut selection_ui, &alignment, area);
@@ -528,9 +372,15 @@ mod tests {
             raw("seq3", b"CATCATCATCATGATCAT"),
         ]);
         alignment.set_reference(0).unwrap();
-        alignment.set_translation(Some(libmsa::ReadingFrame::Frame1)).unwrap();
+        alignment
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .unwrap();
         alignment.diff_mode = DiffMode::Reference;
-        let metrics = metrics_with(StatsView::Translated(libmsa::ReadingFrame::Frame1), b"HHHHHH", Some(1.0));
+        let metrics = metrics_with(
+            StatsView::Translated(libmsa::ReadingFrame::Frame1),
+            b"HHHHHH",
+            Some(1.0),
+        );
         let mut ui = ui_state();
         set_viewport(&mut ui, &alignment, area);
 
@@ -571,7 +421,7 @@ mod tests {
         let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
         let mut ui = ui_state();
         set_viewport(&mut ui, &alignment, area);
-        ui.overlay.open_palette(CommandPaletteState::empty());
+        ui.layers.open_palette(CommandPaletteState::empty());
 
         insta::assert_snapshot!(
             "render_command_palette",
@@ -587,10 +437,14 @@ mod tests {
             raw("seq2", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
             raw("seq3", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
         ]);
-        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCATCATCATCATCATCATCAT", Some(1.0));
+        let metrics = metrics_with(
+            StatsView::Raw,
+            b"CATCATCATCATCATCATCATCATCATCATCATCAT",
+            Some(1.0),
+        );
         let mut ui = ui_state();
         set_viewport(&mut ui, &alignment, area);
-        ui.overlay.toggle_minimap();
+        ui.layers.toggle_minimap();
 
         insta::assert_snapshot!(
             "render_minimap",

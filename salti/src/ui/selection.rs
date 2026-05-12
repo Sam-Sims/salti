@@ -17,10 +17,6 @@ const SELECTION_ROW_HIGHLIGHT_ALPHA: f32 = 0.3;
 const SELECTION_ROW_TINT_ALPHA: f32 = 0.22;
 const SELECTION_COL_HIGHLIGHT_ALPHA: f32 = 0.28;
 
-/// Maps a screen-space mouse position to `(absolute_row, absolute_column)`.
-///
-/// Returns `None` when the click falls outside `sequence_rows_area`, on the
-/// pinned-row divider, or beyond the alignment bounds.
 pub fn selection_point_crosshair(
     alignment: &AlignmentModel,
     viewport: &Viewport,
@@ -193,9 +189,6 @@ pub fn render_mouse_selection(
     }
 }
 
-/// Converts a selection (absolute columns) to a visible-column range clipped
-/// to `visible_col_range`. In translation mode, expands to full codon
-/// boundaries. Returns `None` when the selection does not overlap the viewport.
 pub fn selection_visible_col_range(
     selection: MouseSelection,
     alignment: &AlignmentModel,
@@ -510,11 +503,9 @@ mod tests {
         viewport.set_bounds(3, 4, 2);
 
         let area = Rect::new(0, 0, 4, 3);
-        // No pinned rows, so row 0 maps to absolute row 0.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
         assert_eq!(result, Some((0, 0)));
 
-        // Row 2, col 3.
         let result = selection_point_crosshair(&model, &viewport, area, 3, 2);
         assert_eq!(result, Some((2, 3)));
     }
@@ -523,25 +514,18 @@ mod tests {
     fn crosshair_handles_pinned_band() {
         let mut model = alignment_model(&["s1", "s2", "s3", "s4"]);
         model.pin(0).expect("should pin");
-        // View now has rows [1, 2, 3] (row 0 excluded).
-        // Pinned band: 1 row (row 0).
-        // Divider: 1 row.
-        // Scrollable: remaining rows.
 
         let mut viewport = Viewport::default();
         viewport.update_dimensions(4, 2, 2);
         viewport.set_bounds(3, 4, 2);
 
         let area = Rect::new(0, 0, 4, 4);
-        // Row offset 0 -> pinned row 0 -> absolute row 0.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
         assert_eq!(result, Some((0, 0)));
 
-        // Row offset 1 -> divider -> None.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 1);
         assert!(result.is_none());
 
-        // Row offset 2 -> scrollable row 0 -> view relative 0 -> absolute row 1.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 2);
         assert_eq!(result, Some((1, 0)));
     }

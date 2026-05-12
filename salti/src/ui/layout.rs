@@ -68,11 +68,17 @@ pub struct AppLayout {
     pub alignment_pane_sequence_rows: Rect,
     pub consensus_sequence_id_pane: Rect,
     pub consensus_alignment_pane: Rect,
+    pub gff_info_pane: Rect,
+    pub gff_pane: Rect,
+    pub gff_pane_rows: Rect,
 }
 
 impl AppLayout {
-    pub fn new(content_area: Rect) -> Self {
-        let [alignment_area, consensus_area] = content_area
+    pub fn new(content_area: Rect, gff_height: u16) -> Self {
+        let [gff_area, main_area] =
+            content_area.layout(&vertical![==gff_height, *=1].spacing(Spacing::Overlap(1)));
+
+        let [alignment_area, consensus_area] = main_area
             .layout(&vertical![*=1, ==CONSENSUS_PANE_HEIGHT_ROWS].spacing(Spacing::Overlap(1)));
 
         let [sequence_id_pane_area, alignment_pane_area] = alignment_area.layout(
@@ -88,12 +94,32 @@ impl AppLayout {
             .inner(alignment_pane_area)
             .layout(&vertical![==RULER_HEIGHT_ROWS, *=1]);
 
+        let [gff_info_pane_area, gff_pane_area] = gff_area.layout(
+            &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
+        );
+        let gff_pane_rows = if gff_pane_area.width > 2 && gff_pane_area.height > 2 {
+            ratatui::widgets::Block::bordered().inner(gff_pane_area)
+        } else {
+            Rect::default()
+        };
+
         Self {
             sequence_id_pane: sequence_id_pane_area,
             alignment_pane: alignment_pane_area,
             alignment_pane_sequence_rows: sequence_rows_area,
             consensus_sequence_id_pane: consensus_sequence_id_pane_area,
             consensus_alignment_pane: consensus_alignment_pane_area,
+            gff_info_pane: gff_info_pane_area,
+            gff_pane: gff_pane_area,
+            gff_pane_rows,
         }
     }
+}
+
+pub fn gff_pane_height(feature_row_count: usize) -> u16 {
+    if feature_row_count == 0 {
+        return 0;
+    }
+    let inner = u16::try_from(feature_row_count).unwrap_or(u16::MAX.saturating_sub(3));
+    inner.saturating_add(3)
 }

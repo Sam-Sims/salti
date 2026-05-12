@@ -21,7 +21,6 @@ pub(crate) struct SequenceIdPane<'a> {
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::bordered()
-            .title("Sequence Name")
             .border_style(self.theme.styles.border)
             .style(self.theme.styles.base_block)
             .merge_borders(MergeStrategy::Exact);

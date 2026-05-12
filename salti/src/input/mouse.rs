@@ -1,25 +1,20 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::command::Command;
+use crate::core::gff::Gff;
 use crate::core::model::AlignmentModel;
 use crate::input::route::{MouseRoute, route_mouse};
-use crate::overlay::minimap::MinimapState;
-use crate::overlay::overlay_state::ActiveOverlay;
+use crate::ui::layers::minimap::MinimapState;
+use crate::ui::layers::state::ActiveLayer;
 use crate::ui::layout::{AppLayout, FrameLayout};
+use crate::ui::panes::gff;
 use crate::ui::selection::selection_point_crosshair;
 use crate::ui::ui_state::{MouseSelection, UiState};
 
-/// Snapshot of a mouse click position in absolute coordinates.
-///
-/// In translation mode, `column` and `end_column` span the full codon
-/// (three nucleotide columns). In raw mode they are identical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MouseAnchor {
-    /// Absolute row index.
     sequence_id: usize,
-    /// Absolute column of the codon/cell start.
     column: usize,
-    /// Absolute column of the codon/cell end (inclusive).
     end_column: usize,
 }
 
@@ -69,23 +64,25 @@ impl MouseTracker {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_mouse_event(
     tracker: &mut MouseTracker,
     alignment: Option<&AlignmentModel>,
+    gff: Option<&Gff>,
     ui: &mut UiState,
     frame_layout: &FrameLayout,
     app_layout: &AppLayout,
     mouse: MouseEvent,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
-    match route_mouse(ui, frame_layout, mouse) {
+    ui.gff_tooltip = None;
+
+    match route_mouse(ui, frame_layout, app_layout, mouse, gff.is_some()) {
         MouseRoute::Palette => (),
         MouseRoute::Minimap => {
             if let Some(alignment) = alignment {
                 let viewport_col_range = ui.viewport.window().col_range;
-                if let Some(ActiveOverlay::Minimap(minimap_state)) =
-                    ui.overlay.active_overlay.as_mut()
-                {
+                if let Some(ActiveLayer::Minimap(minimap_state)) = ui.layers.active.as_mut() {
                     handle_minimap_mouse_event(
                         &mut commands,
                         alignment,
@@ -95,6 +92,11 @@ pub(crate) fn handle_mouse_event(
                         mouse,
                     );
                 }
+            }
+        }
+        MouseRoute::GffPane => {
+            if let (Some(gff), Some(alignment)) = (gff, alignment) {
+                handle_gff_mouse_event(&mut commands, gff, alignment, ui, app_layout, mouse);
             }
         }
         MouseRoute::Alignment => {
@@ -131,6 +133,27 @@ fn handle_minimap_mouse_event(
     }
 }
 
+fn handle_gff_mouse_event(
+    commands: &mut Vec<Command>,
+    gff: &Gff,
+    alignment: &AlignmentModel,
+    ui: &mut UiState,
+    app_layout: &AppLayout,
+    mouse: MouseEvent,
+) {
+    let viewport_col_range = ui.viewport.window().col_range;
+    let gff_pane_rows = app_layout.gff_pane_rows;
+
+    if let Some(cmd) =
+        ui.gff_pane
+            .handle_mouse(mouse, gff_pane_rows, &viewport_col_range, alignment)
+    {
+        commands.push(cmd);
+    }
+
+    ui.gff_tooltip = gff::tooltip_at(gff, alignment, gff_pane_rows, mouse.column, mouse.row);
+}
+
 fn handle_alignment_mouse_event(
     commands: &mut Vec<Command>,
     tracker: &mut MouseTracker,
@@ -156,8 +179,7 @@ fn handle_alignment_mouse_event(
                 tracker.clear_anchors();
                 return;
             };
-            let store_anchor = alignment.translation().is_some()
-                || mouse.modifiers.contains(KeyModifiers::CONTROL);
+            let store_anchor = mouse.modifiers.contains(KeyModifiers::CONTROL);
 
             tracker.box_anchor = if store_anchor { Some(anchor) } else { None };
             ui.selection = Some(selection_from_anchors(anchor, anchor));
@@ -238,13 +260,24 @@ mod tests {
 
     use super::*;
     use crate::cli::StartupState;
-    use crate::overlay::command_palette::CommandPaletteState;
+    use crate::ui::layers::palette::CommandPaletteState;
     use crate::ui::layout::{AppLayout, FrameLayout};
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
             id: id.to_string(),
             sequence: sequence.to_vec(),
+        }
+    }
+
+    fn gff(start: usize, end: usize) -> Gff {
+        Gff {
+            features: vec![crate::core::gff::Feature {
+                name: "gene".to_string(),
+                kind: crate::core::gff::FeatureType::Gene,
+                range: start..end,
+                strand: crate::core::gff::Strand::Forward,
+            }],
         }
     }
 
@@ -259,9 +292,9 @@ mod tests {
     fn palette_route_masks_mouse_commands() {
         let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
-        ui.overlay.open_palette(CommandPaletteState::empty());
+        ui.layers.open_palette(CommandPaletteState::empty());
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area);
+        let app_layout = AppLayout::new(frame_layout.content_area, 0);
         let mouse = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 10,
@@ -271,6 +304,7 @@ mod tests {
 
         let commands = handle_mouse_event(
             &mut tracker,
+            None,
             None,
             &mut ui,
             &frame_layout,
@@ -295,10 +329,10 @@ mod tests {
         let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area);
+        let app_layout = AppLayout::new(frame_layout.content_area, 0);
         ui.viewport.update_dimensions(78, 10, 20);
         ui.viewport.set_bounds(2, 200, 4);
-        ui.overlay.toggle_minimap();
+        ui.layers.toggle_minimap();
         let mouse = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: frame_layout.overlay_area.x + frame_layout.overlay_area.width - 2,
@@ -309,6 +343,7 @@ mod tests {
         let commands = handle_mouse_event(
             &mut tracker,
             Some(&model),
+            None,
             &mut ui,
             &frame_layout,
             &app_layout,
@@ -316,5 +351,39 @@ mod tests {
         );
 
         assert!(matches!(commands.as_slice(), [Command::JumpToPosition(_)]));
+    }
+
+    #[test]
+    fn moved_event_in_gff_pane_sets_tooltip_without_mouse_down() {
+        let alignment = libmsa::Alignment::new(vec![raw("row1", &[b'A'; 20])])
+            .expect("alignment should be valid");
+        let model = crate::core::model::AlignmentModel::new(alignment)
+            .expect("alignment model should be valid");
+        let gff = gff(0, 10);
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(frame_layout.content_area, 4);
+        ui.viewport.update_dimensions(20, 10, 20);
+        ui.viewport.set_bounds(1, 20, 4);
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: app_layout.gff_pane_rows.x,
+            row: app_layout.gff_pane_rows.y,
+            modifiers: KeyModifiers::empty(),
+        };
+
+        let commands = handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            Some(&gff),
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            mouse,
+        );
+
+        assert!(commands.is_empty());
+        assert_eq!(ui.gff_tooltip.as_deref(), Some("gene (gene) — Forward →\n1-10 • 10 nt"));
     }
 }

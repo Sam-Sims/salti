@@ -33,7 +33,6 @@ pub(crate) struct AlignmentPane<'a> {
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::bordered()
-            .title("Alignment")
             .border_style(self.theme.styles.border)
             .style(self.theme.styles.base_block)
             .merge_borders(MergeStrategy::Exact);
