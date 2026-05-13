@@ -115,10 +115,10 @@ pub fn parse_gff(path: &Path) -> Result<Gff> {
 fn extract_name(record: &gff::feature::RecordBuf) -> String {
     const POSSIBLE_NAMES: [&[u8]; 4] = [b"Name", b"ID", b"gene_name", b"product"];
 
-    // try get names in order of preference, or falls back to record type so something is shown
+    // try get names in order of preference, or falls back to record type so at at least something is shown
     POSSIBLE_NAMES
         .iter()
-        .filter_map(|tag| record.attributes().get(*tag))
+        .filter_map(|tag| record.attributes().get(tag))
         .filter_map(|value| value.as_string())
         .find(|name| !name.is_empty())
         .map_or_else(|| record.ty().to_string(), |name| name.to_string())

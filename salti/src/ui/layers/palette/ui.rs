@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::Styled,
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
@@ -238,14 +238,18 @@ impl CommandPaletteState {
     }
 
     fn render_input(&self, f: &mut Frame, area: Rect, theme: &crate::config::theme::ThemeStyles) {
-        let input = match self.phase {
-            PaletteState::Command => format!(":{}", self.command_input),
-            PaletteState::Argument { .. } => {
-                format!(":{} {}", self.command_input, self.argument_input)
-            }
-        };
+        let mut spans = vec![
+            Span::styled(":", theme.warning),
+            Span::styled(self.command_input.as_str(), theme.warning),
+        ];
 
-        let line = Line::from(format!("{input}█").set_style(theme.warning));
+        if matches!(self.phase, PaletteState::Argument { .. }) {
+            spans.push(Span::styled(" ", theme.warning));
+            spans.push(Span::styled(self.argument_input.as_str(), theme.warning));
+        }
+
+        spans.push(Span::styled("█", theme.warning));
+        let line = Line::from(spans);
 
         f.render_widget(Paragraph::new(line).style(theme.base_block), area);
     }

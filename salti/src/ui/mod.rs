@@ -1,3 +1,4 @@
+pub(crate) mod features;
 pub(crate) mod layers;
 pub(crate) mod layout;
 pub(crate) mod panes;

@@ -17,13 +17,13 @@ use crate::{
         model::AlignmentModel,
     },
     input::movement::HorizontalDrag,
-    ui::ui_state::ThemeState,
+    ui::{
+        features::{DisplayFeature, display_features, feature_style},
+        ui_state::ThemeState,
+    },
 };
 
 const MIN_LABEL_WIDTH: usize = 2;
-const NUCLEOTIDE_POSITIONS_PER_COL: usize = 1;
-const PROTEIN_POSITIONS_PER_COL: usize = 3;
-
 pub(crate) struct GffPane<'a> {
     pub(crate) gff: &'a Gff,
     pub(crate) alignment: &'a AlignmentModel,
@@ -147,70 +147,6 @@ impl GffPaneState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FeatureMap {
-    total_columns: usize,
-    absolute_total_columns: usize,
-    offset: usize,
-    // proteins use three nucleotide positions per displayed column; nucleotides use one.
-    positions_to_col: usize,
-}
-
-impl FeatureMap {
-    pub(crate) fn for_alignment(alignment: &AlignmentModel) -> Self {
-        let visible_columns = alignment.view().column_count();
-        let absolute_total_columns = alignment.base().column_count();
-        if alignment.is_reloaded_as_protein() {
-            Self::protein(
-                visible_columns,
-                absolute_total_columns,
-                alignment.translation_frame().offset(),
-            )
-        } else {
-            Self::nucleotide(visible_columns, absolute_total_columns)
-        }
-    }
-
-    fn nucleotide(total_columns: usize, absolute_total_columns: usize) -> Self {
-        Self {
-            total_columns,
-            absolute_total_columns,
-            offset: 0,
-            positions_to_col: NUCLEOTIDE_POSITIONS_PER_COL,
-        }
-    }
-
-    fn protein(total_columns: usize, absolute_total_columns: usize, frame_offset: usize) -> Self {
-        Self {
-            total_columns,
-            absolute_total_columns,
-            offset: frame_offset,
-            positions_to_col: PROTEIN_POSITIONS_PER_COL,
-        }
-    }
-
-    pub(crate) fn map_feature(
-        &self,
-        view: &libmsa::Alignment,
-        feature: &Feature,
-    ) -> Option<Range<usize>> {
-        let absolute_range = self.map_feature_absolute_range(feature)?;
-        view.relative_column_range_intersecting(absolute_range)
-    }
-
-    fn map_feature_absolute_range(&self, feature: &Feature) -> Option<Range<usize>> {
-        let start = feature.range.start.saturating_sub(self.offset) / self.positions_to_col;
-        let end = feature
-            .range
-            .end
-            .saturating_sub(self.offset)
-            .div_ceil(self.positions_to_col);
-        let clipped_range =
-            start.min(self.absolute_total_columns)..end.min(self.absolute_total_columns);
-        (!clipped_range.is_empty()).then_some(clipped_range)
-    }
-}
-
 pub(crate) fn tooltip_at(
     gff: &Gff,
     alignment: &AlignmentModel,
@@ -271,12 +207,8 @@ fn format_tooltip(feature: &Feature) -> String {
 fn render_features(track: &FeatureTrack<'_>, inner: Rect, theme: &ThemeState, buf: &mut Buffer) {
     let width = usize::from(inner.width);
     let max_row = usize::from(inner.height);
-    let foreground = theme.theme.sequence.foreground;
-    let dna = theme.theme.sequence.dna;
-    let palette = [dna.a, dna.t, dna.c, dna.g];
     let blank = (' ', theme.styles.base_block);
     let mut cells = vec![blank; width * max_row];
-    let mut feature_idx = 0;
 
     for placed_feature in track.placed_features() {
         if placed_feature.row >= max_row {
@@ -284,18 +216,17 @@ fn render_features(track: &FeatureTrack<'_>, inner: Rect, theme: &ThemeState, bu
         }
 
         let feature = placed_feature.feature;
-        let feature_span = placed_feature.span.clone();
-        let colour = palette[feature_idx % palette.len()];
-        let feature_style = theme.styles.base_block.bg(colour);
-        let text_style = feature_style.fg(foreground);
-        feature_idx += 1;
+        let feature_span = &placed_feature.span;
+        let styles = feature_style(theme, placed_feature.colour_idx);
+        let feature_style = styles.background;
+        let text_style = styles.text;
 
-        for x in feature_span.clone() {
+        for x in feature_span.start..feature_span.end {
             let idx = placed_feature.row * width + x;
             cells[idx] = (' ', feature_style);
         }
 
-        let available = feature_span.end - feature_span.start;
+        let available = feature_span.len();
         let (label_x, label_width, strand_arrow) = match feature.strand {
             Strand::Forward if 0 < available => (
                 feature_span.start,
@@ -366,18 +297,19 @@ struct FeatureTrack<'a> {
 
 impl<'a> FeatureTrack<'a> {
     fn for_alignment(gff: &'a Gff, alignment: &AlignmentModel, available_width: usize) -> Self {
-        let mapping = FeatureMap::for_alignment(alignment);
-        let width = available_width.min(mapping.total_columns);
-        let placed_features = placed_features(gff, alignment.view(), &mapping, width);
+        let total_columns = alignment.view().column_count();
+        let width = available_width.min(total_columns);
+        let display_features = display_features(gff, alignment);
+        let placed_features = placed_features(&display_features, width, total_columns);
         Self {
             placed_features,
-            total_columns: mapping.total_columns,
+            total_columns,
             width,
         }
     }
 
     fn total_columns_for_alignment(alignment: &AlignmentModel) -> usize {
-        FeatureMap::for_alignment(alignment).total_columns
+        alignment.view().column_count()
     }
 
     fn total_columns(&self) -> usize {
@@ -413,20 +345,20 @@ struct PlacedFeature<'a> {
     feature: &'a Feature,
     span: Range<usize>,
     row: usize,
+    colour_idx: usize,
 }
 
 fn placed_features<'a>(
-    gff: &'a Gff,
-    view: &libmsa::Alignment,
-    mapping: &FeatureMap,
+    display_features: &[DisplayFeature<'a>],
     width: usize,
+    total_columns: usize,
 ) -> Vec<PlacedFeature<'a>> {
     let mut res = Vec::new();
     let mut alternating_row = 0;
     let mut stack_offset = 0;
 
-    for feature in &gff.features {
-        let Some(span) = feature_drawn_span(feature, view, mapping, width) else {
+    for display_feature in display_features {
+        let Some(span) = feature_drawn_span(display_feature, width, total_columns) else {
             continue;
         };
 
@@ -441,37 +373,43 @@ fn placed_features<'a>(
             stack_offset = 0;
             alternating_row
         };
-        res.push(PlacedFeature { feature, span, row });
+        res.push(PlacedFeature {
+            feature: display_feature.feature,
+            span,
+            row,
+            colour_idx: display_feature.colour_idx,
+        });
     }
 
     res
 }
 
 fn feature_drawn_span(
-    feature: &Feature,
-    view: &libmsa::Alignment,
-    mapping: &FeatureMap,
+    display_feature: &DisplayFeature<'_>,
     width: usize,
+    total_columns: usize,
 ) -> Option<Range<usize>> {
-    let screen_span = feature_screen_span(feature, view, mapping, width)?;
+    let screen_span = feature_screen_span(display_feature, width, total_columns)?;
     let drawn_width = screen_span.len().saturating_sub(1).max(1);
     Some(screen_span.start..screen_span.start + drawn_width)
 }
 
 fn feature_screen_span(
-    feature: &Feature,
-    view: &libmsa::Alignment,
-    mapping: &FeatureMap,
+    display_feature: &DisplayFeature<'_>,
     width: usize,
+    total_columns: usize,
 ) -> Option<Range<usize>> {
-    let total_columns = mapping.total_columns;
     if width == 0 || total_columns == 0 {
         return None;
     }
 
-    let mapped_span = mapping.map_feature(view, feature)?;
-    let x_start = mapped_span.start.saturating_mul(width) / total_columns;
-    let x_end = mapped_span
+    let x_start = display_feature
+        .relative_col_range
+        .start
+        .saturating_mul(width)
+        / total_columns;
+    let x_end = display_feature
+        .relative_col_range
         .end
         .saturating_mul(width)
         .div_ceil(total_columns)

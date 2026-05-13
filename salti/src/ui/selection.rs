@@ -5,7 +5,7 @@ use ratatui::{Frame, layout::Rect, style::Color::Rgb, widgets::Block};
 use crate::{
     core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},
     ui::{
-        layout::{AppLayout, RULER_HEIGHT_ROWS, pinned_section_layout},
+        layout::{AppLayout, pinned_section_layout},
         ui_state::{MouseSelection, UiState},
     },
 };
@@ -74,7 +74,7 @@ pub fn render_mouse_selection(
     let window = viewport.window();
     let id_inner_area = Block::bordered().inner(layout.sequence_id_pane);
     let sequence_rows_area = layout.alignment_pane_sequence_rows;
-    let id_content_y = id_inner_area.y + RULER_HEIGHT_ROWS;
+    let id_content_y = id_inner_area.y + layout.alignment_header.height();
     let id_end_x = id_inner_area.x.saturating_add(id_inner_area.width);
     let sequence_end_x = sequence_rows_area
         .x

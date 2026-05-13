@@ -133,6 +133,7 @@ pub fn render(
         SequenceIdPane {
             alignment,
             window: &window,
+            header: layout.alignment_header,
             theme: &ui.theme,
         },
         layout.sequence_id_pane,
@@ -143,6 +144,8 @@ pub fn render(
             alignment,
             viewport: &ui.viewport,
             metrics: stats_cache,
+            gff,
+            header: layout.alignment_header,
             theme: &ui.theme,
         },
         layout.alignment_pane,

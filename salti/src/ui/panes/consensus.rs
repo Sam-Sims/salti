@@ -16,8 +16,8 @@ use crate::{
     },
     ui::{
         rows::{
-            RowRenderMode, format_row_spans, format_translated_byte_range_spans,
-            format_translated_row_spans, visible_bytes,
+            RowRenderMode, format_row_spans, format_row_view_spans,
+            format_translated_byte_range_spans, format_translated_row_spans,
         },
         ui_state::ThemeState,
     },
@@ -223,8 +223,12 @@ fn consensus_alignment_lines(
             let Some(projected_row) = alignment.view().project_absolute_row(absolute_row) else {
                 return Line::from("No reference selected".fg(theme.theme.text_dim).italic());
             };
-            let bytes = visible_bytes(projected_row, &window.col_range);
-            let spans = format_row_spans(&bytes, &theme.theme.sequence, no_diff_mode);
+            let spans = format_row_view_spans(
+                projected_row,
+                &window.col_range,
+                &theme.theme.sequence,
+                no_diff_mode,
+            );
             Line::from(spans)
         },
     );

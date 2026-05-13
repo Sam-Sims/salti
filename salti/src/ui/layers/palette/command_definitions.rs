@@ -88,7 +88,7 @@ pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
     }),
     PaletteCommand::Typable(TypableCommand {
         name: "filter-constant",
-        help_text: "Hide columns when a counted symbol reaches the given percentage. Gaps and type-specific unknowns are ignored. Use 0 to disable it.",
+        help_text: "Hide columns when a counted position reaches the given percentage. Gaps and unknowns are ignored. Use 0 to disable it.",
         aliases: &[],
         completer: None,
         static_candidates: &["0", "70", "90", "95", "100"],

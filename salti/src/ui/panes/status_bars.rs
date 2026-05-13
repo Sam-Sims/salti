@@ -88,7 +88,32 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
             parts.push(Span::raw(" | "));
         }
 
-        if selected_sequence_count == 1 && col_start == col_end {
+        if selected_sequence_count == 1 {
+            let position_label = alignment
+                .and_then(|alignment| alignment.translation_overlay())
+                .and_then(|overlay| {
+                    let start_col = selection.column.min(selection.end_column);
+                    let end_col = selection.column.max(selection.end_column);
+                    match (overlay.codon_span(start_col), overlay.codon_span(end_col)) {
+                        (Some(start_span), Some(end_span)) => {
+                            let start = (start_span.start - overlay.frame.offset()) / 3 + 1;
+                            let end = (end_span.start - overlay.frame.offset()) / 3 + 1;
+                            if start == end {
+                                Some(start.to_string())
+                            } else {
+                                Some(format!("{start}-{end}"))
+                            }
+                        }
+                        _ => None,
+                    }
+                })
+                .unwrap_or_else(|| {
+                    if col_start == col_end {
+                        col_start.to_string()
+                    } else {
+                        format!("{col_start}-{col_end}")
+                    }
+                });
             let sequence_name = if let Some(alignment) = alignment {
                 if let Some(sequence) = alignment.base().project_absolute_row(selection.sequence_id)
                 {
@@ -99,7 +124,9 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
             } else {
                 "Unknown".to_string()
             };
-            parts.push(format!("Selected: {sequence_name} @ {col_start}").set_style(theme.text));
+            parts.push(
+                format!("Selected: {sequence_name} @ {position_label}").set_style(theme.text),
+            );
         } else {
             parts.push(
                 format!("{selected_sequence_count} sequence(s) selected @ {col_start}-{col_end}")
@@ -126,13 +153,12 @@ fn build_top_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec
         })
         .unwrap_or("Unknown");
 
-    let loading_text = ui.meta.loading_state.to_string();
-    let loading_style = match &ui.meta.loading_state {
-        LoadingState::Idle | LoadingState::Loading => theme.text_dim,
-        LoadingState::Loaded => theme.success,
-        LoadingState::Failed(_) => theme.error,
+    let loading_status = match &ui.meta.loading_state {
+        LoadingState::Idle => Span::styled("Status: Idle", theme.text_dim),
+        LoadingState::Loading => Span::styled("Status: Loading", theme.text_dim),
+        LoadingState::Loaded => Span::styled("Status: Loaded", theme.success),
+        LoadingState::Failed(_) => Span::styled("Status: Failed", theme.error),
     };
-    let loading_status = loading_text.set_style(loading_style);
 
     let alignment_count = alignment
         .map(|alignment| alignment.view().row_count())
@@ -291,6 +317,7 @@ mod tests {
             status_text(&build_bottom_status_bar(Some(&alignment), &ui_state())),
             "Filters: [constant: >= 100%] (3 rows) (0 cols)"
         );
+    }
 
     #[test]
     fn bottom_status_single_selection() {

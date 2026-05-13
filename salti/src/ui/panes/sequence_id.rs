@@ -10,7 +10,7 @@ use ratatui::{
 use crate::{
     core::{model::AlignmentModel, viewport::ViewportWindow},
     ui::{
-        layout::{RULER_HEIGHT_ROWS, pinned_section_layout},
+        layout::{AlignmentHeaderLayout, pinned_section_layout},
         ui_state::ThemeState,
     },
 };
@@ -18,6 +18,7 @@ use crate::{
 pub(crate) struct SequenceIdPane<'a> {
     pub(crate) alignment: &'a AlignmentModel,
     pub(crate) window: &'a ViewportWindow,
+    pub(crate) header: AlignmentHeaderLayout,
     pub(crate) theme: &'a ThemeState,
 }
 
@@ -30,7 +31,14 @@ impl Widget for SequenceIdPane<'_> {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        render_sequence_id_rows(self.alignment, self.window, self.theme, inner_area, buf);
+        render_sequence_id_rows(
+            self.alignment,
+            self.window,
+            self.header,
+            self.theme,
+            inner_area,
+            buf,
+        );
     }
 }
 
@@ -60,17 +68,23 @@ fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
 fn render_sequence_id_rows(
     alignment: &AlignmentModel,
     window: &ViewportWindow,
+    header: AlignmentHeaderLayout,
     theme: &ThemeState,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let ruler_height = usize::from(RULER_HEIGHT_ROWS);
-    let available_content_height = area.height.saturating_sub(RULER_HEIGHT_ROWS) as usize;
+    let local_feature_height = usize::from(header.local_feature_rows);
+    let ruler_height = usize::from(header.ruler_rows);
+    let available_content_height = area.height.saturating_sub(header.height()) as usize;
     let band_layout =
         pinned_section_layout(alignment.rows().pinned().len(), available_content_height);
     let mut lines = Vec::with_capacity(ruler_height + area.height as usize);
 
     let has_pins = !alignment.rows().pinned().is_empty();
+    for _ in 0..local_feature_height {
+        lines.push(Line::from(" "));
+    }
+
     for ruler_row in 0..ruler_height {
         if ruler_row == 1 && has_pins {
             lines.push(Line::from(

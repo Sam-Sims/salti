@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn gff_hover_sets_tooltip() {
-        let model = alignment_model(vec![raw("seq1", &vec![b'A'; 100])]);
+        let model = alignment_model(vec![raw("seq1", &[b'A'; 100])]);
         let gff = Gff {
             features: vec![feature("gene1", 0, 100)],
         };
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn gff_drag_emits_jump() {
-        let model = alignment_model(vec![raw("seq1", &vec![b'A'; 100])]);
+        let model = alignment_model(vec![raw("seq1", &[b'A'; 100])]);
         let gff = Gff {
             features: vec![feature("gene1", 0, 100)],
         };

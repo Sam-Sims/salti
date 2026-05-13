@@ -48,41 +48,26 @@ fn span_for_sequence_byte(
 }
 
 #[inline]
-fn format_visible_bytes(
-    bytes: &[u8],
+fn format_byte_iter_spans(
+    bytes: impl Iterator<Item = u8>,
     sequence_theme: &SequenceTheme,
-    alignment_type: libmsa::AlignmentType,
+    mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
-    bytes
-        .iter()
-        .map(|&byte| span_for_sequence_byte(byte, sequence_theme, alignment_type))
-        .collect()
-}
-
-#[inline]
-fn format_visible_bytes_with_diff(
-    bytes: &[u8],
-    diff_against: &[u8],
-    sequence_theme: &SequenceTheme,
-    alignment_type: libmsa::AlignmentType,
-) -> Vec<Span<'static>> {
-    assert_eq!(
-        bytes.len(),
-        diff_against.len(),
-        "diff bytes must match the visible width"
-    );
-
-    bytes
-        .iter()
-        .zip(diff_against.iter())
-        .map(|(&byte, &diff_byte)| {
-            if byte == diff_byte {
-                ".".fg(sequence_theme.diff_match)
-            } else {
-                span_for_sequence_byte(byte, sequence_theme, alignment_type)
-            }
-        })
-        .collect()
+    match mode.diff_against {
+        Some(diff_against) => bytes
+            .zip(diff_against.iter().copied())
+            .map(|(byte, diff_byte)| {
+                if byte == diff_byte {
+                    ".".fg(sequence_theme.diff_match)
+                } else {
+                    span_for_sequence_byte(byte, sequence_theme, mode.alignment_type)
+                }
+            })
+            .collect(),
+        None => bytes
+            .map(|byte| span_for_sequence_byte(byte, sequence_theme, mode.alignment_type))
+            .collect(),
+    }
 }
 
 pub fn format_row_spans(
@@ -90,15 +75,21 @@ pub fn format_row_spans(
     sequence_theme: &SequenceTheme,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
-    match mode.diff_against {
-        Some(diff_against) => format_visible_bytes_with_diff(
-            visible_bytes,
-            diff_against,
-            sequence_theme,
-            mode.alignment_type,
-        ),
-        None => format_visible_bytes(visible_bytes, sequence_theme, mode.alignment_type),
-    }
+    format_byte_iter_spans(visible_bytes.iter().copied(), sequence_theme, mode)
+}
+
+pub fn format_row_view_spans(
+    sequence: libmsa::RowView<'_>,
+    col_range: &Range<usize>,
+    sequence_theme: &SequenceTheme,
+    mode: RowRenderMode<'_>,
+) -> Vec<Span<'static>> {
+    let bytes = sequence
+        .indexed_bytes_range(col_range.clone())
+        .expect("viewport range must be within the current view")
+        .map(|(_, byte)| byte);
+
+    format_byte_iter_spans(bytes, sequence_theme, mode)
 }
 
 pub fn format_translated_row_spans(

@@ -76,7 +76,12 @@ impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
         let layout_area = Rect::default();
         let frame_layout = FrameLayout::new(layout_area);
-        let app_layout = AppLayout::new(frame_layout.content_area, 0);
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            // TODO: remove magic number similar to AlignmentHeaderLayout - currently 0 at start since no GFF loaded
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
         Self {
             alignment: None,
             gff: None,
@@ -107,7 +112,7 @@ impl App {
                     height = area.height,
                     "Captured initial terminal size"
                 );
-                self.update_layout(area.into());
+                self.rebuild_layout(area.into());
             }
             Err(error) => {
                 warn!(error = ?error, "Failed to capture initial terminal size");
@@ -136,7 +141,10 @@ impl App {
                 _ = interval.tick() => {
                     if needs_redraw {
                         if let Err(error) = terminal.draw(|frame| {
-                            self.update_layout(frame.area());
+                            let area = frame.area();
+                            if area != self.layout_area {
+                                self.rebuild_layout(area);
+                            }
                             render(
                                 frame,
                                 self.alignment.as_ref(),
@@ -156,7 +164,7 @@ impl App {
                 Some(Ok(event)) = events.next() => {
                     match event {
                         TermEvent::Resize(width, height) => {
-                            self.update_layout(Rect::new(0, 0, width, height));
+                            self.rebuild_layout(Rect::new(0, 0, width, height));
                             self.extend_stats_if_needed();
                         }
                         TermEvent::Key(key) => {
@@ -247,13 +255,10 @@ impl App {
         self.start_load_job(input);
     }
 
-    fn update_layout(&mut self, area: Rect) {
-        if area == self.layout_area {
-            return;
-        }
-
+    fn rebuild_layout(&mut self, area: Rect) {
         self.layout_area = area;
         self.frame_layout = FrameLayout::new(area);
+        // TODO: revist this as feels clunky
         // hides the gff pane if we dont have one loaded
         // if loaded the height is dynamic to the number of rows the features spill on to
         let gff_height = self.gff.as_ref().map_or(0, |gff| {
@@ -261,12 +266,48 @@ impl App {
                 return 0;
             };
             // create a temp applayout with a gff height of 1 to get a value for width
-            let probe_layout = AppLayout::new(self.frame_layout.content_area, gff_pane_height(1));
+            let probe_layout = AppLayout::new(
+                self.frame_layout.content_area,
+                gff_pane_height(1),
+                AlignmentHeaderLayout::without_features(),
+            );
             let width = usize::from(probe_layout.gff_pane_rows.width);
             gff_pane_height(feature_row_count(gff, alignment, width).max(1))
         });
+        let local_feature_rows = match (self.gff.as_ref(), self.alignment.as_ref()) {
+            (Some(gff), Some(alignment)) => {
+                let probe_layout = AppLayout::new(
+                    self.frame_layout.content_area,
+                    gff_height,
+                    AlignmentHeaderLayout::without_features(),
+                );
+                let visible_width = probe_layout.alignment_pane.width.saturating_sub(2) as usize;
+                let col_start = self
+                    .ui
+                    .viewport
+                    .offsets
+                    .cols
+                    .min(alignment.view().column_count());
+                let col_end = col_start
+                    .saturating_add(visible_width)
+                    .min(alignment.view().column_count());
+                u16::try_from(local_feature_row_count(
+                    gff,
+                    alignment,
+                    &(col_start..col_end),
+                ))
+                .unwrap_or(u16::MAX)
+            }
+            (None, _) | (_, None) => 0,
+        };
+        let alignment_header = if local_feature_rows == 0 {
+            AlignmentHeaderLayout::without_features()
+        } else {
+            AlignmentHeaderLayout::with_features(local_feature_rows)
+        };
         // set the real layout once we know the height of the gff
-        self.app_layout = AppLayout::new(self.frame_layout.content_area, gff_height);
+        self.app_layout =
+            AppLayout::new(self.frame_layout.content_area, gff_height, alignment_header);
 
         let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
         let available_sequence_rows = self.app_layout.alignment_pane_sequence_rows.height as usize;
@@ -385,7 +426,7 @@ impl App {
                 Ok(model) => {
                     self.gff = Some(model);
                     self.ui.gff_pane = Default::default();
-                    self.force_relayout();
+                    self.rebuild_layout(self.layout_area);
                     self.show_info(format!("Loaded GFF file: {path}"));
                 }
                 Err(error) => {
@@ -401,8 +442,18 @@ impl App {
 
             Command::ScrollDown { amount } => self.ui.viewport.scroll_down(amount),
             Command::ScrollUp { amount } => self.ui.viewport.scroll_up(amount),
-            Command::ScrollLeft { amount } => self.ui.viewport.scroll_left(amount),
-            Command::ScrollRight { amount } => self.ui.viewport.scroll_right(amount),
+            Command::ScrollLeft { amount } => {
+                self.ui.viewport.scroll_left(amount);
+                if self.layout_needs_rebuild() {
+                    self.rebuild_layout(self.layout_area);
+                }
+            }
+            Command::ScrollRight { amount } => {
+                self.ui.viewport.scroll_right(amount);
+                if self.layout_needs_rebuild() {
+                    self.rebuild_layout(self.layout_area);
+                }
+            }
             Command::ScrollNamesLeft { amount } => self.ui.viewport.scroll_names_left(amount),
             Command::ScrollNamesRight { amount } => self.ui.viewport.scroll_names_right(amount),
 
@@ -413,6 +464,9 @@ impl App {
                     .is_some_and(|alignment| relative_col < alignment.view().column_count());
                 if has_column {
                     self.ui.viewport.jump_to_position(relative_col);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
             Command::JumpToSequence(abs_row) => {
@@ -433,6 +487,9 @@ impl App {
                     .is_some_and(|alignment| alignment.view().column_count() > 0);
                 if has_columns {
                     self.ui.viewport.jump_to_position(0);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
             Command::JumpToEnd => {
@@ -442,6 +499,9 @@ impl App {
                     .and_then(|alignment| alignment.view().column_count().checked_sub(1));
                 if let Some(last_col) = last_col {
                     self.ui.viewport.jump_to_position(last_col);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
 
@@ -523,7 +583,7 @@ impl App {
                 let viewport_target = self.reload_as_protein_viewport_target(frame);
                 self.alignment_mut()?.toggle_reload_as_protein(frame)?;
                 self.clear_mouse_selection();
-                self.force_relayout();
+                self.rebuild_layout(self.layout_area);
                 self.jump_to_reloaded_viewport_target(viewport_target);
                 self.invalidate_all_stats();
                 return Ok(());
@@ -567,7 +627,7 @@ impl App {
     }
 
     fn on_view_rebuilt(&mut self) {
-        self.force_relayout();
+        self.rebuild_layout(self.layout_area);
         self.invalidate_all_stats();
     }
 
@@ -608,6 +668,9 @@ impl App {
             return;
         };
         self.ui.viewport.jump_to_position(relative_col);
+        if self.layout_needs_rebuild() {
+            self.rebuild_layout(self.layout_area);
+        }
     }
 
     fn clear_mouse_selection(&mut self) {
@@ -633,10 +696,24 @@ impl App {
         );
     }
 
-    fn force_relayout(&mut self) {
-        let area = self.layout_area;
-        self.layout_area = Rect::default();
-        self.update_layout(area);
+    fn layout_needs_rebuild(&self) -> bool {
+        let (Some(gff), Some(alignment)) = (self.gff.as_ref(), self.alignment.as_ref()) else {
+            return false;
+        };
+
+        let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
+        let col_start = self.ui.viewport.offsets.cols;
+        let col_end = col_start
+            .saturating_add(visible_width)
+            .min(alignment.view().column_count());
+        let local_feature_rows = u16::try_from(local_feature_row_count(
+            gff,
+            alignment,
+            &(col_start..col_end),
+        ))
+        .unwrap_or(u16::MAX);
+
+        local_feature_rows != self.app_layout.alignment_header.local_feature_rows
     }
 
     fn alignment_mut(&mut self) -> Result<&mut AlignmentModel> {
@@ -845,8 +922,55 @@ mod tests {
         app.alignment = Some(model);
         app.ui.meta.loading_state = LoadingState::Loaded;
         app.refresh_viewport_bounds();
-        app.update_layout(Rect::new(0, 0, 40, 12));
+        app.rebuild_layout(Rect::new(0, 0, 40, 12));
         app
+    }
+
+    fn gff_with_overlapping_features() -> Gff {
+        Gff {
+            features: vec![
+                gff::Feature {
+                    name: "gene1".to_string(),
+                    kind: gff::FeatureType::Gene,
+                    range: 0..10,
+                    strand: gff::Strand::Forward,
+                },
+                gff::Feature {
+                    name: "gene2".to_string(),
+                    kind: gff::FeatureType::Gene,
+                    range: 0..10,
+                    strand: gff::Strand::Forward,
+                },
+            ],
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn horizontal_scroll_updates_layout_local_feature_stacked() {
+        let sequence = vec![b'A'; 120];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.gff = Some(gff_with_overlapping_features());
+        app.rebuild_layout(app.layout_area);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
+
+        app.execute_commands([Command::ScrollRight { amount: 50 }]);
+
+        assert_eq!(app.ui.viewport.offsets.cols, 50);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn jump_to_position_updates_layout_local_feature_stacked() {
+        let sequence = vec![b'A'; 120];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.gff = Some(gff_with_overlapping_features());
+        app.rebuild_layout(app.layout_area);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
+
+        app.execute_commands([Command::JumpToPosition(50)]);
+
+        assert_eq!(app.ui.viewport.offsets.cols, 50);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

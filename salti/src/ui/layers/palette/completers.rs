@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::Path};
 
 use super::input::CommandPaletteState;
 
@@ -76,12 +76,12 @@ fn join_display_path(dir_prefix: &str, name: &str) -> String {
 pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> {
     let (dir_prefix, name_prefix) = split_dir_and_prefix(arguments);
     let base_dir = if dir_prefix.is_empty() {
-        PathBuf::from(".")
+        Path::new(".")
     } else {
-        PathBuf::from(dir_prefix)
+        Path::new(dir_prefix)
     };
 
-    let Ok(entries) = fs::read_dir(base_dir.as_path()) else {
+    let Ok(entries) = fs::read_dir(base_dir) else {
         return Vec::new();
     };
 
@@ -89,16 +89,14 @@ pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> 
 
     for entry in entries.flatten() {
         let entry_name = entry.file_name();
-        let Some(entry_name) = entry_name.to_str() else {
-            continue;
-        };
+        let entry_name = entry_name.to_string_lossy();
 
         if !entry_name.starts_with(name_prefix) {
             continue;
         }
 
-        let is_dir = entry.path().is_dir();
-        let mut label = join_display_path(dir_prefix, entry_name);
+        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let mut label = join_display_path(dir_prefix, &entry_name);
         if is_dir {
             label.push('/');
         }

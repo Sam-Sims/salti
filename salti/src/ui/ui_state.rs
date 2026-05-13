@@ -109,5 +109,6 @@ impl UiState {
         self.selection = None;
         self.layers.close_active();
         self.notification = None;
+        self.gff_tooltip = None;
     }
 }

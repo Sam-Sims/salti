@@ -167,18 +167,17 @@ impl CommandPaletteState {
         Some(command)
     }
 
-    fn parse_command_input(&self) -> Option<(String, Option<String>)> {
-        let input = self.command_input.trim();
+    fn parse_command_input(input: &str) -> Option<(&str, Option<&str>)> {
+        let input = input.trim();
         if input.is_empty() {
             return None;
         }
 
         if let Some((command_name, rest)) = input.split_once(char::is_whitespace) {
             let arguments = rest.trim();
-            let arguments = (!arguments.is_empty()).then_some(arguments.to_string());
-            Some((command_name.to_string(), arguments))
+            Some((command_name, (!arguments.is_empty()).then_some(arguments)))
         } else {
-            Some((input.to_string(), None))
+            Some((input, None))
         }
     }
 
@@ -297,10 +296,11 @@ impl CommandPaletteState {
     }
 
     fn submit_command_selection(&mut self) -> Vec<Command> {
-        let Some((command_name, arguments)) = self.parse_command_input() else {
+        let input = std::mem::take(&mut self.command_input);
+        let Some((command_name, arguments)) = Self::parse_command_input(input.as_str()) else {
             return self.command_error(&format_err!("No command selected"));
         };
-        let Some(spec) = resolve_command(command_name.as_str()) else {
+        let Some(spec) = resolve_command(command_name) else {
             return self.command_error(&format_err!("Unknown command"));
         };
         let command_selected = self.command_list.selected_display_index().is_some();
@@ -311,7 +311,7 @@ impl CommandPaletteState {
             if spec.typable().is_none() {
                 return self.command_error(&format_err!("Expected 0 arguments, got 1"));
             }
-            return match spec.run(self, arguments.as_str()) {
+            return match spec.run(self, arguments) {
                 Ok(action) => self.close_palette_with(action),
                 Err(error) => self.command_error(&error),
             };
