@@ -4,7 +4,10 @@ use crate::{
         EVERFOREST_DARK, Theme, ThemeId, ThemeStyles, build_theme_styles, theme_from_id,
     },
     core::Viewport,
-    ui::{layers::notification::Notification, layers::state::LayerState, panes::gff::GffPaneState},
+    ui::{
+        layers::{notification::Notification, state::LayerState},
+        panes::gff::GffPaneState,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -1,9 +1,6 @@
 use std::ops::Range;
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Color::Rgb;
-use ratatui::widgets::Block;
+use ratatui::{Frame, layout::Rect, style::Color::Rgb, widgets::Block};
 
 use crate::{
     core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},

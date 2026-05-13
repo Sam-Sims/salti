@@ -1,6 +1,7 @@
+use std::time::Duration;
+
 use semver::Version;
 use serde::Deserialize;
-use std::time::Duration;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");

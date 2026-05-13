@@ -8,6 +8,8 @@ mod logging;
 mod ui;
 mod update;
 
+use std::io::stdout;
+
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{

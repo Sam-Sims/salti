@@ -1,4 +1,5 @@
 use super::input::CommandPaletteState;
+use crate::command::Command;
 
 pub(super) type CompleterFunc = fn(&CommandPaletteState, &str) -> Vec<String>;
 pub(super) type RunnerFunc = fn(&CommandPaletteState, &str) -> anyhow::Result<Command>;

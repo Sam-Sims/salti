@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::format_err;
 use crossterm::event::{KeyCode, KeyEvent};
 use libmsa::AlignmentType;
 

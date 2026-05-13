@@ -1,10 +1,11 @@
 use std::ops::Range;
 
-use ratatui::style::Stylize;
-use ratatui::text::Span;
+use ratatui::{style::Stylize, text::Span};
 
-use crate::config::theme::SequenceTheme;
-use crate::core::codon::{TranslatedByteRange, TranslatedDiffRange, TranslationOverlay};
+use crate::{
+    config::theme::SequenceTheme,
+    core::codon::{TranslatedByteRange, TranslatedDiffRange, TranslationOverlay},
+};
 
 /// Lookup table that maps each byte value (`0-255`) to a str for display.
 ///
