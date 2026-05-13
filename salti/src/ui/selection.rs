@@ -1,6 +1,11 @@
 use std::ops::Range;
 
-use ratatui::{Frame, layout::Rect, style::Color::Rgb, widgets::Block};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Color::Rgb, Style},
+    widgets::Block,
+};
 
 use crate::{
     core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},
@@ -208,18 +213,25 @@ fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
     (from + (to - from) * alpha).round().clamp(0.0, 255.0) as u8
 }
 
-fn blend_background(
-    base: ratatui::style::Color,
-    tint: ratatui::style::Color,
-    alpha: f32,
-) -> ratatui::style::Color {
+fn blend_background(base: Color, tint: Color, alpha: f32) -> Option<Color> {
     match (base, tint) {
-        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Rgb(
+        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Some(Rgb(
             interpolate(red, red_tint, alpha),
             interpolate(green, green_tint, alpha),
             interpolate(blue, blue_tint, alpha),
-        ),
-        _ => tint,
+        )),
+        _ => None,
+    }
+}
+
+fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32) {
+    match blend_background(cell.bg, tint, alpha) {
+        Some(background) => {
+            cell.set_bg(background);
+        }
+        None => {
+            cell.set_style(Style::new().reversed());
+        }
     }
 }
 
@@ -252,7 +264,7 @@ fn shader(
     for y in y_start..y_end {
         for x in x_start..x_end {
             if let Some(cell) = buffer.cell_mut((x, y)) {
-                cell.set_bg(blend_background(cell.bg, tint, alpha));
+                shade_selected_cell(cell, tint, alpha);
             }
         }
     }
@@ -335,6 +347,7 @@ fn translated_selection_visible_col_range(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::core::{Viewport, model::AlignmentModel};
 
