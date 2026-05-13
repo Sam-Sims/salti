@@ -1,0 +1,18 @@
+---
+source: salti/src/ui/render.rs
+assertion_line: 441
+expression: "render_text(None, &idle_ui, &ColumnStatsCache::default(), area)"
+---
+                            File: Unknown | Status: Idle | 0 alignments | Length: 0 | Positions: 0-0
+
+
+
+
+
+
+
+
+                            salti: A modern MSA browser for the terminal.
+                            Use the command palette to open an alignment.
+
+                             Hint: use :load-alignment <alignment.fasta>

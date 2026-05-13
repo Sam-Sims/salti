@@ -5,13 +5,18 @@
 [![test](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml)
 [![check](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml)
 
-# salti
+<h1 align="center">Salti</h1>
+
+<p align="center">
+  <img src="assets/salti_ss.png" />
+</p>
 
 `salti` is a terminal based multiple sequence alignment (MSA) viewer for FASTA files.
 It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want
 to leave the terminal.
 
 ## Quick start
+
 If using linux/macOS
 
 ```bash
@@ -31,7 +36,7 @@ conda install -c bioconda salti
 - [Usage](#usage)
 - [Some notes on features](#some-notes-on-features)
 
-## Features
+## Feature showcase
 
 ### Fast
 
@@ -67,13 +72,6 @@ Press `m` to open the minimap and drag to quickly pan around.
 
 ![minimap](assets/minimap.gif)
 
-### Nucleotide and Amino acid support
-
-`salti` automatically detects whether your alignment is nucleotide (NT) or amino acid (AA), then applies the correct
-rendering mode.
-
-![nt/aa](assets/aant.png)
-
 ### Translation
 
 Can translate NT codons to AA on the fly, with support for all 3 frames, although designed for browsing, rather than a
@@ -88,6 +86,14 @@ dedicated translation tool.
 - Pin important sequences fixed at the top while browsing.
 
 ![viz](assets/viz.gif)
+
+### GFF support
+
+Support for loading GFF3 annotations with a global minimap + local feature track, and jump straight to features with `jump-feature`.
+
+See [### GFF support](GFF support) for more detail.
+
+![gff](assets/gff.gif)
 
 ### Themes
 
@@ -195,6 +201,9 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Ctrl + Left click` - Select a range of sequences or positions
 - `Middle click + drag` - Pan.
 - `m` - Open the minimap
+- `t` - Toggle between quick translate of the current view.
+- `Shift+t` - Toggle between the original alignment and the reloaded protein alignment.
+- `Alt+1|2|3` - Change reading frame for quick/full translation.
 
 ### Command palette
 
@@ -211,19 +220,23 @@ Commands:
 
 - `jump-position` - Jump to a 1-based alignment position.
 - `jump-sequence` - Jump to a sequence by name
+- `jump-feature` - Jump to a feature if a GFF file has been loaded.
 - `pin-sequence` - Pin a visible sequence to the top of the alignment view.
 - `unpin-sequence` - Remove a sequence from the pinned group.
 - `filter-rows` - Filter rows by their IDs (fasta headers) via regex.
 - `filter-gaps` - Filter columns by their gap percentage.
+- `filter-constant` - Filter columns by their similarity.
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
+- `reload-as-protein` - Reloads the entire alignment as a protein alignment.
 - `set-diff-mode` - Set diff rendering mode (`off`, `reference`, or `consensus`).
 - `load-alignment` (alias: `load`) - Load an alignment file.
+- `load-gff` - Load a GFF3 annotation file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
-- `set-sequence-type` - Override auto-detection if it fails (`dna`, `aa`, or `full`).
+- `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `generic`).
 - `check-update` - Check for updates and show the latest version.
 - `quit` - Quit the app.
 
@@ -246,7 +259,28 @@ Two methods are available for consensus calculation:
 
 If there is a tie for most common character, one is chosen at random.
 
-Consensus is calculated in the background
+The defailt is `majority-non-gap`
+
+### Quick translate vs full translate
+
+`salti` offers two methods of translating. The first is "quick translate" toggled by pressing `t` or the `toggle-translate` command, named as such because
+it only translates the visible view and so is technically faster than the full translate
+
+Quick translate maps the currently visible nucleotides into their respetive codons according to the current frame and then renders them 
+as an amino acid overlay. This does not change the coordinate space - and the ruler will stay in nucleotides. Clicking on an amino acid however
+will display the coordinate in protein space in the bottom status bar.
+
+Importantly quick translate can not be used if any of the columns have been filtered - as this would cause frameshifts and would not make sense to
+represent.
+
+In contrast full translate (`Shift+T` or the `reload-as-protein` command) takes the full alignment and reloads it into a protein alignment, as if you 
+had loaded a fasta with the translated amino acids instead of nucleotides. This means the coordinate space becomes amino acids - and each amino acid
+is represented by one column. This means full translate is compatible with column filtering, unlike quick translate.
+
+In practice this is still very fast (~3000 mpox virus sequences which are about 200kb big can be translated in under 0.1 seconds on my PC) and so it is useful
+to switch between different translation modes depending on what is useful.
+
+Reading frame can be changed at any time using `Alt+1`, `Alt+2`, `Alt+3`, or the `set-translation-frame` command.
 
 ### Gap filtering
 
@@ -257,8 +291,51 @@ Gap filtering changes the visible coordinate space. The ruler still shows absolu
 hidden columns have been skipped. A single jump is shown with an arrow pointing towards the side that has a jump.
 Dense regions of skipped columns are shown as a run of `~` characters rather than individual arrows.
 
-Gap filtering and translation cannot be used at the same time. If translation is active, `filter-gaps` will be
-rejected. Likewise if a gap filter is active, translation cannot be enabled until the filter is cleared.
+Gap filtering and quick translation cannot be used at the same time. If quick translation is active, `filter-gaps` will be
+rejected. Likewise if a gap filter is active, quick translation cannot be enabled until the filter is cleared. The full translation 
+(e.g using `reload-as-protein`) supports column filtering however.
+
+All column filters are applied after row filters.
+
+### Constant filtering
+
+`filter-constant` hides columns where any given value in the column meets the threshold you give it. Like gap filtering, the
+threshold is also a percentage so `filter-constant 100` hides columns where 100% of the positions are the same (i.e removes constant sites).
+
+Like gap filtering - removing columns can change the visible coordinate space - see gap filtering for a more detailed breakdown of what that means.
+
+`filter-constant 99` hides columns where 99% of the positions are the same and so on. `filter-constant 0` clears the filter.
+
+NOTE:
+Gaps are ignored when calculating constant fractions, in DNA alignments `N` is also ignored and in protein, `X` is also ignored
+
+### GFF support
+
+`salti` can load and display GFF3 annotations from a file with the `load-gff` command. This is currently experimental.
+
+At the moment only `gene` features are supported.
+
+When a GFF is loaded `salti` will show:
+- a global feature pane
+- a local feature track above the alignment
+- feature details in the `Feature Info` pane when you hover over a feature
+- support for the `jump-feature` command in the command palette
+
+You can also drag in the global feature pane to pan around the alignment.
+
+Currently annotations are treated as "global" - and per sequence annotations are not supported. This also means there is no fancy business that
+tries to match GFF coordinates to gaps etc. This is mainly useful in specific use cases e.g:
+
+When you have multiple alignments to a reference sequence where that reference does not have gaps inserted (i.e insertions are ignored). 
+For example running mafft with something like `mafft --add --keeplength` or using alignments from something like [nextclade](https://github.com/nextstrain/nextclade)
+or [fastalign](https://github.com/Sam-Sims/fastalign).
+
+In the normal nucleotide view, GFF coordinates are shown in nucleotide space.
+Quick translate keeps this the same - because quick translate is just an amino acid overlay on top of the nucleotide view.
+In full translate / `reload-as-protein`, the features are projected into protein columns using the active reading frame.
+
+If columns are filtered, features are projected onto the remaining visible columns. This means a feature can look compressed, or disappear entirely if all
+of its columns are filtered out.
 
 ### Pinned behaviour
 
@@ -270,7 +347,7 @@ rejected. Likewise if a gap filter is active, translation cannot be enabled unti
 - Input must be FASTA with equal sequence lengths across records.
 - Sequence type is auto-detected on load; you can override it if its wrong.
     - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it
-      falls back to `full` mode.
+      falls back to `generic` mode.
 
 ### Update check:
 

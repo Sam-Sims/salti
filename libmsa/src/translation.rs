@@ -1,13 +1,35 @@
 use std::ops::Range;
 
-use crate::Alignment;
-use crate::alignment_type::AlignmentType;
-use crate::data::{AlignmentData, RawSequence};
-use crate::error::AlignmentError;
-use crate::metrics::{
-    ColumnSummary, ConsensusMethod, counted_translated_columns_positions,
-    counted_translated_columns_range, summaries_from_columns,
+use rayon::prelude::*;
+
+use crate::{
+    Alignment,
+    alignment_type::AlignmentType,
+    error::AlignmentError,
+    metrics::{
+        ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
+    },
 };
+
+const NUCLEOTIDE_INDEX_TABLE: [u8; 256] = build_nucleotide_index_table();
+
+const fn build_nucleotide_index_table() -> [u8; 256] {
+    // 4 is invalid, only maps valid nts to 0-3
+    let mut table = [4; 256];
+
+    table[b'A' as usize] = 0;
+    table[b'a' as usize] = 0;
+    table[b'T' as usize] = 1;
+    table[b't' as usize] = 1;
+    table[b'U' as usize] = 1;
+    table[b'u' as usize] = 1;
+    table[b'C' as usize] = 2;
+    table[b'c' as usize] = 2;
+    table[b'G' as usize] = 3;
+    table[b'g' as usize] = 3;
+
+    table
+}
 
 /// Reading frames for translating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +81,15 @@ impl ReadingFrame {
         }
 
         ((nucleotide_length - 1 - offset) / 3) + 1
+    }
+
+    /// Returns the number of complete three-nucleotide codons for this frame.
+    ///
+    /// Unlike [`translated_length`](Self::translated_length), this excludes the
+    /// incomplete terminal codon when the remaining nucleotides after the frame
+    /// offset are not divisible by three.
+    pub const fn complete_codons(self, nucleotide_len: usize) -> usize {
+        nucleotide_len.saturating_sub(self.offset()) / 3
     }
 }
 
@@ -160,22 +191,6 @@ impl<'a> TranslatedAlignment<'a> {
         self.translated_column_count
     }
 
-    /// Returns the translated view for one visible row by absolute row id.
-    ///
-    /// The row id is resolved against the source alignment's current row
-    /// projection, not against the translated view itself. Returns `None` when
-    /// the row is not visible in the source alignment.
-    pub fn sequence_by_absolute(&self, absolute_row: usize) -> Option<TranslatedSequenceView<'a>> {
-        let _relative = self.source.relative_row_id(absolute_row)?;
-        let sequence = self.source.data.sequences.get(absolute_row)?;
-        Some(TranslatedSequenceView {
-            data: sequence.sequence(),
-            frame: self.frame,
-            table: self.table,
-            translated_len: self.translated_column_count,
-        })
-    }
-
     /// Returns a [`TranslatedSequenceView`] for the absolute row but projected
     /// through this alignment's current column projection.
     ///
@@ -188,7 +203,7 @@ impl<'a> TranslatedAlignment<'a> {
     pub fn project_absolute_row(&self, abs_row: usize) -> Option<TranslatedSequenceView<'a>> {
         let sequence = self.source.data.sequences.get(abs_row)?;
         Some(TranslatedSequenceView {
-            data: sequence.sequence(),
+            data: &sequence.sequence,
             frame: self.frame,
             table: self.table,
             translated_len: self.translated_column_count,
@@ -207,57 +222,29 @@ impl<'a> TranslatedAlignment<'a> {
     /// Returns any [`AlignmentError`] encountered while materialising the
     /// translated rows into a concrete alignment.
     pub fn to_alignment(&self) -> Result<Alignment, AlignmentError> {
-        let translated = self
-            .source
-            .absolute_row_ids()
-            .map(|absolute_row| {
+        let translated = (0..self.source.rows.len())
+            .into_par_iter()
+            .map(|relative_row| {
+                let absolute_row = self
+                    .source
+                    .rows
+                    .absolute(relative_row)
+                    .expect("out of bounds relative row index");
                 let sequence = self.source.data.sequences.get(absolute_row).ok_or(
                     AlignmentError::RowOutOfBounds {
                         index: absolute_row,
                         row_count: self.source.data.sequences.len(),
                     },
                 )?;
-                Ok(RawSequence {
-                    id: sequence.id().to_string(),
-                    sequence: translate_sequence(sequence.sequence(), self.frame, &self.table),
+
+                Ok(crate::RawSequence {
+                    id: sequence.id.to_string(),
+                    sequence: translate_sequence(&sequence.sequence, self.frame, &self.table),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let data = AlignmentData::from_raw(translated)?;
-        Ok(Alignment::from_data(data, AlignmentType::Protein))
-    }
-
-    /// Returns a summary for each requested protein column.
-    ///
-    /// The returned positions use protein-column coordinates from the translated
-    /// view. Consensus, conservation, and gap fraction are calculated from the
-    /// visible rows in the source alignment with this view's reading frame and
-    /// translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if any value in `positions` is not a
-    /// valid protein-column index in the translated view.
-    pub fn column_summaries_positions(
-        &self,
-        positions: &[usize],
-        method: ConsensusMethod,
-    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
-        let columns = counted_translated_columns_positions(
-            &self.source.data,
-            &self.source.rows,
-            positions,
-            self.frame,
-            &self.table,
-        )?;
-        let mut rng = rand::rng();
-        Ok(summaries_from_columns(
-            &columns,
-            method,
-            AlignmentType::Protein.conservation_alphabet_size(),
-            &mut rng,
-        ))
+        Alignment::new_with_type(translated, AlignmentType::Protein)
     }
 
     /// Returns summary for each protein column in `range`.
@@ -294,32 +281,6 @@ impl<'a> TranslatedAlignment<'a> {
         ))
     }
 
-    /// Returns the translated consensus byte for each protein column in `range`.
-    ///
-    /// The returned positions use protein-column coordinates from the translated
-    /// view. Consensus is calculated from the visible rows in the source alignment
-    /// with this view's reading frame and translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::EmptyRange`] if `range` is empty.
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than
-    /// the translated width of this view.
-    pub fn consensus_range(
-        &self,
-        range: Range<usize>,
-        method: ConsensusMethod,
-    ) -> Result<Vec<(usize, Option<u8>)>, AlignmentError> {
-        let summaries = self.column_summaries_range(range, method)?;
-        Ok(summaries
-            .into_iter()
-            .map(|summary| (summary.position, summary.consensus))
-            .collect())
-    }
-}
-
-impl<'a> TranslatedAlignment<'a> {
     pub(crate) fn new(
         source: &'a Alignment,
         frame: ReadingFrame,
@@ -430,37 +391,32 @@ pub(crate) fn normalise_nucleotide(byte: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn translate_sequence(
-    sequence: &[u8],
-    frame: ReadingFrame,
-    table: &TranslationTable,
-) -> Vec<u8> {
-    let mut translated = Vec::with_capacity(translated_length(sequence.len(), frame));
-
-    for codon_start in (frame.offset()..sequence.len()).step_by(3) {
-        let codon = [
-            sequence
-                .get(codon_start)
-                .and_then(|&byte| normalise_nucleotide(byte)),
-            sequence
-                .get(codon_start + 1)
-                .and_then(|&byte| normalise_nucleotide(byte)),
-            sequence
-                .get(codon_start + 2)
-                .and_then(|&byte| normalise_nucleotide(byte)),
-        ];
-
-        let amino_acid = match codon {
-            [Some(first), Some(second), Some(third)] => {
-                table.translate_codon([first, second, third])
-            }
-            _ => b'X',
-        };
-
-        translated.push(amino_acid);
+fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationTable) -> Vec<u8> {
+    let offset = frame.offset();
+    if sequence.len() <= offset {
+        return Vec::new();
     }
 
-    translated
+    let translated_len = translated_length(sequence.len(), frame);
+    let complete_codons = frame.complete_codons(sequence.len());
+    let complete_end = offset + (complete_codons * 3);
+    let has_incomplete_terminal_codon = complete_codons < translated_len;
+
+    sequence[offset..complete_end]
+        .chunks_exact(3)
+        .map(|codon| {
+            let first = nucleotide_index(codon[0]);
+            let second = nucleotide_index(codon[1]);
+            let third = nucleotide_index(codon[2]);
+
+            if first == 4 || second == 4 || third == 4 {
+                b'X'
+            } else {
+                table.codons[usize::from(first)][usize::from(second)][usize::from(third)]
+            }
+        })
+        .chain(has_incomplete_terminal_codon.then_some(b'X'))
+        .collect()
 }
 
 pub(crate) fn translated_byte_at(
@@ -493,13 +449,15 @@ pub(crate) fn translated_length(sequence_len: usize, frame: ReadingFrame) -> usi
     frame.translated_length(sequence_len)
 }
 
+#[inline]
+fn nucleotide_index(base: u8) -> u8 {
+    NUCLEOTIDE_INDEX_TABLE[base as usize]
+}
+
 fn index_nucleotide(base: u8) -> Option<usize> {
-    match base {
-        b'A' => Some(0),
-        b'T' => Some(1),
-        b'C' => Some(2),
-        b'G' => Some(3),
-        _ => None,
+    match nucleotide_index(base) {
+        4 => None,
+        index => Some(index as usize),
     }
 }
 
@@ -712,6 +670,23 @@ mod reading_frame_tests {
         assert_eq!(ReadingFrame::Frame2.translated_length(2), 1);
         assert_eq!(ReadingFrame::Frame3.translated_length(2), 0);
     }
+
+    #[test]
+    fn complete_codons_excludes_incomplete_terminal() {
+        // 9 nucleotides, frame 1: 9 / 3 = 3 complete codons.
+        assert_eq!(ReadingFrame::Frame1.complete_codons(9), 3);
+        // 10 nucleotides, frame 1: 10 / 3 = 3 (drops the leftover).
+        assert_eq!(ReadingFrame::Frame1.complete_codons(10), 3);
+        // translated_length would give 4 here (includes the incomplete).
+        assert_eq!(ReadingFrame::Frame1.translated_length(10), 4);
+
+        // Frame 2, 9 nucleotides: (9 - 1) / 3 = 2 complete codons.
+        assert_eq!(ReadingFrame::Frame2.complete_codons(9), 2);
+        // Frame 3, 2 nucleotides: (2 - 2) / 3 = 0.
+        assert_eq!(ReadingFrame::Frame3.complete_codons(2), 0);
+        // Edge: empty sequence.
+        assert_eq!(ReadingFrame::Frame1.complete_codons(0), 0);
+    }
 }
 
 #[cfg(test)]
@@ -739,9 +714,9 @@ mod translated_alignment_tests {
         let frame2 = alignment.translated(ReadingFrame::Frame2).unwrap();
         let frame3 = alignment.translated(ReadingFrame::Frame3).unwrap();
 
-        let frame1_sequence = frame1.sequence_by_absolute(0).unwrap();
-        let frame2_sequence = frame2.sequence_by_absolute(0).unwrap();
-        let frame3_sequence = frame3.sequence_by_absolute(0).unwrap();
+        let frame1_sequence = frame1.project_absolute_row(0).unwrap();
+        let frame2_sequence = frame2.project_absolute_row(0).unwrap();
+        let frame3_sequence = frame3.project_absolute_row(0).unwrap();
 
         assert_eq!(frame1_sequence.byte_at(0), Some(b'M'));
         assert_eq!(frame1_sequence.byte_at(1), Some(b'P'));
@@ -776,30 +751,6 @@ mod translated_alignment_tests {
             frame3.column_count(),
             ReadingFrame::Frame3.translated_length(9)
         );
-    }
-
-    #[test]
-    fn translated_sequence_by_absolute_returns_visible_row() {
-        let alignment = Alignment::new_with_type(
-            vec![
-                raw("s1", b"ATGAAA"),
-                raw("s2", b"TTTCCC"),
-                raw("s3", b"GGGAAA"),
-            ],
-            AlignmentType::Dna,
-        )
-        .unwrap();
-        let filtered = alignment
-            .filter()
-            .unwrap()
-            .without_rows([1])
-            .apply()
-            .unwrap();
-        let translated = filtered.translated(ReadingFrame::Frame1).unwrap();
-
-        let sequence = translated.sequence_by_absolute(2).unwrap();
-        assert_eq!(sequence.byte_at(0), Some(b'G'));
-        assert!(translated.sequence_by_absolute(1).is_none());
     }
 
     #[test]
@@ -894,9 +845,6 @@ mod translated_alignment_tests {
         let translated = filtered.translated(ReadingFrame::Frame1).unwrap();
         let materialised = translated.to_alignment().unwrap();
 
-        assert!(translated.sequence_by_absolute(1).is_some());
-        assert!(translated.sequence_by_absolute(0).is_none());
-        assert!(translated.sequence_by_absolute(2).is_none());
         assert_eq!(
             materialised
                 .sequence(0)
@@ -941,7 +889,7 @@ mod translated_alignment_tests {
     }
 
     #[test]
-    fn translated_alignment_custom_table_is_used_for_consensus() {
+    fn translated_alignment_custom_table_is_used_for_summaries() {
         let alignment = Alignment::new_with_type(
             vec![
                 raw("s1", b"ATGAAA"),
@@ -983,13 +931,11 @@ mod translated_alignment_tests {
         let translated = alignment
             .translated_with(ReadingFrame::Frame1, custom)
             .unwrap();
+        let summaries = translated
+            .column_summaries_range(0..1, ConsensusMethod::MajorityNonGap)
+            .unwrap();
 
-        assert_eq!(
-            translated
-                .consensus_range(0..1, ConsensusMethod::MajorityNonGap)
-                .unwrap(),
-            vec![(0, Some(b'Z'))]
-        );
+        assert_eq!(summaries[0].consensus, Some(b'Z'));
     }
 
     #[test]
@@ -1011,7 +957,6 @@ mod translated_alignment_tests {
             .unwrap();
         let translated = filtered.translated(ReadingFrame::Frame1).unwrap();
 
-        assert!(translated.sequence_by_absolute(1).is_none());
         assert_eq!(
             translated_bytes(translated.project_absolute_row(1).unwrap(), 2),
             vec![(0, b'F'), (1, b'P')]
@@ -1027,12 +972,14 @@ mod translated_alignment_tests {
         .unwrap();
         let translated = alignment.translated(ReadingFrame::Frame1).unwrap();
 
-        for abs_row in 0..2 {
-            assert_eq!(
-                translated_bytes(translated.sequence_by_absolute(abs_row).unwrap(), 2),
-                translated_bytes(translated.project_absolute_row(abs_row).unwrap(), 2)
-            );
-        }
+        assert_eq!(
+            translated_bytes(translated.project_absolute_row(0).unwrap(), 2),
+            vec![(0, b'M'), (1, b'K')]
+        );
+        assert_eq!(
+            translated_bytes(translated.project_absolute_row(1).unwrap(), 2),
+            vec![(0, b'F'), (1, b'P')]
+        );
     }
 
     #[test]

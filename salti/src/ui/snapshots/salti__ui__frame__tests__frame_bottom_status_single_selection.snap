@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 288
+expression: "status_text(&build_bottom_status_bar(Some(&selected_alignment),\n&single_selection_ui))"
+---
+Selected: seq1 @ 6

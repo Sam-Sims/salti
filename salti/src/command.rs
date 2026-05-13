@@ -1,6 +1,6 @@
-use crate::config::theme::ThemeId;
-use crate::core::model::DiffMode;
-use crate::ui::notification::Notification;
+use crate::{
+    config::theme::ThemeId, core::model::DiffMode, ui::layers::notification::Notification,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -11,7 +11,8 @@ pub enum Command {
     SetTheme(ThemeId),
     ShowNotification(Notification),
     LoadFile { input: String },
-    CheckForUpdate { show_success_message: bool },
+    CheckForUpdate,
+    CheckForUpdateAndNotify,
     ScrollDown { amount: usize },
     ScrollUp { amount: usize },
     ScrollLeft { amount: usize },
@@ -24,6 +25,7 @@ pub enum Command {
     JumpToEnd,
     SetFilter(String),
     SetGapFilter(Option<f32>),
+    SetConstantFilter(Option<f32>),
     ClearFilter,
     PinSequence(usize),
     UnpinSequence(usize),
@@ -34,4 +36,6 @@ pub enum Command {
     SetTranslationFrame(libmsa::ReadingFrame),
     SetDiffMode(DiffMode),
     ToggleTranslationView,
+    ReloadAsProtein { frame: Option<libmsa::ReadingFrame> },
+    LoadGff { path: String },
 }

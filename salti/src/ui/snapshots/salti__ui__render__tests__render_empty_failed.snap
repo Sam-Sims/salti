@@ -1,0 +1,17 @@
+---
+source: salti/src/ui/render.rs
+assertion_line: 448
+expression: "render_text(None, &failed_ui, &ColumnStatsCache::default(), area)"
+---
+                          File: Unknown | Status: Failed | 0 alignments | Length: 0 | Positions: 0-0
+
+
+
+
+
+
+
+
+
+
+                                   Failed to load alignment: boom

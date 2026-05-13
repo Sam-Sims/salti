@@ -1,26 +1,23 @@
 use std::ops::Range;
 
-use ratatui::layout::Rect;
-
-use crate::{
-    core::{Viewport, model::AlignmentModel},
-    ui::{layout::pinned_section_layout, ui_state::MouseSelection},
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Color::Rgb, Style},
+    widgets::Block,
 };
 
-pub fn codon_span_for_absolute_column(
-    absolute_col: usize,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> Option<Range<usize>> {
-    let offset = frame.offset();
-    if absolute_col < offset {
-        return None;
-    }
+use crate::{
+    core::{Viewport, codon::TranslationOverlay, model::AlignmentModel},
+    ui::{
+        layout::{AppLayout, pinned_section_layout},
+        ui_state::{MouseSelection, UiState},
+    },
+};
 
-    let codon_start = offset + ((absolute_col - offset) / 3) * 3;
-    let codon_end = codon_start + 3;
-    (codon_end <= nucleotide_len).then_some(codon_start..codon_end)
-}
+const SELECTION_ROW_HIGHLIGHT_ALPHA: f32 = 0.3;
+const SELECTION_ROW_TINT_ALPHA: f32 = 0.22;
+const SELECTION_COL_HIGHLIGHT_ALPHA: f32 = 0.28;
 
 pub fn selection_point_crosshair(
     alignment: &AlignmentModel,
@@ -68,16 +65,208 @@ pub fn selection_row_bounds(selection: MouseSelection) -> (usize, usize) {
     (start.min(end), start.max(end))
 }
 
+pub fn render_mouse_selection(
+    f: &mut Frame,
+    layout: &AppLayout,
+    alignment: &AlignmentModel,
+    ui: &UiState,
+    viewport: &Viewport,
+) {
+    let Some(selection) = ui.selection else {
+        return;
+    };
+
+    let window = viewport.window();
+    let id_inner_area = Block::bordered().inner(layout.sequence_id_pane);
+    let sequence_rows_area = layout.alignment_pane_sequence_rows;
+    let id_content_y = id_inner_area.y + layout.alignment_header.height();
+    let id_end_x = id_inner_area.x.saturating_add(id_inner_area.width);
+    let sequence_end_x = sequence_rows_area
+        .x
+        .saturating_add(sequence_rows_area.width);
+    let band_layout = pinned_section_layout(
+        alignment.rows().pinned().len(),
+        sequence_rows_area.height as usize,
+    );
+    let (row_min, row_max) = selection_row_bounds(selection);
+
+    for (row_offset, &absolute_row) in alignment
+        .rows()
+        .pinned()
+        .iter()
+        .take(band_layout.pinned_rendered)
+        .enumerate()
+    {
+        if !(row_min..=row_max).contains(&absolute_row) {
+            continue;
+        }
+
+        let row_y = sequence_rows_area.y + row_offset as u16;
+        shader(
+            f,
+            id_inner_area,
+            Rect::new(
+                id_inner_area.x,
+                id_content_y + row_offset as u16,
+                id_end_x.saturating_sub(id_inner_area.x),
+                1,
+            ),
+            ui.theme.theme.accent,
+            SELECTION_ROW_HIGHLIGHT_ALPHA,
+        );
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                sequence_rows_area.x,
+                row_y,
+                sequence_end_x.saturating_sub(sequence_rows_area.x),
+                1,
+            ),
+            ui.theme.theme.surface_bg,
+            SELECTION_ROW_TINT_ALPHA,
+        );
+    }
+
+    let scroll_start_y = sequence_rows_area.y
+        + band_layout.pinned_rendered as u16
+        + band_layout.divider_height as u16;
+    for (row_offset, relative_row) in window.row_range.clone().enumerate() {
+        let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
+            continue;
+        };
+        if !(row_min..=row_max).contains(&absolute_row) {
+            continue;
+        }
+
+        let row_y = scroll_start_y + row_offset as u16;
+        shader(
+            f,
+            id_inner_area,
+            Rect::new(
+                id_inner_area.x,
+                id_content_y
+                    + band_layout.pinned_rendered as u16
+                    + band_layout.divider_height as u16
+                    + row_offset as u16,
+                id_end_x.saturating_sub(id_inner_area.x),
+                1,
+            ),
+            ui.theme.theme.accent,
+            SELECTION_ROW_HIGHLIGHT_ALPHA,
+        );
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                sequence_rows_area.x,
+                row_y,
+                sequence_end_x.saturating_sub(sequence_rows_area.x),
+                1,
+            ),
+            ui.theme.theme.surface_bg,
+            SELECTION_ROW_TINT_ALPHA,
+        );
+    }
+
+    if let Some(visible_col_range) =
+        selection_visible_col_range(selection, alignment, &window.col_range)
+    {
+        let start_x =
+            sequence_rows_area.x + (visible_col_range.start - window.col_range.start) as u16;
+        let end_x_exclusive =
+            sequence_rows_area.x + (visible_col_range.end - window.col_range.start) as u16;
+        shader(
+            f,
+            sequence_rows_area,
+            Rect::new(
+                start_x,
+                sequence_rows_area.y,
+                end_x_exclusive.saturating_sub(start_x),
+                sequence_rows_area.height,
+            ),
+            ui.theme.theme.panel_bg,
+            SELECTION_COL_HIGHLIGHT_ALPHA,
+        );
+    }
+}
+
 pub fn selection_visible_col_range(
     selection: MouseSelection,
     alignment: &AlignmentModel,
     visible_col_range: &Range<usize>,
 ) -> Option<Range<usize>> {
-    match alignment.translation() {
-        Some(frame) => {
-            translated_selection_visible_col_range(selection, alignment, visible_col_range, frame)
-        }
+    match alignment.translation_overlay() {
+        Some(overlay) => translated_selection_visible_col_range(
+            selection,
+            alignment,
+            visible_col_range,
+            &overlay,
+        ),
         None => raw_selection_visible_col_range(selection, alignment, visible_col_range),
+    }
+}
+
+fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
+    let from = f32::from(from);
+    let to = f32::from(to);
+    (from + (to - from) * alpha).round().clamp(0.0, 255.0) as u8
+}
+
+fn blend_background(base: Color, tint: Color, alpha: f32) -> Option<Color> {
+    match (base, tint) {
+        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Some(Rgb(
+            interpolate(red, red_tint, alpha),
+            interpolate(green, green_tint, alpha),
+            interpolate(blue, blue_tint, alpha),
+        )),
+        _ => None,
+    }
+}
+
+fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32) {
+    match blend_background(cell.bg, tint, alpha) {
+        Some(background) => {
+            cell.set_bg(background);
+        }
+        None => {
+            cell.set_style(Style::new().reversed());
+        }
+    }
+}
+
+fn shader(
+    f: &mut Frame,
+    clip_area: Rect,
+    tint_area: Rect,
+    tint: ratatui::style::Color,
+    alpha: f32,
+) {
+    if alpha <= 0.0 || clip_area.width == 0 || clip_area.height == 0 {
+        return;
+    }
+
+    let x_start = tint_area.x.max(clip_area.x);
+    let x_end = tint_area
+        .x
+        .saturating_add(tint_area.width)
+        .min(clip_area.x.saturating_add(clip_area.width));
+    let y_start = tint_area.y.max(clip_area.y);
+    let y_end = tint_area
+        .y
+        .saturating_add(tint_area.height)
+        .min(clip_area.y.saturating_add(clip_area.height));
+    if x_start >= x_end || y_start >= y_end {
+        return;
+    }
+
+    let buffer = f.buffer_mut();
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                shade_selected_cell(cell, tint, alpha);
+            }
+        }
     }
 }
 
@@ -112,12 +301,11 @@ fn translated_selection_visible_col_range(
     selection: MouseSelection,
     alignment: &AlignmentModel,
     visible_col_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
+    overlay: &TranslationOverlay,
 ) -> Option<Range<usize>> {
     let selection_start = selection.column.min(selection.end_column);
     let selection_end = selection.column.max(selection.end_column) + 1;
     let view = alignment.view();
-    let nucleotide_len = view.column_count();
 
     let mut rel_start: Option<usize> = None;
     let mut rel_end: Option<usize> = None;
@@ -127,7 +315,7 @@ fn translated_selection_visible_col_range(
         let Some(abs) = view.absolute_column_id(rel) else {
             continue;
         };
-        let Some(codon_span) = codon_span_for_absolute_column(abs, frame, nucleotide_len) else {
+        let Some(codon_span) = overlay.codon_span(abs) else {
             continue;
         };
         if previous_codon_start == Some(codon_span.start) {
@@ -141,13 +329,15 @@ fn translated_selection_visible_col_range(
 
         let clipped_start = codon_span.start.max(visible_col_range.start);
         let clipped_end = codon_span.end.min(visible_col_range.end);
-        let start = view
-            .relative_column_id(clipped_start)
-            .expect("translated mode requires a full visible column set");
-        let end = view
+        let Some(start) = view.relative_column_id(clipped_start) else {
+            continue;
+        };
+        let Some(end) = view
             .relative_column_id(clipped_end - 1)
-            .expect("translated mode requires a full visible column set")
-            + 1;
+            .map(|relative_col| relative_col + 1)
+        else {
+            continue;
+        };
         rel_start = Some(rel_start.map_or(start, |current| current.min(start)));
         rel_end = Some(rel_end.map_or(end, |current| current.max(end)));
     }
@@ -157,9 +347,9 @@ fn translated_selection_visible_col_range(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use crate::core::Viewport;
-    use crate::core::model::AlignmentModel;
+    use crate::core::{Viewport, model::AlignmentModel};
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -220,24 +410,6 @@ mod tests {
 
         let range = selection_visible_col_range(selection, &model, &(0..4));
         assert!(range.is_none());
-    }
-
-    #[test]
-    fn codon_span_maps_any_column_in_the_same_codon() {
-        let frame = libmsa::ReadingFrame::Frame1;
-
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(1, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(2, frame, 9), Some(0..3));
-        assert_eq!(codon_span_for_absolute_column(3, frame, 9), Some(3..6));
-    }
-
-    #[test]
-    fn codon_span_returns_none_for_partial_frame_edges() {
-        let frame = libmsa::ReadingFrame::Frame2;
-
-        assert_eq!(codon_span_for_absolute_column(0, frame, 9), None);
-        assert_eq!(codon_span_for_absolute_column(8, frame, 9), None);
     }
 
     #[test]
@@ -340,11 +512,9 @@ mod tests {
         viewport.set_bounds(3, 4, 2);
 
         let area = Rect::new(0, 0, 4, 3);
-        // No pinned rows, so row 0 maps to absolute row 0.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
         assert_eq!(result, Some((0, 0)));
 
-        // Row 2, col 3.
         let result = selection_point_crosshair(&model, &viewport, area, 3, 2);
         assert_eq!(result, Some((2, 3)));
     }
@@ -353,25 +523,18 @@ mod tests {
     fn crosshair_handles_pinned_band() {
         let mut model = alignment_model(&["s1", "s2", "s3", "s4"]);
         model.pin(0).expect("should pin");
-        // View now has rows [1, 2, 3] (row 0 excluded).
-        // Pinned band: 1 row (row 0).
-        // Divider: 1 row.
-        // Scrollable: remaining rows.
 
         let mut viewport = Viewport::default();
         viewport.update_dimensions(4, 2, 2);
         viewport.set_bounds(3, 4, 2);
 
         let area = Rect::new(0, 0, 4, 4);
-        // Row offset 0 -> pinned row 0 -> absolute row 0.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
         assert_eq!(result, Some((0, 0)));
 
-        // Row offset 1 -> divider -> None.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 1);
         assert!(result.is_none());
 
-        // Row offset 2 -> scrollable row 0 -> view relative 0 -> absolute row 1.
         let result = selection_point_crosshair(&model, &viewport, area, 0, 2);
         assert_eq!(result, Some((1, 0)));
     }

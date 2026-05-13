@@ -5,19 +5,20 @@ mod config;
 mod core;
 mod input;
 mod logging;
-mod overlay;
 mod ui;
 mod update;
 
+use std::io::stdout;
+
 use anyhow::Result;
 use clap::Parser;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::execute;
-use std::io::stdout;
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+};
 use tracing::{error, info};
 
-use crate::app::App;
-use crate::cli::Cli;
+use crate::{app::App, cli::Cli};
 
 struct MouseCapture {
     enabled: bool,

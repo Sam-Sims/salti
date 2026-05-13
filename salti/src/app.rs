@@ -1,9 +1,8 @@
-use std::{env, time::Duration};
+use std::{env, path::Path, time::Duration};
 
 use anyhow::{Result, format_err};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
-use ratatui::DefaultTerminal;
-use ratatui::layout::Rect;
+use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::{
     sync::mpsc::{UnboundedSender, unbounded_channel},
     task::{JoinError, JoinHandle, JoinSet},
@@ -12,19 +11,31 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::cli::StartupState;
-use crate::command::Command;
-use crate::core::model::{AlignmentModel, StatsView};
-use crate::core::parser;
-use crate::core::stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult};
-use crate::input;
-use crate::input::MouseTracker;
-use crate::overlay::command_palette::CommandPaletteState;
-use crate::ui::layout::{AppLayout, FrameLayout, pinned_section_layout};
-use crate::ui::notification::{Notification, NotificationLevel};
-use crate::ui::render::render;
-use crate::ui::ui_state::{LoadingState, UiState};
-use crate::update::UpdateResult;
+use crate::{
+    cli::StartupState,
+    command::Command,
+    core::{
+        gff::{self, Gff},
+        model::{AlignmentModel, StatsView},
+        parser,
+        stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult},
+    },
+    input,
+    input::MouseTracker,
+    ui::{
+        layers::{
+            notification::{Notification, NotificationLevel},
+            palette::CommandPaletteState,
+        },
+        layout::{
+            AlignmentHeaderLayout, AppLayout, FrameLayout, gff_pane_height, pinned_section_layout,
+        },
+        panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
+        render::render,
+        ui_state::{LoadingState, UiState},
+    },
+    update::UpdateResult,
+};
 
 const RENDER_FPS: f32 = 120.0;
 
@@ -46,6 +57,7 @@ struct AsyncJob<T> {
 #[derive(Debug)]
 pub(crate) struct App {
     alignment: Option<AlignmentModel>,
+    gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
     stats_cache: ColumnStatsCache,
@@ -57,15 +69,22 @@ pub(crate) struct App {
     layout_area: Rect,
     frame_layout: FrameLayout,
     app_layout: AppLayout,
+    reloaded_nucleotide_phase: usize,
 }
 
 impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
         let layout_area = Rect::default();
         let frame_layout = FrameLayout::new(layout_area);
-        let app_layout = AppLayout::new(frame_layout.content_area);
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            // TODO: remove magic number similar to AlignmentHeaderLayout - currently 0 at start since no GFF loaded
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
         Self {
             alignment: None,
+            gff: None,
             ui: UiState::new(startup),
             mouse_tracker: MouseTracker::default(),
             stats_cache: ColumnStatsCache::default(),
@@ -77,6 +96,7 @@ impl App {
             layout_area,
             frame_layout,
             app_layout,
+            reloaded_nucleotide_phase: 0,
         }
     }
 
@@ -92,7 +112,7 @@ impl App {
                     height = area.height,
                     "Captured initial terminal size"
                 );
-                self.update_layout(area.into());
+                self.rebuild_layout(area.into());
             }
             Err(error) => {
                 warn!(error = ?error, "Failed to capture initial terminal size");
@@ -108,9 +128,7 @@ impl App {
         self.event_tx = Some(event_tx);
         let mut needs_redraw = true;
         if Self::startup_update_check_enabled() {
-            self.execute_commands([Command::CheckForUpdate {
-                show_success_message: false,
-            }]);
+            self.execute_commands([Command::CheckForUpdate]);
         } else {
             debug!(
                 env_var = UPDATE_CHECK_ENV_VAR,
@@ -123,10 +141,14 @@ impl App {
                 _ = interval.tick() => {
                     if needs_redraw {
                         if let Err(error) = terminal.draw(|frame| {
-                            self.update_layout(frame.area());
+                            let area = frame.area();
+                            if area != self.layout_area {
+                                self.rebuild_layout(area);
+                            }
                             render(
                                 frame,
                                 self.alignment.as_ref(),
+                                self.gff.as_ref(),
                                 &self.ui,
                                 &self.stats_cache,
                                 &self.frame_layout,
@@ -142,7 +164,7 @@ impl App {
                 Some(Ok(event)) = events.next() => {
                     match event {
                         TermEvent::Resize(width, height) => {
-                            self.update_layout(Rect::new(0, 0, width, height));
+                            self.rebuild_layout(Rect::new(0, 0, width, height));
                             self.extend_stats_if_needed();
                         }
                         TermEvent::Key(key) => {
@@ -233,14 +255,59 @@ impl App {
         self.start_load_job(input);
     }
 
-    fn update_layout(&mut self, area: Rect) {
-        if area == self.layout_area {
-            return;
-        }
-
+    fn rebuild_layout(&mut self, area: Rect) {
         self.layout_area = area;
         self.frame_layout = FrameLayout::new(area);
-        self.app_layout = AppLayout::new(self.frame_layout.content_area);
+        // TODO: revist this as feels clunky
+        // hides the gff pane if we dont have one loaded
+        // if loaded the height is dynamic to the number of rows the features spill on to
+        let gff_height = self.gff.as_ref().map_or(0, |gff| {
+            let Some(alignment) = self.alignment.as_ref() else {
+                return 0;
+            };
+            // create a temp applayout with a gff height of 1 to get a value for width
+            let probe_layout = AppLayout::new(
+                self.frame_layout.content_area,
+                gff_pane_height(1),
+                AlignmentHeaderLayout::without_features(),
+            );
+            let width = usize::from(probe_layout.gff_pane_rows.width);
+            gff_pane_height(feature_row_count(gff, alignment, width).max(1))
+        });
+        let local_feature_rows = match (self.gff.as_ref(), self.alignment.as_ref()) {
+            (Some(gff), Some(alignment)) => {
+                let probe_layout = AppLayout::new(
+                    self.frame_layout.content_area,
+                    gff_height,
+                    AlignmentHeaderLayout::without_features(),
+                );
+                let visible_width = probe_layout.alignment_pane.width.saturating_sub(2) as usize;
+                let col_start = self
+                    .ui
+                    .viewport
+                    .offsets
+                    .cols
+                    .min(alignment.view().column_count());
+                let col_end = col_start
+                    .saturating_add(visible_width)
+                    .min(alignment.view().column_count());
+                u16::try_from(local_feature_row_count(
+                    gff,
+                    alignment,
+                    &(col_start..col_end),
+                ))
+                .unwrap_or(u16::MAX)
+            }
+            (None, _) | (_, None) => 0,
+        };
+        let alignment_header = if local_feature_rows == 0 {
+            AlignmentHeaderLayout::without_features()
+        } else {
+            AlignmentHeaderLayout::with_features(local_feature_rows)
+        };
+        // set the real layout once we know the height of the gff
+        self.app_layout =
+            AppLayout::new(self.frame_layout.content_area, gff_height, alignment_header);
 
         let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
         let available_sequence_rows = self.app_layout.alignment_pane_sequence_rows.height as usize;
@@ -291,6 +358,7 @@ impl App {
         let commands = input::handle_mouse_event(
             &mut self.mouse_tracker,
             self.alignment.as_ref(),
+            self.gff.as_ref(),
             &mut self.ui,
             &self.frame_layout,
             &self.app_layout,
@@ -339,10 +407,10 @@ impl App {
                 self.open_command_palette();
             }
             Command::CloseOverlay => {
-                self.ui.overlay.close();
+                self.ui.layers.close_active();
             }
             Command::ToggleMinimap => {
-                self.ui.overlay.toggle_minimap();
+                self.ui.layers.toggle_minimap();
             }
             Command::SetTheme(theme_id) => {
                 self.ui.set_theme(theme_id);
@@ -354,16 +422,38 @@ impl App {
                 self.clear_mouse_selection();
                 self.start_load_job(input);
             }
-            Command::CheckForUpdate {
-                show_success_message,
-            } => {
-                self.spawn_update_check(show_success_message);
+            Command::LoadGff { path } => match gff::parse_gff(Path::new(&path)) {
+                Ok(model) => {
+                    self.gff = Some(model);
+                    self.ui.gff_pane = Default::default();
+                    self.rebuild_layout(self.layout_area);
+                    self.show_info(format!("Loaded GFF file: {path}"));
+                }
+                Err(error) => {
+                    return Err(error);
+                }
+            },
+            Command::CheckForUpdate => {
+                self.spawn_update_check(false);
+            }
+            Command::CheckForUpdateAndNotify => {
+                self.spawn_update_check(true);
             }
 
             Command::ScrollDown { amount } => self.ui.viewport.scroll_down(amount),
             Command::ScrollUp { amount } => self.ui.viewport.scroll_up(amount),
-            Command::ScrollLeft { amount } => self.ui.viewport.scroll_left(amount),
-            Command::ScrollRight { amount } => self.ui.viewport.scroll_right(amount),
+            Command::ScrollLeft { amount } => {
+                self.ui.viewport.scroll_left(amount);
+                if self.layout_needs_rebuild() {
+                    self.rebuild_layout(self.layout_area);
+                }
+            }
+            Command::ScrollRight { amount } => {
+                self.ui.viewport.scroll_right(amount);
+                if self.layout_needs_rebuild() {
+                    self.rebuild_layout(self.layout_area);
+                }
+            }
             Command::ScrollNamesLeft { amount } => self.ui.viewport.scroll_names_left(amount),
             Command::ScrollNamesRight { amount } => self.ui.viewport.scroll_names_right(amount),
 
@@ -374,6 +464,9 @@ impl App {
                     .is_some_and(|alignment| relative_col < alignment.view().column_count());
                 if has_column {
                     self.ui.viewport.jump_to_position(relative_col);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
             Command::JumpToSequence(abs_row) => {
@@ -394,6 +487,9 @@ impl App {
                     .is_some_and(|alignment| alignment.view().column_count() > 0);
                 if has_columns {
                     self.ui.viewport.jump_to_position(0);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
             Command::JumpToEnd => {
@@ -403,6 +499,9 @@ impl App {
                     .and_then(|alignment| alignment.view().column_count().checked_sub(1));
                 if let Some(last_col) = last_col {
                     self.ui.viewport.jump_to_position(last_col);
+                    if self.layout_needs_rebuild() {
+                        self.rebuild_layout(self.layout_area);
+                    }
                 }
             }
 
@@ -447,6 +546,17 @@ impl App {
                 self.on_view_rebuilt();
                 return Ok(());
             }
+            Command::SetConstantFilter(min_constant_fraction) => {
+                let alignment = self.alignment_mut()?;
+                if min_constant_fraction.is_some() && alignment.translation().is_some() {
+                    return Err(format_err!(
+                        "filter-constant is unavailable while translation is active"
+                    ));
+                }
+                alignment.set_constant_filter(min_constant_fraction)?;
+                self.on_view_rebuilt();
+                return Ok(());
+            }
             Command::ClearFilter => {
                 self.alignment_mut()?.clear_filter()?;
                 self.on_view_rebuilt();
@@ -462,17 +572,31 @@ impl App {
                 let alignment = self.alignment_mut()?;
                 if alignment.translation().is_none() && alignment.filter().has_column_filter() {
                     return Err(format_err!(
-                        "translation is unavailable while filter-gaps is active"
+                        "translation is unavailable while a column filter is active"
                     ));
                 }
                 alignment.toggle_translation_view()?;
                 self.invalidate_all_stats();
                 return Ok(());
             }
+            Command::ReloadAsProtein { frame } => {
+                let viewport_target = self.reload_as_protein_viewport_target(frame);
+                self.alignment_mut()?.toggle_reload_as_protein(frame)?;
+                self.clear_mouse_selection();
+                self.rebuild_layout(self.layout_area);
+                self.jump_to_reloaded_viewport_target(viewport_target);
+                self.invalidate_all_stats();
+                return Ok(());
+            }
             Command::SetTranslationFrame(frame) => {
                 let alignment = self.alignment_mut()?;
                 let was_enabled = alignment.translation().is_some();
+                let was_reloaded = alignment.is_reloaded_as_protein();
                 alignment.set_translation_frame(frame)?;
+                if was_reloaded {
+                    self.on_view_rebuilt();
+                    return Ok(());
+                }
                 if was_enabled {
                     self.invalidate_translated_stats();
                 }
@@ -497,14 +621,56 @@ impl App {
         let palette = self
             .alignment
             .as_ref()
-            .map(CommandPaletteState::from_alignment)
+            .map(|alignment| CommandPaletteState::from_alignment(alignment, self.gff.as_ref()))
             .unwrap_or_else(CommandPaletteState::empty);
-        self.ui.overlay.open_palette(palette);
+        self.ui.layers.open_palette(palette);
     }
 
     fn on_view_rebuilt(&mut self) {
-        self.refresh_viewport_bounds();
+        self.rebuild_layout(self.layout_area);
         self.invalidate_all_stats();
+    }
+
+    fn reload_as_protein_viewport_target(
+        &mut self,
+        frame: Option<libmsa::ReadingFrame>,
+    ) -> Option<usize> {
+        let alignment = self.alignment.as_ref()?;
+        let frame = frame.unwrap_or(alignment.translation_frame());
+        let relative_col = self.ui.viewport.window().col_range.start;
+        let absolute_col = alignment.view().absolute_column_id(relative_col)?;
+
+        if alignment.is_reloaded_as_protein() {
+            let nucleotide_col = absolute_col
+                .checked_mul(3)
+                .and_then(|scaled| frame.offset().checked_add(scaled))?
+                .saturating_add(self.reloaded_nucleotide_phase);
+            return Some(nucleotide_col);
+        }
+
+        self.reloaded_nucleotide_phase = match absolute_col.checked_sub(frame.offset()) {
+            Some(offset_col) => offset_col % 3,
+            None => 0,
+        };
+        Some(frame.protein_col(absolute_col).unwrap_or(0))
+    }
+
+    fn jump_to_reloaded_viewport_target(&mut self, target_absolute_col: Option<usize>) {
+        let Some(target_absolute_col) = target_absolute_col else {
+            return;
+        };
+        let Some(alignment) = self.alignment.as_ref() else {
+            return;
+        };
+        let Some(relative_col) =
+            nearest_visible_relative_column(alignment.view(), target_absolute_col)
+        else {
+            return;
+        };
+        self.ui.viewport.jump_to_position(relative_col);
+        if self.layout_needs_rebuild() {
+            self.rebuild_layout(self.layout_area);
+        }
     }
 
     fn clear_mouse_selection(&mut self) {
@@ -528,6 +694,26 @@ impl App {
             alignment.view().column_count(),
             alignment.base().max_id_len(),
         );
+    }
+
+    fn layout_needs_rebuild(&self) -> bool {
+        let (Some(gff), Some(alignment)) = (self.gff.as_ref(), self.alignment.as_ref()) else {
+            return false;
+        };
+
+        let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
+        let col_start = self.ui.viewport.offsets.cols;
+        let col_end = col_start
+            .saturating_add(visible_width)
+            .min(alignment.view().column_count());
+        let local_feature_rows = u16::try_from(local_feature_row_count(
+            gff,
+            alignment,
+            &(col_start..col_end),
+        ))
+        .unwrap_or(u16::MAX);
+
+        local_feature_rows != self.app_layout.alignment_header.local_feature_rows
     }
 
     fn alignment_mut(&mut self) -> Result<&mut AlignmentModel> {
@@ -693,11 +879,28 @@ impl App {
     }
 }
 
+fn nearest_visible_relative_column(
+    view: &libmsa::Alignment,
+    target_absolute_col: usize,
+) -> Option<usize> {
+    if let Some(relative_col) = view.relative_column_id(target_absolute_col) {
+        return Some(relative_col);
+    }
+
+    let mut previous_relative_col = None;
+    for (relative_col, absolute_col) in view.absolute_column_ids().enumerate() {
+        if target_absolute_col <= absolute_col {
+            return Some(relative_col);
+        }
+        previous_relative_col = Some(relative_col);
+    }
+
+    previous_relative_col
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
-
     use crate::ui::ui_state::MouseSelection;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
@@ -713,105 +916,67 @@ mod tests {
             initial_position: 0,
         };
         let mut app = App::new(startup);
-        let alignment = libmsa::Alignment::new(sequences).expect("alignment should load");
-        let model = AlignmentModel::new(alignment).expect("alignment model should build");
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        let model = AlignmentModel::new(alignment).unwrap();
         app.stats_cache.init(model.view().column_count());
         app.alignment = Some(model);
         app.ui.meta.loading_state = LoadingState::Loaded;
         app.refresh_viewport_bounds();
-        app.update_layout(Rect::new(0, 0, 40, 12));
+        app.rebuild_layout(Rect::new(0, 0, 40, 12));
         app
     }
 
-    fn left_mouse_event(
-        kind: MouseEventKind,
-        area: Rect,
-        column_offset: u16,
-        row_offset: u16,
-    ) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: area.x + column_offset,
-            row: area.y + row_offset,
-            modifiers: KeyModifiers::empty(),
+    fn gff_with_overlapping_features() -> Gff {
+        Gff {
+            features: vec![
+                gff::Feature {
+                    name: "gene1".to_string(),
+                    kind: gff::FeatureType::Gene,
+                    range: 0..10,
+                    strand: gff::Strand::Forward,
+                },
+                gff::Feature {
+                    name: "gene2".to_string(),
+                    kind: gff::FeatureType::Gene,
+                    range: 0..10,
+                    strand: gff::Strand::Forward,
+                },
+            ],
         }
     }
 
-    #[test]
-    fn translated_click_selects_a_full_codon_span() {
-        let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .expect("setting translation frame should succeed");
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .toggle_translation_view()
-            .expect("translation should enable");
+    #[tokio::test(flavor = "current_thread")]
+    async fn horizontal_scroll_updates_layout_local_feature_stacked() {
+        let sequence = vec![b'A'; 120];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.gff = Some(gff_with_overlapping_features());
+        app.rebuild_layout(app.layout_area);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
 
-        let area = app.app_layout.alignment_pane_sequence_rows;
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            area,
-            1,
-            0,
-        ));
+        app.execute_commands([Command::ScrollRight { amount: 50 }]);
 
-        let selection = app.ui.selection.expect("selection should be created");
-        assert_eq!(selection.sequence_id, 0);
-        assert_eq!(selection.column, 0);
-        assert_eq!(selection.end_column, 2);
-    }
-
-    #[test]
-    fn translated_drag_extends_selection_in_whole_codons() {
-        let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .expect("setting translation frame should succeed");
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .toggle_translation_view()
-            .expect("translation should enable");
-
-        let area = app.app_layout.alignment_pane_sequence_rows;
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            area,
-            1,
-            0,
-        ));
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Drag(MouseButton::Left),
-            area,
-            7,
-            0,
-        ));
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Up(MouseButton::Left),
-            area,
-            7,
-            0,
-        ));
-
-        let selection = app.ui.selection.expect("selection should be created");
-        assert_eq!(selection.sequence_id, 0);
-        assert_eq!(selection.column, 0);
-        assert_eq!(selection.end_sequence_id, 0);
-        assert_eq!(selection.end_column, 8);
+        assert_eq!(app.ui.viewport.offsets.cols, 50);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn toggling_translation_preserves_the_stored_nucleotide_selection() {
+    async fn jump_to_position_updates_layout_local_feature_stacked() {
+        let sequence = vec![b'A'; 120];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.gff = Some(gff_with_overlapping_features());
+        app.rebuild_layout(app.layout_area);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
+
+        app.execute_commands([Command::JumpToPosition(50)]);
+
+        assert_eq!(app.ui.viewport.offsets.cols, 50);
+        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn translation_toggle_keeps_selection() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         let selection = MouseSelection {
             sequence_id: 0,
             column: 4,
@@ -828,17 +993,67 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn filter_gaps_shows_notification_when_translation_is_active() {
+    async fn reload_as_protein_clears_selection() {
         let mut app =
-            app_with_alignment(vec![raw("row1", b"ATGAAATTT"), raw("row2", b"ATGAAATTT")]);
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        app.ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 0,
+            end_sequence_id: 0,
+            end_column: 2,
+        });
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert!(app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert_eq!(
+            app.alignment.as_ref().unwrap().base().active_type(),
+            libmsa::AlignmentType::Protein
+        );
+        assert_eq!(app.ui.selection, None);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert!(!app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert_eq!(
+            app.alignment.as_ref().unwrap().base().active_type(),
+            libmsa::AlignmentType::Dna
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_as_protein_keeps_locus_from_nt() {
+        let sequence = vec![b'C'; 360];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.ui.viewport.jump_to_position(200);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert_eq!(app.ui.viewport.window().col_range.start, 66);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reload_as_dna_keeps_locus_from_aa() {
+        let sequence = vec![b'C'; 360];
+        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
+        app.ui.viewport.jump_to_position(200);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.ui.viewport.jump_to_position(70);
+
+        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+
+        assert_eq!(app.ui.viewport.window().col_range.start, 212);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gap_filter_blocked_during_translation() {
+        let mut app =
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
         app.execute_commands([Command::SetGapFilter(Some(0.25))]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
             "filter-gaps is unavailable while translation is active"
@@ -846,29 +1061,42 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn translation_shows_notification_when_gap_filter_is_active() {
-        let mut app = app_with_alignment(vec![raw("row1", b"ATG---"), raw("row2", b"ATG---")]);
-        app.execute_commands([Command::SetGapFilter(Some(0.0))]);
+    async fn constant_filter_blocked_during_translation() {
+        let mut app =
+            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
 
-        let notification = app
-            .ui
-            .notification
-            .as_ref()
-            .expect("notification should be created");
+        let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
             notification.message,
-            "translation is unavailable while filter-gaps is active"
+            "filter-constant is unavailable while translation is active"
         );
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn key_events_are_forwarded_to_command_execution() {
-        let mut app = app_with_alignment(vec![raw("row1", b"ACGT"), raw("row2", b"ACGT")]);
-        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    async fn translation_blocked_by_gap_filter() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
+        app.execute_commands([Command::SetGapFilter(Some(0.0))]);
+        app.execute_commands([Command::ToggleTranslationView]);
 
-        app.handle_key_event(key);
+        let notification = app.ui.notification.as_ref().unwrap();
+        assert_eq!(
+            notification.message,
+            "translation is unavailable while a column filter is active"
+        );
+    }
 
-        assert!(app.should_quit);
+    #[tokio::test(flavor = "current_thread")]
+    async fn translation_blocked_by_constant_filter() {
+        let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
+        app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
+        app.execute_commands([Command::ToggleTranslationView]);
+
+        let notification = app.ui.notification.as_ref().unwrap();
+        assert_eq!(
+            notification.message,
+            "translation is unavailable while a column filter is active"
+        );
     }
 }

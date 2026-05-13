@@ -1,31 +1,32 @@
 use crate::error::AlignmentError;
 
-/// Stores a raw sequence, before it has been validated into a [`Sequence`].
+/// Stores a raw sequence before it has been validated into an internal row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawSequence {
     pub id: String,
     pub sequence: Vec<u8>,
 }
 
-/// Represents a validated sequence in an alignment.
-///
-/// A `Sequence` will always have a non-empty sequence of bytes,
-/// and all sequences in an alignment will have the same length
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sequence {
-    id: String,
-    sequence: Box<[u8]>,
+pub(crate) struct Sequence {
+    pub(crate) id: String,
+    pub(crate) sequence: Box<[u8]>,
 }
 
-impl Sequence {
-    /// Returns the identifier (FASTA header).
-    pub fn id(&self) -> &str {
-        &self.id
-    }
+impl TryFrom<RawSequence> for Sequence {
+    type Error = AlignmentError;
 
-    /// Returns sequence in bytes.
-    pub fn sequence(&self) -> &[u8] {
-        &self.sequence
+    fn try_from(raw_sequence: RawSequence) -> Result<Self, Self::Error> {
+        if raw_sequence.sequence.is_empty() {
+            return Err(AlignmentError::EmptySequence {
+                id: raw_sequence.id,
+            });
+        }
+
+        Ok(Self {
+            id: raw_sequence.id,
+            sequence: raw_sequence.sequence.into_boxed_slice(),
+        })
     }
 }
 
@@ -36,49 +37,32 @@ pub(crate) struct AlignmentData {
 }
 
 impl AlignmentData {
-    pub(crate) fn from_raw(sequences: Vec<RawSequence>) -> Result<Self, AlignmentError> {
-        let mut raw_iter = sequences.into_iter();
-        let Some(first) = raw_iter.next() else {
+    pub(crate) fn new(sequences: Vec<Sequence>) -> Result<Self, AlignmentError> {
+        let mut sequences = sequences.into_iter();
+        let Some(first) = sequences.next() else {
             return Err(AlignmentError::Empty);
         };
 
-        if first.sequence.is_empty() {
-            return Err(AlignmentError::EmptySequence { id: first.id });
-        }
-
-        let width = first.sequence.len();
-        let first = Sequence {
-            id: first.id,
-            sequence: first.sequence.into_boxed_slice(),
-        };
-
-        let mut normalised = Vec::with_capacity(1 + raw_iter.len());
+        let length = first.sequence.len();
+        let mut normalised = Vec::with_capacity(1 + sequences.len());
         normalised.push(first);
 
-        let normalised = raw_iter.try_fold(normalised, |mut normalised, raw| {
-            if raw.sequence.is_empty() {
-                return Err(AlignmentError::EmptySequence { id: raw.id });
-            }
-
-            let actual = raw.sequence.len();
-            if actual != width {
+        for sequence in sequences {
+            let actual = sequence.sequence.len();
+            if actual != length {
                 return Err(AlignmentError::LengthMismatch {
-                    expected: width,
+                    expected: length,
                     actual,
-                    id: raw.id,
+                    id: sequence.id,
                 });
             }
 
-            normalised.push(Sequence {
-                id: raw.id,
-                sequence: raw.sequence.into_boxed_slice(),
-            });
-            Ok(normalised)
-        })?;
+            normalised.push(sequence);
+        }
 
         Ok(Self {
             sequences: normalised,
-            length: width,
+            length,
         })
     }
 }

@@ -1,6 +1,6 @@
+use std::{num::NonZeroU8, str::FromStr};
+
 use crate::error::AlignmentError;
-use std::num::NonZeroU8;
-use std::str::FromStr;
 
 /// Describes the alignment type used by an alignment.
 ///

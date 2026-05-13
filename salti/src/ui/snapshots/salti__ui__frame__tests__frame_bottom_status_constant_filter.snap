@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 285
+expression: "status_text(&build_bottom_status_bar(Some(&constant_filter_alignment),\n&ui_state(),))"
+---
+Filters: [constant: >= 100%] (3 rows) (0 cols)

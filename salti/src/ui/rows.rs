@@ -1,8 +1,11 @@
 use std::ops::Range;
 
-use crate::config::theme::SequenceTheme;
-use ratatui::style::Stylize;
-use ratatui::text::Span;
+use ratatui::{style::Stylize, text::Span};
+
+use crate::{
+    config::theme::SequenceTheme,
+    core::codon::{TranslatedByteRange, TranslatedDiffRange, TranslationOverlay},
+};
 
 /// Lookup table that maps each byte value (`0-255`) to a str for display.
 ///
@@ -33,32 +36,6 @@ pub struct RowRenderMode<'a> {
     pub diff_against: Option<&'a [u8]>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct TranslatedByteRange<'a> {
-    start: usize,
-    bytes: &'a [u8],
-}
-
-impl<'a> TranslatedByteRange<'a> {
-    pub fn new(start: usize, bytes: &'a [u8]) -> Self {
-        Self { start, bytes }
-    }
-
-    fn byte_at(self, protein_col: usize) -> Option<u8> {
-        let offset = protein_col.checked_sub(self.start)?;
-        self.bytes.get(offset).copied()
-    }
-}
-
-pub type TranslatedDiffRange<'a> = TranslatedByteRange<'a>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VisibleCodon {
-    protein_col: usize,
-    nuc_start: usize,
-    centre: usize,
-}
-
 #[inline]
 fn span_for_sequence_byte(
     sequence_byte: u8,
@@ -71,41 +48,26 @@ fn span_for_sequence_byte(
 }
 
 #[inline]
-fn format_visible_bytes(
-    bytes: &[u8],
+fn format_byte_iter_spans(
+    bytes: impl Iterator<Item = u8>,
     sequence_theme: &SequenceTheme,
-    alignment_type: libmsa::AlignmentType,
+    mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
-    bytes
-        .iter()
-        .map(|&byte| span_for_sequence_byte(byte, sequence_theme, alignment_type))
-        .collect()
-}
-
-#[inline]
-fn format_visible_bytes_with_diff(
-    bytes: &[u8],
-    diff_against: &[u8],
-    sequence_theme: &SequenceTheme,
-    alignment_type: libmsa::AlignmentType,
-) -> Vec<Span<'static>> {
-    assert_eq!(
-        bytes.len(),
-        diff_against.len(),
-        "diff bytes must match the visible width"
-    );
-
-    bytes
-        .iter()
-        .zip(diff_against.iter())
-        .map(|(&byte, &diff_byte)| {
-            if byte == diff_byte {
-                ".".fg(sequence_theme.diff_match)
-            } else {
-                span_for_sequence_byte(byte, sequence_theme, alignment_type)
-            }
-        })
-        .collect()
+    match mode.diff_against {
+        Some(diff_against) => bytes
+            .zip(diff_against.iter().copied())
+            .map(|(byte, diff_byte)| {
+                if byte == diff_byte {
+                    ".".fg(sequence_theme.diff_match)
+                } else {
+                    span_for_sequence_byte(byte, sequence_theme, mode.alignment_type)
+                }
+            })
+            .collect(),
+        None => bytes
+            .map(|byte| span_for_sequence_byte(byte, sequence_theme, mode.alignment_type))
+            .collect(),
+    }
 }
 
 pub fn format_row_spans(
@@ -113,75 +75,33 @@ pub fn format_row_spans(
     sequence_theme: &SequenceTheme,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
-    match mode.diff_against {
-        Some(diff_against) => format_visible_bytes_with_diff(
-            visible_bytes,
-            diff_against,
-            sequence_theme,
-            mode.alignment_type,
-        ),
-        None => format_visible_bytes(visible_bytes, sequence_theme, mode.alignment_type),
-    }
+    format_byte_iter_spans(visible_bytes.iter().copied(), sequence_theme, mode)
 }
 
-fn complete_protein_len(frame: libmsa::ReadingFrame, nucleotide_len: usize) -> usize {
-    nucleotide_len.saturating_sub(frame.offset()) / 3
-}
+pub fn format_row_view_spans(
+    sequence: libmsa::RowView<'_>,
+    col_range: &Range<usize>,
+    sequence_theme: &SequenceTheme,
+    mode: RowRenderMode<'_>,
+) -> Vec<Span<'static>> {
+    let bytes = sequence
+        .indexed_bytes_range(col_range.clone())
+        .expect("viewport range must be within the current view")
+        .map(|(_, byte)| byte);
 
-pub fn visible_protein_range(
-    visible_nucleotide_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> Option<Range<usize>> {
-    let last_visible_col = visible_nucleotide_range.end.checked_sub(1)?;
-    if last_visible_col < frame.offset() {
-        return None;
-    }
-
-    let protein_len = complete_protein_len(frame, nucleotide_len);
-    if protein_len == 0 {
-        return None;
-    }
-
-    let start = visible_nucleotide_range
-        .start
-        .saturating_sub(frame.offset())
-        / 3;
-    let end = ((last_visible_col - frame.offset()) / 3 + 1).min(protein_len);
-
-    (start < end).then_some(start..end)
-}
-
-fn visible_codons(
-    visible_nucleotide_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> impl Iterator<Item = VisibleCodon> {
-    visible_protein_range(visible_nucleotide_range, frame, nucleotide_len)
-        .into_iter()
-        .flatten()
-        .map(move |protein_col| {
-            let nuc_start = frame.offset() + protein_col * 3;
-            VisibleCodon {
-                protein_col,
-                nuc_start,
-                centre: nuc_start + 1,
-            }
-        })
+    format_byte_iter_spans(bytes, sequence_theme, mode)
 }
 
 pub fn format_translated_row_spans(
     sequence: libmsa::TranslatedSequenceView<'_>,
     visible_nucleotide_range: &Range<usize>,
-    nucleotide_len: usize,
-    frame: libmsa::ReadingFrame,
+    overlay: &TranslationOverlay,
     sequence_theme: &SequenceTheme,
     diff_against: Option<TranslatedDiffRange<'_>>,
 ) -> Vec<Span<'static>> {
     format_translated_spans(
         visible_nucleotide_range,
-        nucleotide_len,
-        frame,
+        overlay,
         sequence_theme,
         diff_against,
         |protein_col| sequence.byte_at(protein_col),
@@ -191,15 +111,13 @@ pub fn format_translated_row_spans(
 pub fn format_translated_byte_range_spans(
     bytes: TranslatedByteRange<'_>,
     visible_nucleotide_range: &Range<usize>,
-    nucleotide_len: usize,
-    frame: libmsa::ReadingFrame,
+    overlay: &TranslationOverlay,
     sequence_theme: &SequenceTheme,
     diff_against: Option<TranslatedDiffRange<'_>>,
 ) -> Vec<Span<'static>> {
     format_translated_spans(
         visible_nucleotide_range,
-        nucleotide_len,
-        frame,
+        overlay,
         sequence_theme,
         diff_against,
         |protein_col| bytes.byte_at(protein_col),
@@ -208,8 +126,7 @@ pub fn format_translated_byte_range_spans(
 
 fn format_translated_spans(
     visible_nucleotide_range: &Range<usize>,
-    nucleotide_len: usize,
-    frame: libmsa::ReadingFrame,
+    overlay: &TranslationOverlay,
     sequence_theme: &SequenceTheme,
     diff_against: Option<TranslatedDiffRange<'_>>,
     mut byte_at: impl FnMut(usize) -> Option<u8>,
@@ -217,8 +134,10 @@ fn format_translated_spans(
     let width = visible_nucleotide_range.len();
     let mut spans = vec![Span::raw(" "); width];
 
-    for codon in visible_codons(visible_nucleotide_range, frame, nucleotide_len) {
-        let residue = byte_at(codon.protein_col).expect("visible codon must resolve");
+    for codon in overlay.visible_codons(visible_nucleotide_range) {
+        let Some(residue) = byte_at(codon.protein_col) else {
+            continue;
+        };
         let translated_style = sequence_theme.style_for(residue, libmsa::AlignmentType::Protein);
         let diff_matches =
             diff_against.and_then(|diff| diff.byte_at(codon.protein_col)) == Some(residue);
@@ -249,8 +168,7 @@ fn format_translated_spans(
     spans
 }
 
-/// Collects visible bytes from a sequence view for the given relative column range.
-pub fn visible_bytes(sequence: libmsa::SequenceView<'_>, col_range: &Range<usize>) -> Vec<u8> {
+pub fn visible_bytes(sequence: libmsa::RowView<'_>, col_range: &Range<usize>) -> Vec<u8> {
     if col_range.is_empty() {
         return Vec::new();
     }
@@ -265,6 +183,7 @@ pub fn visible_bytes(sequence: libmsa::SequenceView<'_>, col_range: &Range<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::codon::TranslatedDiffRange;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -277,13 +196,11 @@ mod tests {
         spans.iter().map(|span| span.content.as_ref()).collect()
     }
 
-    #[test]
-    fn visible_protein_range_includes_complete_codons_overlapping_window() {
-        let range = visible_protein_range(&(1..8), libmsa::ReadingFrame::Frame1, 9);
-        assert_eq!(range, Some(0..3));
-
-        let range = visible_protein_range(&(0..2), libmsa::ReadingFrame::Frame3, 9);
-        assert!(range.is_none());
+    fn overlay(frame: libmsa::ReadingFrame, nucleotide_len: usize) -> TranslationOverlay {
+        TranslationOverlay {
+            frame,
+            nucleotide_len,
+        }
     }
 
     #[test]
@@ -293,14 +210,13 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
 
         let spans = format_translated_row_spans(
             sequence,
             &(0..9),
-            9,
-            libmsa::ReadingFrame::Frame1,
+            &overlay(libmsa::ReadingFrame::Frame1, 9),
             &crate::config::theme::EVERFOREST_DARK.sequence,
             None,
         );
@@ -316,15 +232,14 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
         let diff_against = TranslatedDiffRange::new(0, b"MKF");
 
         let spans = format_translated_row_spans(
             sequence,
             &(0..9),
-            9,
-            libmsa::ReadingFrame::Frame1,
+            &overlay(libmsa::ReadingFrame::Frame1, 9),
             &crate::config::theme::EVERFOREST_DARK.sequence,
             Some(diff_against),
         );
@@ -339,15 +254,14 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame1)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
         let diff_against = TranslatedDiffRange::new(0, b"MKF");
 
         let spans = format_translated_row_spans(
             sequence,
             &(0..9),
-            9,
-            libmsa::ReadingFrame::Frame1,
+            &overlay(libmsa::ReadingFrame::Frame1, 9),
             &crate::config::theme::EVERFOREST_DARK.sequence,
             Some(diff_against),
         );
@@ -365,14 +279,13 @@ mod tests {
         let sequence = alignment
             .translated(libmsa::ReadingFrame::Frame2)
             .expect("DNA alignment should translate")
-            .sequence_by_absolute(0)
-            .expect("visible row should resolve");
+            .project_absolute_row(0)
+            .expect("row should resolve");
 
         let spans = format_translated_row_spans(
             sequence,
             &(0..9),
-            9,
-            libmsa::ReadingFrame::Frame2,
+            &overlay(libmsa::ReadingFrame::Frame2, 9),
             &crate::config::theme::EVERFOREST_DARK.sequence,
             None,
         );

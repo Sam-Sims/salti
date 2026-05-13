@@ -4,8 +4,10 @@ use crate::{
         EVERFOREST_DARK, Theme, ThemeId, ThemeStyles, build_theme_styles, theme_from_id,
     },
     core::Viewport,
-    overlay::overlay_state::OverlayState,
-    ui::notification::Notification,
+    ui::{
+        layers::{notification::Notification, state::LayerState},
+        panes::gff::GffPaneState,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -71,23 +73,27 @@ impl Default for ThemeState {
 
 #[derive(Debug)]
 pub struct UiState {
-    pub(crate) overlay: OverlayState,
+    pub(crate) layers: LayerState,
+    pub(crate) gff_pane: GffPaneState,
     pub notification: Option<Notification>,
     pub selection: Option<MouseSelection>,
     pub theme: ThemeState,
     pub viewport: Viewport,
     pub meta: MetaState,
+    pub gff_tooltip: Option<String>,
 }
 
 impl UiState {
     pub fn new(startup: StartupState) -> Self {
         Self {
-            overlay: OverlayState::default(),
+            layers: LayerState::default(),
+            gff_pane: GffPaneState::default(),
             notification: None,
             selection: None,
             theme: ThemeState::default(),
             viewport: Viewport::default(),
             meta: MetaState::from(startup),
+            gff_tooltip: None,
         }
     }
 
@@ -101,7 +107,8 @@ impl UiState {
 
     pub fn clear_transient_state(&mut self) {
         self.selection = None;
-        self.overlay.close();
+        self.layers.close_active();
         self.notification = None;
+        self.gff_tooltip = None;
     }
 }

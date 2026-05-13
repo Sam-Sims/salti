@@ -2,23 +2,20 @@ use std::num::NonZeroUsize;
 
 use rand::seq::IndexedRandom;
 
-use crate::alignment_type::AlignmentType;
-use crate::data::AlignmentData;
-use crate::error::AlignmentError;
+use crate::{alignment_type::AlignmentType, data::AlignmentData, error::AlignmentError};
 
-// cant be zero
 const DEFAULT_SAMPLE_SIZE: usize = 100;
 const DEFAULT_CLASSIFICATION_THRESHOLD: f32 = 0.5;
-const NUCLEOTIDE_BYTES: &[u8] = b"ACGTURYSWKMBDHVN-.";
-const PROTEIN_BYTES: &[u8] = b"DEFHIKLMNPQRSVWYX-.";
+const NUCLEOTIDE_BYTES: &[u8] = b"ACGTURYSWKMBDHVN-";
+const PROTEIN_BYTES: &[u8] = b"DEFHIKLMNPQRSVWYX-";
 
 /// Options that control alignment type detection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DetectionOptions {
     /// The maximum number of sequences to sample when classifying an alignment.
     sample_size: NonZeroUsize,
-    /// The minimum fraction of observed non-gap symbols that must match a
-    /// before that classification is accepted.
+    /// The minimum fraction of observed non-gap symbols that must match before
+    /// that classification is accepted.
     classification_threshold: f32,
 }
 
@@ -71,8 +68,8 @@ pub(crate) fn detect_alignment_type(
     let (protein_count, nucleotide_count, total_count) = alignment
         .sequences
         .choose_multiple(rng, options.sample_size())
-        .flat_map(|sequence| sequence.sequence().iter().copied())
-        .filter(|byte| !matches!(byte, b'-' | b'.'))
+        .flat_map(|sequence| sequence.sequence.iter().copied())
+        .filter(|byte| !matches!(byte, b'-'))
         .map(|byte| byte.to_ascii_uppercase())
         .fold(
             (0usize, 0usize, 0usize),
@@ -113,8 +110,7 @@ mod detect_alignment_type_tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     use super::{DetectionOptions, detect_alignment_type};
-    use crate::data::AlignmentData;
-    use crate::{AlignmentError, AlignmentType, RawSequence};
+    use crate::{AlignmentError, AlignmentType, RawSequence, data::AlignmentData};
 
     fn raw(id: &str, sequence: &[u8]) -> RawSequence {
         RawSequence {
@@ -124,7 +120,12 @@ mod detect_alignment_type_tests {
     }
 
     fn make_data(rows: &[(&str, &[u8])]) -> AlignmentData {
-        AlignmentData::from_raw(rows.iter().map(|(id, seq)| raw(id, seq)).collect()).unwrap()
+        let sequences = rows
+            .iter()
+            .map(|(id, seq)| raw(id, seq).try_into())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        AlignmentData::new(sequences).unwrap()
     }
 
     fn detect_with_seed(

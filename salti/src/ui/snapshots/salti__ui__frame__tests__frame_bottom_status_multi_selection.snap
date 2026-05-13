@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 301
+expression: "status_text(&build_bottom_status_bar(None, &multi_selection_ui))"
+---
+3 sequence(s) selected @ 2-5

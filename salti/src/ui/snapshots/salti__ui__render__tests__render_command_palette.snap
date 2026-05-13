@@ -1,0 +1,28 @@
+---
+source: salti/src/ui/render.rs
+expression: "render_text(Some(&alignment), &ui, &metrics, area)"
+---
+                        File: Unknown | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│                  │1       10                                                                     │
+│                  │.   .    |    .                                                                │
+│1 seq1            │CATCATCATCATCATCAT                                                             │
+│2 seq2            │CATCATCATCATCATCAT                                                             │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+jump-position            clear-filter             reload-as-protein        set-translation-frame
+jump-sequence            filter-gaps              check-update             set-theme
+jump-feature             filter-constant          quit                     set-sequence-type
+pin-sequence             set-reference            set-diff-mode            load-gff
+unpin-sequence           clear-reference          load-alignment
+filter-rows              toggle-translate         set-consensus-method
+:█

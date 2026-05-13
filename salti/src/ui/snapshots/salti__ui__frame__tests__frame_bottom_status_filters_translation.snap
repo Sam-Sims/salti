@@ -1,0 +1,6 @@
+---
+source: salti/src/ui/frame.rs
+assertion_line: 271
+expression: "status_text(&build_bottom_status_bar(Some(&filtered_alignment), &ui_state()))"
+---
+Filters: [rows: seq1|seq2] [gaps: <= 50%] (2 rows) (9 cols) | Translation frame: 2

@@ -83,8 +83,9 @@ fn open_fasta_reader(input: &str) -> Result<fasta::Reader<paraseq::BoxedReader>>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     fn create_temp_fasta(content: &str) -> NamedTempFile {
         let temp_file = NamedTempFile::new().unwrap();
@@ -92,59 +93,74 @@ mod tests {
         temp_file
     }
 
-    #[test]
-    fn test_parse_valid() {
-        let content = ">seq1\nA-CG\n>seq2\nTGCA\n";
+    fn parse_temp_fasta(content: &str, cancel: &CancellationToken) -> Result<Vec<RawSequence>> {
         let temp_file = create_temp_fasta(content);
         let input = temp_file.path().to_str().unwrap();
-        let result = parse_fasta_file(input, &CancellationToken::new());
-        let sequences = result.expect("parse should succeed");
-        assert_eq!(sequences.len(), 2);
-        assert_eq!(sequences[0].id.as_str(), "seq1");
-        assert_eq!(sequences[0].sequence.as_slice(), b"A-CG");
-        assert_eq!(sequences[1].id.as_str(), "seq2");
-        assert_eq!(sequences[1].sequence.as_slice(), b"TGCA");
+        parse_fasta_file(input, cancel)
     }
 
     #[test]
-    fn test_parse_nonexistant() {
-        let result = parse_fasta_file("idontexist.fasta", &CancellationToken::new());
-        assert!(result.is_err());
+    fn parse_fasta_file_success() {
+        let sequences =
+            parse_temp_fasta(">seq1\nA-CG\n>seq2\nTGCA\n", &CancellationToken::new()).unwrap();
+
+        assert_eq!(
+            sequences,
+            vec![
+                RawSequence {
+                    id: "seq1".to_string(),
+                    sequence: b"A-CG".to_vec(),
+                },
+                RawSequence {
+                    id: "seq2".to_string(),
+                    sequence: b"TGCA".to_vec(),
+                },
+            ]
+        );
     }
 
     #[test]
-    fn test_parse_empty() {
-        let content = "";
-        let temp_file = create_temp_fasta(content);
-        let input = temp_file.path().to_str().unwrap();
-        let result = parse_fasta_file(input, &CancellationToken::new());
-        assert!(result.is_err());
+    fn parse_fasta_file_errors_missing_input() {
+        let error = parse_fasta_file("idontexist.fasta", &CancellationToken::new()).unwrap_err();
+
+        assert!(error.to_string().starts_with("Failed to open input:"));
     }
 
     #[test]
-    fn test_parse_no_seqs() {
-        let content = ">seq1\n>seq2\n";
-        let temp_file = create_temp_fasta(content);
-        let input = temp_file.path().to_str().unwrap();
-        let result = parse_fasta_file(input, &CancellationToken::new());
-        assert!(result.is_err());
+    fn parse_fasta_file_errors_empty_file() {
+        let error = parse_temp_fasta("", &CancellationToken::new()).unwrap_err();
+
+        assert!(error.to_string().starts_with("Failed to open input:"));
     }
 
     #[test]
-    fn test_parse_length_mismatch() {
-        let content = ">seq1\nATCG\n>seq2\nTGCAAA\n";
-        let temp_file = create_temp_fasta(content);
-        let input = temp_file.path().to_str().unwrap();
-        let result = parse_fasta_file(input, &CancellationToken::new());
-        assert!(result.is_err());
+    fn parse_fasta_file_errors_zero_length_sequences() {
+        let error = parse_temp_fasta(">seq1\n>seq2\n", &CancellationToken::new()).unwrap_err();
+
+        assert_eq!(error.to_string(), "Sequence has zero length for id seq1");
     }
 
     #[test]
-    fn test_parse_invalid() {
-        let content = "imaninvalidfasta\nfile\n";
-        let temp_file = create_temp_fasta(content);
-        let input = temp_file.path().to_str().unwrap();
-        let result = parse_fasta_file(input, &CancellationToken::new());
-        assert!(result.is_err());
+    fn parse_fasta_file_errors_length_mismatch() {
+        let error = parse_temp_fasta(">seq1\nATCG\n>seq2\nTGCAAA\n", &CancellationToken::new())
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Sequence length mismatch: expected 4, found 6 for id seq2"
+        );
+    }
+
+    #[test]
+    fn parse_fasta_file_errors_invalid_fasta() {
+        let error =
+            parse_temp_fasta("imaninvalidfasta\nfile\n", &CancellationToken::new()).unwrap_err();
+
+        let message = error.to_string();
+        assert!(
+            message.starts_with("Failed to open input:")
+                || message.starts_with("Error reading records:")
+                || message == "No valid FASTA records found in input"
+        );
     }
 }

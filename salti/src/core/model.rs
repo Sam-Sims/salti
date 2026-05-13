@@ -1,5 +1,7 @@
 use std::{fmt, ops::Range, str::FromStr};
 
+use crate::core::codon::{TranslationOverlay, complete_protein_len, visible_protein_range};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatsView {
     Raw,
@@ -118,6 +120,7 @@ impl RowPresentationState {
 pub struct FilterState {
     pattern: Option<String>,
     max_gap_fraction: Option<f32>,
+    min_constant_fraction: Option<f32>,
 }
 
 impl FilterState {
@@ -129,13 +132,31 @@ impl FilterState {
         self.max_gap_fraction
     }
 
+    pub fn min_constant_fraction(&self) -> Option<f32> {
+        self.min_constant_fraction
+    }
+
     pub fn has_column_filter(&self) -> bool {
-        self.max_gap_fraction.is_some()
+        self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some()
     }
 
     pub fn is_active(&self) -> bool {
-        self.pattern.is_some() || self.max_gap_fraction.is_some()
+        self.pattern.is_some()
+            || self.max_gap_fraction.is_some()
+            || self.min_constant_fraction.is_some()
     }
+}
+
+#[derive(Debug, Clone)]
+struct Stash {
+    base: libmsa::Alignment,
+}
+
+#[derive(Debug, Clone)]
+enum TranslationMode {
+    Off,
+    Overlay,
+    ReloadedProtein { stash: Stash },
 }
 
 #[derive(Debug)]
@@ -144,7 +165,7 @@ pub struct AlignmentModel {
     view: libmsa::Alignment,
     rows: RowPresentationState,
     filter: FilterState,
-    translation_enabled: bool,
+    translation_mode: TranslationMode,
     translation_frame: libmsa::ReadingFrame,
     pub diff_mode: DiffMode,
     pub consensus_method: libmsa::ConsensusMethod,
@@ -164,7 +185,7 @@ impl AlignmentModel {
             base,
             rows: RowPresentationState::default(),
             filter: FilterState::default(),
-            translation_enabled: false,
+            translation_mode: TranslationMode::Off,
             translation_frame: libmsa::ReadingFrame::Frame1,
             diff_mode: DiffMode::default(),
             consensus_method: libmsa::ConsensusMethod::default(),
@@ -188,42 +209,52 @@ impl AlignmentModel {
     }
 
     pub fn translation(&self) -> Option<libmsa::ReadingFrame> {
-        self.translation_enabled.then_some(self.translation_frame)
+        match &self.translation_mode {
+            TranslationMode::Overlay => Some(self.translation_frame),
+            TranslationMode::Off | TranslationMode::ReloadedProtein { .. } => None,
+        }
     }
 
-    #[cfg(test)]
+    pub fn is_reloaded_as_protein(&self) -> bool {
+        matches!(
+            &self.translation_mode,
+            TranslationMode::ReloadedProtein { .. }
+        )
+    }
+
     pub fn translation_frame(&self) -> libmsa::ReadingFrame {
         self.translation_frame
     }
 
     pub fn pin(&mut self, abs_row: usize) -> Result<(), libmsa::AlignmentError> {
         self.rows.pin(abs_row, self.base_row_count())?;
-        self.derive_view_from_intent()
+        self.update_current_view()
     }
 
     pub fn unpin(&mut self, abs_row: usize) -> Result<(), libmsa::AlignmentError> {
         self.rows.unpin(abs_row, self.base_row_count())?;
-        self.derive_view_from_intent()
+        self.update_current_view()
     }
 
     pub fn set_reference(&mut self, abs_row: usize) -> Result<(), libmsa::AlignmentError> {
         self.rows.set_reference(abs_row, self.base_row_count())?;
-        self.derive_view_from_intent()
+        self.update_current_view()
     }
 
     pub fn clear_reference(&mut self) -> Result<(), libmsa::AlignmentError> {
         self.rows.clear_reference();
-        self.derive_view_from_intent()
+        self.update_current_view()
     }
 
-    pub fn set_filter(&mut self, pattern: String) -> Result<(), libmsa::AlignmentError> {
+    pub fn set_filter(&mut self, pattern: impl Into<String>) -> Result<(), libmsa::AlignmentError> {
+        let pattern = pattern.into();
         let next_pattern = if pattern.is_empty() {
             None
         } else {
             Some(pattern)
         };
         let previous = std::mem::replace(&mut self.filter.pattern, next_pattern);
-        if let Err(error) = self.derive_view_from_intent() {
+        if let Err(error) = self.update_current_view() {
             self.filter.pattern = previous;
             return Err(error);
         }
@@ -236,8 +267,21 @@ impl AlignmentModel {
     ) -> Result<(), libmsa::AlignmentError> {
         let previous = self.filter.max_gap_fraction;
         self.filter.max_gap_fraction = max_gap_fraction;
-        if let Err(error) = self.derive_view_from_intent() {
+        if let Err(error) = self.update_current_view() {
             self.filter.max_gap_fraction = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn set_constant_filter(
+        &mut self,
+        min_constant_fraction: Option<f32>,
+    ) -> Result<(), libmsa::AlignmentError> {
+        let previous = self.filter.min_constant_fraction;
+        self.filter.min_constant_fraction = min_constant_fraction;
+        if let Err(error) = self.update_current_view() {
+            self.filter.min_constant_fraction = previous;
             return Err(error);
         }
         Ok(())
@@ -246,7 +290,8 @@ impl AlignmentModel {
     pub fn clear_filter(&mut self) -> Result<(), libmsa::AlignmentError> {
         self.filter.pattern = None;
         self.filter.max_gap_fraction = None;
-        self.derive_view_from_intent()
+        self.filter.min_constant_fraction = None;
+        self.update_current_view()
     }
 
     pub fn set_active_kind(
@@ -254,10 +299,12 @@ impl AlignmentModel {
         kind: libmsa::AlignmentType,
     ) -> Result<(), libmsa::AlignmentError> {
         self.base.set_override_type(kind);
-        if kind != libmsa::AlignmentType::Dna {
-            self.translation_enabled = false;
+        if kind != libmsa::AlignmentType::Dna
+            && matches!(&self.translation_mode, TranslationMode::Overlay)
+        {
+            self.translation_mode = TranslationMode::Off;
         }
-        self.derive_view_from_intent()
+        self.update_current_view()
     }
 
     pub fn set_translation(
@@ -265,7 +312,12 @@ impl AlignmentModel {
         frame: Option<libmsa::ReadingFrame>,
     ) -> Result<(), libmsa::AlignmentError> {
         let Some(frame) = frame else {
-            self.translation_enabled = false;
+            if !matches!(
+                &self.translation_mode,
+                TranslationMode::ReloadedProtein { .. }
+            ) {
+                self.translation_mode = TranslationMode::Off;
+            }
             return Ok(());
         };
 
@@ -277,7 +329,7 @@ impl AlignmentModel {
         }
 
         self.view.translated(frame)?;
-        self.translation_enabled = true;
+        self.translation_mode = TranslationMode::Overlay;
         self.translation_frame = frame;
         Ok(())
     }
@@ -286,6 +338,19 @@ impl AlignmentModel {
         &mut self,
         frame: libmsa::ReadingFrame,
     ) -> Result<(), libmsa::AlignmentError> {
+        let protein = match &self.translation_mode {
+            TranslationMode::ReloadedProtein { stash: dna_stash } => {
+                Some(dna_stash.base.translated(frame)?.to_alignment()?)
+            }
+            TranslationMode::Off | TranslationMode::Overlay => None,
+        };
+
+        if let Some(protein) = protein {
+            self.translation_frame = frame;
+            self.base = protein;
+            return self.update_current_view();
+        }
+
         if self.base.active_type() != libmsa::AlignmentType::Dna {
             return Err(libmsa::AlignmentError::UnsupportedOperation {
                 operation: "set translation frame",
@@ -299,43 +364,103 @@ impl AlignmentModel {
     }
 
     pub fn toggle_translation_view(&mut self) -> Result<(), libmsa::AlignmentError> {
-        if self.translation_enabled {
-            self.translation_enabled = false;
+        if matches!(&self.translation_mode, TranslationMode::Off) {
+            return self.set_translation(Some(self.translation_frame));
+        }
+
+        if matches!(&self.translation_mode, TranslationMode::Overlay) {
+            self.translation_mode = TranslationMode::Off;
             return Ok(());
         }
-        self.set_translation(Some(self.translation_frame))
+
+        Err(libmsa::AlignmentError::UnsupportedOperation {
+            operation: "set translation",
+            kind: self.base.active_type(),
+        })
+    }
+
+    pub fn toggle_reload_as_protein(
+        &mut self,
+        frame: Option<libmsa::ReadingFrame>,
+    ) -> Result<(), libmsa::AlignmentError> {
+        if let Some(frame) = frame {
+            self.translation_frame = frame;
+        }
+
+        if matches!(
+            &self.translation_mode,
+            TranslationMode::ReloadedProtein { .. }
+        ) {
+            let translation_mode =
+                std::mem::replace(&mut self.translation_mode, TranslationMode::Off);
+            let dna_stash = match translation_mode {
+                TranslationMode::ReloadedProtein { stash: dna_stash } => dna_stash,
+                TranslationMode::Off | TranslationMode::Overlay => unreachable!(),
+            };
+
+            self.base = dna_stash.base;
+            self.translation_mode = TranslationMode::Off;
+            return self.update_current_view();
+        }
+
+        let protein = self
+            .base
+            .translated(self.translation_frame)?
+            .to_alignment()?;
+        let dna_stash = Stash {
+            base: self.base.clone(),
+        };
+        self.base = protein;
+        self.translation_mode = TranslationMode::ReloadedProtein { stash: dna_stash };
+        self.update_current_view()
     }
 
     pub fn translated_view(&self) -> Option<libmsa::TranslatedAlignment<'_>> {
-        let frame = self.translation()?;
-        self.view.translated(frame).ok()
+        match &self.translation_mode {
+            TranslationMode::Overlay => self.view.translated(self.translation_frame).ok(),
+            TranslationMode::Off | TranslationMode::ReloadedProtein { .. } => None,
+        }
+    }
+
+    pub(crate) fn translation_overlay(&self) -> Option<TranslationOverlay> {
+        match &self.translation_mode {
+            TranslationMode::Overlay => Some(TranslationOverlay {
+                frame: self.translation_frame,
+                nucleotide_len: self.view().column_count(),
+            }),
+            TranslationMode::Off | TranslationMode::ReloadedProtein { .. } => None,
+        }
     }
 
     pub fn stats_context(&self, visible_col_range: Range<usize>) -> Option<StatsContext> {
-        if let Some(frame) = self.translation() {
-            let nucleotide_len = self.view().column_count();
-            let total_columns = complete_protein_len(frame, nucleotide_len);
-            if total_columns == 0 {
-                return None;
+        match &self.translation_mode {
+            TranslationMode::Overlay => {
+                let frame = self.translation_frame;
+                let nucleotide_len = self.view().column_count();
+                let total_columns = complete_protein_len(frame, nucleotide_len);
+                if total_columns == 0 {
+                    return None;
+                }
+                let range = visible_protein_range(&visible_col_range, frame, nucleotide_len)?;
+                Some(StatsContext {
+                    view: StatsView::Translated(frame),
+                    range,
+                    total_columns,
+                })
             }
-            let range = visible_protein_range(&visible_col_range, frame, nucleotide_len)?;
-            return Some(StatsContext {
-                view: StatsView::Translated(frame),
-                range,
-                total_columns,
-            });
-        }
+            TranslationMode::Off | TranslationMode::ReloadedProtein { .. } => {
+                let total_columns = self.view().column_count();
+                if total_columns == 0 || visible_col_range.is_empty() {
+                    return None;
+                }
 
-        let total_columns = self.view().column_count();
-        if total_columns == 0 || visible_col_range.is_empty() {
-            return None;
+                Some(StatsContext {
+                    view: StatsView::Raw,
+                    range: visible_col_range,
+                    total_columns,
+                })
+            }
         }
-
-        Some(StatsContext {
-            view: StatsView::Raw,
-            range: visible_col_range,
-            total_columns,
-        })
     }
 
     pub fn jump_to_sequence(&self, abs_row: usize) -> Option<String> {
@@ -356,7 +481,7 @@ impl AlignmentModel {
         self.base.row_count()
     }
 
-    fn derive_view_from_intent(&mut self) -> Result<(), libmsa::AlignmentError> {
+    fn update_current_view(&mut self) -> Result<(), libmsa::AlignmentError> {
         let mut builder = self.base.filter()?;
         builder = builder.without_rows(self.rows.excluded_rows());
         if let Some(pattern) = self.filter.pattern() {
@@ -364,6 +489,9 @@ impl AlignmentModel {
         }
         if let Some(max_gap_fraction) = self.filter.max_gap_fraction() {
             builder = builder.with_max_gap_fraction(max_gap_fraction);
+        }
+        if let Some(min_constant_fraction) = self.filter.min_constant_fraction() {
+            builder = builder.with_min_constant_fraction(min_constant_fraction);
         }
         self.view = builder.apply()?;
         Ok(())
@@ -380,34 +508,6 @@ fn validate_row_id(abs_row: usize, row_count: usize) -> Result<(), libmsa::Align
     })
 }
 
-const fn complete_protein_len(frame: libmsa::ReadingFrame, nucleotide_len: usize) -> usize {
-    nucleotide_len.saturating_sub(frame.offset()) / 3
-}
-
-fn visible_protein_range(
-    visible_nucleotide_range: &Range<usize>,
-    frame: libmsa::ReadingFrame,
-    nucleotide_len: usize,
-) -> Option<Range<usize>> {
-    let last_visible_col = visible_nucleotide_range.end.checked_sub(1)?;
-    if last_visible_col < frame.offset() {
-        return None;
-    }
-
-    let protein_len = complete_protein_len(frame, nucleotide_len);
-    if protein_len == 0 {
-        return None;
-    }
-
-    let start = visible_nucleotide_range
-        .start
-        .saturating_sub(frame.offset())
-        / 3;
-    let end = ((last_visible_col - frame.offset()) / 3 + 1).min(protein_len);
-
-    (start < end).then_some(start..end)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{AlignmentModel, DiffMode, RowPresentationState, StatsContext, StatsView};
@@ -420,8 +520,8 @@ mod tests {
     }
 
     fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).expect("alignment should be valid");
-        AlignmentModel::new(alignment).expect("alignment model should build")
+        let alignment = libmsa::Alignment::new(sequences).unwrap();
+        AlignmentModel::new(alignment).unwrap()
     }
 
     #[test]
@@ -438,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn row_presentation_state_rejects_pinning_the_reference() {
+    fn row_presentation_state_rejects_pinning_reference() {
         let mut state = RowPresentationState::default();
         state.set_reference(1, 3).unwrap();
 
@@ -451,26 +551,18 @@ mod tests {
     }
 
     #[test]
-    fn row_presentation_state_sets_reference() {
-        let mut state = RowPresentationState::default();
-
-        state.set_reference(1, 3).unwrap();
-
-        assert_eq!(state.reference(), Some(1));
-    }
-
-    #[test]
-    fn row_presentation_state_removes_row_when_reference_set() {
+    fn row_presentation_state_sets_reference_and_unpins_row() {
         let mut state = RowPresentationState::default();
         state.pin(1, 3).unwrap();
 
         state.set_reference(1, 3).unwrap();
 
+        assert_eq!(state.reference(), Some(1));
         assert!(!state.is_pinned(1));
     }
 
     #[test]
-    fn row_presentation_state_excluded_rows() {
+    fn row_presentation_state_lists_pinned_rows_before_reference() {
         let mut state = RowPresentationState::default();
         state.pin(1, 4).unwrap();
         state.pin(3, 4).unwrap();
@@ -513,8 +605,8 @@ mod tests {
     }
 
     #[test]
-    fn alignment_model_new_clones_base_into_view() {
-        let model = alignment_model(vec![raw("row1", b"ACGT"), raw("row2", b"TGCA")]);
+    fn alignment_model_new_sets_view_and_defaults() {
+        let model = alignment_model(vec![raw("seq1", b"CATC"), raw("seq2", b"ATAC")]);
 
         assert_eq!(model.base().row_count(), 2);
         assert_eq!(model.view().row_count(), 2);
@@ -524,13 +616,13 @@ mod tests {
 
     #[test]
     fn alignment_model_new_rejects_filtered_alignment() {
-        let alignment = libmsa::Alignment::new(vec![raw("row1", b"ACGT"), raw("row2", b"ACGT")])
-            .expect("alignment should be valid")
+        let alignment = libmsa::Alignment::new(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")])
+            .unwrap()
             .filter()
-            .expect("filter builder should build")
-            .with_row_regex("row1")
+            .unwrap()
+            .with_row_regex("seq1")
             .apply()
-            .expect("filtered alignment should build");
+            .unwrap();
 
         let error = AlignmentModel::new(alignment).unwrap_err();
 
@@ -546,9 +638,9 @@ mod tests {
     #[test]
     fn pin_hides_row_from_view() {
         let mut model = alignment_model(vec![
-            raw("row1", b"ACGT"),
-            raw("row2", b"ACGT"),
-            raw("row3", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
         ]);
 
         model.pin(1).unwrap();
@@ -561,9 +653,9 @@ mod tests {
     #[test]
     fn unpin_restores_row_to_view() {
         let mut model = alignment_model(vec![
-            raw("row1", b"ACGT"),
-            raw("row2", b"ACGT"),
-            raw("row3", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
         ]);
         model.pin(1).unwrap();
 
@@ -577,9 +669,9 @@ mod tests {
     #[test]
     fn set_reference_hides_row_from_view() {
         let mut model = alignment_model(vec![
-            raw("row1", b"ACGT"),
-            raw("row2", b"ACGT"),
-            raw("row3", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
         ]);
 
         model.set_reference(1).unwrap();
@@ -591,7 +683,7 @@ mod tests {
 
     #[test]
     fn clear_reference_restores_row_to_view() {
-        let mut model = alignment_model(vec![raw("row1", b"ACGT"), raw("row2", b"ACGT")]);
+        let mut model = alignment_model(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")]);
         model.set_reference(1).unwrap();
 
         model.clear_reference().unwrap();
@@ -603,25 +695,25 @@ mod tests {
     #[test]
     fn set_filter_applies_row_pattern() {
         let mut model = alignment_model(vec![
-            raw("alpha", b"ACGT"),
-            raw("beta", b"ACGT"),
-            raw("gamma", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
         ]);
 
-        model.set_filter("alpha|beta".to_string()).unwrap();
+        model.set_filter("seq1|seq2".to_string()).unwrap();
 
-        assert_eq!(model.filter().pattern(), Some("alpha|beta"));
+        assert_eq!(model.filter().pattern(), Some("seq1|seq2"));
         assert_eq!(model.view().row_count(), 2);
     }
 
     #[test]
-    fn set_filter_treats_empty_string_as_clear() {
+    fn set_filter_clears_pattern_on_empty_string() {
         let mut model = alignment_model(vec![
-            raw("alpha", b"ACGT"),
-            raw("beta", b"ACGT"),
-            raw("gamma", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
         ]);
-        model.set_filter("alpha|beta".to_string()).unwrap();
+        model.set_filter("seq1|seq2".to_string()).unwrap();
 
         model.set_filter(String::new()).unwrap();
 
@@ -630,22 +722,22 @@ mod tests {
     }
 
     #[test]
-    fn set_filter_restores_previous_pattern_on_error() {
-        let mut model = alignment_model(vec![raw("alpha", b"ACGT"), raw("beta", b"ACGT")]);
-        model.set_filter("alpha".to_string()).unwrap();
+    fn set_filter_keeps_previous_pattern_on_error() {
+        let mut model = alignment_model(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")]);
+        model.set_filter("seq1".to_string()).unwrap();
 
         let error = model.set_filter("(".to_string()).unwrap_err();
 
-        assert_eq!(model.filter().pattern(), Some("alpha"));
+        assert_eq!(model.filter().pattern(), Some("seq1"));
         assert!(matches!(error, libmsa::AlignmentError::InvalidRegex { .. }));
     }
 
     #[test]
-    fn set_gap_filter_applies_column_filter() {
+    fn set_gap_filter_hides_filtered_columns() {
         let mut model = alignment_model(vec![
-            raw("alpha", b"A--T"),
-            raw("beta", b"A--T"),
-            raw("gamma", b"ACGT"),
+            raw("seq1", b"C--C"),
+            raw("seq2", b"C--C"),
+            raw("seq3", b"CATC"),
         ]);
 
         model.set_gap_filter(Some(0.0)).unwrap();
@@ -655,26 +747,44 @@ mod tests {
     }
 
     #[test]
-    fn clear_filter_removes_both_filters() {
+    fn set_constant_filter_hides_constant_columns() {
+        let alignment = libmsa::Alignment::new(vec![
+            raw("seq1", b"CN-C"),
+            raw("seq2", b"C--C"),
+            raw("seq3", b"CTGC"),
+        ])
+        .unwrap();
+        let mut model = AlignmentModel::new(alignment).unwrap();
+
+        model.set_constant_filter(Some(1.0)).unwrap();
+
+        assert_eq!(model.filter().min_constant_fraction(), Some(1.0));
+        assert_eq!(model.view().column_count(), 0);
+    }
+
+    #[test]
+    fn clear_filter_removes_row_and_column_filters() {
         let mut model = alignment_model(vec![
-            raw("alpha", b"A--T"),
-            raw("beta", b"A--T"),
-            raw("gamma", b"ACGT"),
+            raw("seq1", b"C--C"),
+            raw("seq2", b"C--C"),
+            raw("seq3", b"CATC"),
         ]);
-        model.set_filter("alpha|beta".to_string()).unwrap();
+        model.set_filter("seq1|seq2".to_string()).unwrap();
         model.set_gap_filter(Some(0.0)).unwrap();
+        model.set_constant_filter(Some(1.0)).unwrap();
 
         model.clear_filter().unwrap();
 
         assert_eq!(model.filter().pattern(), None);
         assert_eq!(model.filter().max_gap_fraction(), None);
+        assert_eq!(model.filter().min_constant_fraction(), None);
         assert_eq!(model.view().row_count(), 3);
         assert_eq!(model.view().column_count(), 4);
     }
 
     #[test]
-    fn set_active_kind_disables_translation_when_leaving_dna() {
-        let mut model = alignment_model(vec![raw("dna", b"ATGAAATTT")]);
+    fn set_active_kind_clears_translation_outside_dna() {
+        let mut model = alignment_model(vec![raw("seq1", b"CATCATCATCAT")]);
         model
             .set_translation(Some(libmsa::ReadingFrame::Frame1))
             .unwrap();
@@ -688,8 +798,8 @@ mod tests {
     }
 
     #[test]
-    fn set_translation_enables_translation_for_dna() {
-        let mut model = alignment_model(vec![raw("dna", b"ATGAAATTT")]);
+    fn set_translation_enables_translation_in_dna() {
+        let mut model = alignment_model(vec![raw("seq1", b"CATCATCATCAT")]);
 
         model
             .set_translation(Some(libmsa::ReadingFrame::Frame2))
@@ -700,8 +810,8 @@ mod tests {
     }
 
     #[test]
-    fn set_translation_rejects_non_dna_alignments() {
-        let mut model = alignment_model(vec![raw("aa", b"MKF")]);
+    fn set_translation_rejects_non_dna_alignment() {
+        let mut model = alignment_model(vec![raw("seq1", b"MKF")]);
         model
             .set_active_kind(libmsa::AlignmentType::Protein)
             .unwrap();
@@ -721,7 +831,7 @@ mod tests {
 
     #[test]
     fn set_translation_frame_updates_stored_frame() {
-        let mut model = alignment_model(vec![raw("dna", b"ATGAAATTT")]);
+        let mut model = alignment_model(vec![raw("seq1", b"CATCATCATCAT")]);
 
         model
             .set_translation_frame(libmsa::ReadingFrame::Frame3)
@@ -732,8 +842,8 @@ mod tests {
     }
 
     #[test]
-    fn set_translation_frame_rejects_non_dna_alignments() {
-        let mut model = alignment_model(vec![raw("aa", b"MKF")]);
+    fn set_translation_frame_rejects_non_dna_alignment() {
+        let mut model = alignment_model(vec![raw("seq1", b"MKF")]);
         model
             .set_active_kind(libmsa::AlignmentType::Protein)
             .unwrap();
@@ -752,8 +862,117 @@ mod tests {
     }
 
     #[test]
-    fn stats_context_returns_raw_range_unchanged() {
-        let model = alignment_model(vec![raw("row1", b"ACGT"), raw("row2", b"ACGT")]);
+    fn reload_as_protein_preserves_filter_and_restores_dna() {
+        let mut model = alignment_model(vec![
+            raw("seq1", b"CATCATCATCAT"),
+            raw("seq2", b"CATCATCATCAT"),
+        ]);
+        model.set_filter("seq1".to_string()).unwrap();
+        model
+            .set_translation(Some(libmsa::ReadingFrame::Frame2))
+            .unwrap();
+
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert!(model.is_reloaded_as_protein());
+        assert_eq!(model.base().active_type(), libmsa::AlignmentType::Protein);
+        assert_eq!(model.view().column_count(), 4);
+        assert_eq!(model.filter().pattern(), Some("seq1"));
+        assert_eq!(model.translation(), None);
+
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert!(!model.is_reloaded_as_protein());
+        assert_eq!(model.base().active_type(), libmsa::AlignmentType::Dna);
+        assert_eq!(model.filter().pattern(), Some("seq1"));
+        assert_eq!(model.translation(), None);
+    }
+
+    #[test]
+    fn set_translation_frame_retranslates_reloaded_protein_alignment() {
+        let mut model = alignment_model(vec![raw("seq1", b"ATGCCCTAA")]);
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert_eq!(model.base().column_count(), 3);
+        assert_eq!(model.base().sequence(0).unwrap().byte_at(0), Some(b'M'));
+
+        model
+            .set_translation_frame(libmsa::ReadingFrame::Frame2)
+            .unwrap();
+
+        assert!(model.is_reloaded_as_protein());
+        assert_eq!(model.translation_frame(), libmsa::ReadingFrame::Frame2);
+        assert_eq!(model.base().column_count(), 3);
+        assert_eq!(model.base().sequence(0).unwrap().byte_at(0), Some(b'C'));
+    }
+
+    #[test]
+    fn reload_as_protein_uses_requested_frame_and_keeps_it_global() {
+        let mut model = alignment_model(vec![raw("seq1", b"ATGCCCTAA")]);
+
+        model
+            .toggle_reload_as_protein(Some(libmsa::ReadingFrame::Frame3))
+            .unwrap();
+
+        assert_eq!(model.translation_frame(), libmsa::ReadingFrame::Frame3);
+        assert_eq!(model.base().sequence(0).unwrap().byte_at(0), Some(b'A'));
+
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert_eq!(model.translation_frame(), libmsa::ReadingFrame::Frame3);
+    }
+
+    #[test]
+    fn filters_changed_in_reloaded_protein_view_persist_in_dna() {
+        let mut model = alignment_model(vec![
+            raw("seq1", b"CAT---CATCAT"),
+            raw("seq2", b"CATCATCATCAT"),
+            raw("seq3", b"CATCATCATCAT"),
+        ]);
+        model.toggle_reload_as_protein(None).unwrap();
+
+        model.set_filter("seq1|seq2".to_string()).unwrap();
+        model.set_gap_filter(Some(0.5)).unwrap();
+        model.set_constant_filter(Some(1.0)).unwrap();
+
+        assert_eq!(model.filter().pattern(), Some("seq1|seq2"));
+        assert_eq!(model.filter().max_gap_fraction(), Some(0.5));
+        assert_eq!(model.filter().min_constant_fraction(), Some(1.0));
+
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert_eq!(model.base().active_type(), libmsa::AlignmentType::Dna);
+        assert_eq!(model.filter().pattern(), Some("seq1|seq2"));
+        assert_eq!(model.filter().max_gap_fraction(), Some(0.5));
+        assert_eq!(model.filter().min_constant_fraction(), Some(1.0));
+    }
+
+    #[test]
+    fn live_presentation_state_persists_across_reloaded_protein_toggle() {
+        let mut model = alignment_model(vec![
+            raw("seq1", b"CATCATCATCAT"),
+            raw("seq2", b"CATCATCATCAT"),
+            raw("seq3", b"CATCATCATCAT"),
+        ]);
+        model.toggle_reload_as_protein(None).unwrap();
+
+        model.pin(0).unwrap();
+        model.set_reference(1).unwrap();
+        model.diff_mode = DiffMode::Consensus;
+        model.consensus_method = libmsa::ConsensusMethod::Majority;
+
+        model.toggle_reload_as_protein(None).unwrap();
+
+        assert_eq!(model.base().active_type(), libmsa::AlignmentType::Dna);
+        assert_eq!(model.rows().pinned(), &[0]);
+        assert_eq!(model.rows().reference(), Some(1));
+        assert_eq!(model.diff_mode, DiffMode::Consensus);
+        assert_eq!(model.consensus_method, libmsa::ConsensusMethod::Majority);
+    }
+
+    #[test]
+    fn stats_context_keeps_raw_range() {
+        let model = alignment_model(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")]);
 
         assert_eq!(
             model.stats_context(1..3),
@@ -767,7 +986,7 @@ mod tests {
 
     #[test]
     fn stats_context_maps_translated_range_to_protein_columns() {
-        let mut model = alignment_model(vec![raw("row1", b"ATGAAATTT")]);
+        let mut model = alignment_model(vec![raw("seq1", b"ATGAAATTT")]);
         model
             .set_translation(Some(libmsa::ReadingFrame::Frame2))
             .unwrap();
@@ -783,12 +1002,12 @@ mod tests {
     }
 
     #[test]
-    fn stats_context_returns_none_when_no_columns_can_be_computed() {
-        let model = alignment_model(vec![raw("row1", b"ACGT")]);
+    fn stats_context_returns_none_without_visible_columns() {
+        let model = alignment_model(vec![raw("seq1", b"CATC")]);
 
         assert_eq!(model.stats_context(0..0), None);
 
-        let mut translated = alignment_model(vec![raw("row1", b"AT")]);
+        let mut translated = alignment_model(vec![raw("seq1", b"AT")]);
         translated
             .set_translation(Some(libmsa::ReadingFrame::Frame1))
             .unwrap();
@@ -796,16 +1015,16 @@ mod tests {
     }
 
     #[test]
-    fn jump_to_sequence_reports_why_hidden_rows_are_not_visible() {
+    fn jump_to_sequence_reports_why_row_is_hidden() {
         let mut model = alignment_model(vec![
-            raw("row1", b"ACGT"),
-            raw("row2", b"ACGT"),
-            raw("row3", b"ACGT"),
-            raw("row4", b"ACGT"),
+            raw("seq1", b"CATC"),
+            raw("seq2", b"CATC"),
+            raw("seq3", b"CATC"),
+            raw("seq4", b"CATC"),
         ]);
         model.pin(0).unwrap();
         model.set_reference(1).unwrap();
-        model.set_filter("row4".to_string()).unwrap();
+        model.set_filter("seq4".to_string()).unwrap();
 
         assert_eq!(
             model.jump_to_sequence(0),

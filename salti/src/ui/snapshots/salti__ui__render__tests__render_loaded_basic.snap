@@ -1,0 +1,26 @@
+---
+source: salti/src/ui/render.rs
+expression: "render_text(Some(&alignment), &ui, &metrics, area)"
+---
+                        File: Unknown | Status: Loaded | 4 alignments | Length: 18 | Positions: 1-18
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│                  │1       10                                                                     │
+│                  │.   .    |    .                                                                │
+│1 seq1            │CATCATCATCATCATCAT                                                             │
+│2 seq2            │CATCATGATCATCATCAT                                                             │
+│3 seq3            │CATCATCATCATGATCAT                                                             │
+│4 seq4            │CATCATCATCATCATCAT                                                             │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+│                  │                                                                               │
+├──────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+│Reference Sequence│No reference selected                                                          │
+│Consensus Sequence│CATCATCATCATCATCAT                                                             │
+│Conservation:     │██████████████████                                                             │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-// this is essentially the scroll position in each axis
-// i.e the top-left of the visible area
+// This is effectively the scroll position in each axis.
+// It is the top-left of the visible area.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ViewportOffsets {
     pub rows: usize,
@@ -9,8 +9,8 @@ pub struct ViewportOffsets {
     pub names: usize,
 }
 
-// this is how much is visible on each axis.
-// this is affected by terminal size/layout etc.
+// This is how much is visible on each axis.
+// It is affected by terminal size and layout.
 #[derive(Debug, Clone, Default)]
 struct ViewportDims {
     rows: usize,
@@ -18,8 +18,8 @@ struct ViewportDims {
     name_width: usize,
 }
 
-// maximum bounds of the data.
-// this is the full size of the alignment and name data, independent of the terminal.
+// Maximum bounds of the data.
+// This is the full size of the alignment and name data, independent of the terminal.
 #[derive(Debug, Clone, Default)]
 struct ViewportMax {
     rows: usize,
@@ -34,10 +34,17 @@ pub struct Viewport {
     max: ViewportMax,
 }
 
+/// Viewport window expressed in visible-row and visible-column coordinates.
+///
+/// Visible coordinates map to absolute coordinates via
+/// [`libmsa::Alignment::absolute_row_id`] and [`libmsa::Alignment::absolute_column_id`].
 #[derive(Debug, Clone)]
 pub struct ViewportWindow {
+    /// Visible row indices into the current filtered view.
     pub row_range: Range<usize>,
+    /// Visible column indices into the current filtered view.
     pub col_range: Range<usize>,
+    /// Visible name-column indices for the sequence ID pane.
     pub name_range: Range<usize>,
 }
 
