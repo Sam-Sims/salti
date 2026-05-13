@@ -5,13 +5,18 @@
 [![test](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/test.yaml)
 [![check](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml/badge.svg)](https://github.com/Sam-Sims/salti/actions/workflows/check.yaml)
 
-# salti
+<h1 align="center">Salti</h1>
+
+<p align="center">
+  <img src="assets/salti_ss.png" />
+</p>
 
 `salti` is a terminal based multiple sequence alignment (MSA) viewer for FASTA files.
 It is designed for fast interactive browsing primarily on remote servers, and HPC environments, or anytime you dont want
 to leave the terminal.
 
 ## Quick start
+
 If using linux/macOS
 
 ```bash
@@ -31,7 +36,7 @@ conda install -c bioconda salti
 - [Usage](#usage)
 - [Some notes on features](#some-notes-on-features)
 
-## Features
+## Feature showcase
 
 ### Fast
 
@@ -66,13 +71,6 @@ Hold middle mouse to pan around the alignment.
 Press `m` to open the minimap and drag to quickly pan around.
 
 ![minimap](assets/minimap.gif)
-
-### Nucleotide and Amino acid support
-
-`salti` automatically detects whether your alignment is nucleotide (NT) or amino acid (AA), then applies the correct
-rendering mode.
-
-![nt/aa](assets/aant.png)
 
 ### Translation
 
@@ -195,6 +193,9 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Ctrl + Left click` - Select a range of sequences or positions
 - `Middle click + drag` - Pan.
 - `m` - Open the minimap
+- `t` - Quick translate the current view.
+- `Shift+t` - Full translate the current view.
+- `Alt+1|2|3` - Change reading frame for translation.
 
 ### Command palette
 
@@ -211,15 +212,19 @@ Commands:
 
 - `jump-position` - Jump to a 1-based alignment position.
 - `jump-sequence` - Jump to a sequence by name
+- `jump-feature` - Jump to a feature if a GFF file has been loaded.
 - `pin-sequence` - Pin a visible sequence to the top of the alignment view.
 - `unpin-sequence` - Remove a sequence from the pinned group.
 - `filter-rows` - Filter rows by their IDs (fasta headers) via regex.
 - `filter-gaps` - Filter columns by their gap percentage.
+- `filter-constant` - Filter columns by their similarity.
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
+- `reload-as-protein` - Reloads the entire alignment as a protien alignment.
 - `set-diff-mode` - Set diff rendering mode (`off`, `reference`, or `consensus`).
 - `load-alignment` (alias: `load`) - Load an alignment file.
+- `load-gff` - Load an GFF3 annotation file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
@@ -248,6 +253,27 @@ If there is a tie for most common character, one is chosen at random.
 
 Consensus is calculated in the background
 
+### Quick translate vs full translate
+
+`salti` offers two methods of translating. The first is "quick translate" toggled by pressing `t` or the `toggle-translate` command, named as such because
+it only translates the visible view and so is technically faster than the full translate
+
+Quick translate maps the currently visible nucleotides into their respetive codons according to the current frame and then renders them 
+as an amino acid overlay. This does not change the coordinate space - and the ruler will stay in nucleotides. Clicking on an amino acid however
+will display the coordinate in protein space in the bottom status bar.
+
+Importantly quick translate can not be used if any of the columns have been filtered - as this would cause frameshifts and would not make sense to
+represent.
+
+In contrast full translate (`Shift+T` or the `reload-as-protein` command) takes the full alignment and reloads it into a protein alignment, as if you 
+had loaded a fasta with the translated amino acids instead of nucleotides. This means the coordinate space becomes amino acids - and each amino acid
+is represented by one column. This means full translate is compatible with column filtering, unlike quick translate.
+
+In practice this is still very fast (~3000 mpox virus sequences which are about 200kb big can be translated in under 0.1 seconds on my PC) and so it is useful
+to switch between different translation modes depending on what is useful.
+
+Reading frame can be changed at any time using `Alt+1`, `Alt+2`, `Alt+3`, or the `set-translation-frame` command.
+
 ### Gap filtering
 
 `filter-gaps` hides columns whose gap fraction is above the threshold you give it. The threshold is a percentage, so
@@ -259,6 +285,29 @@ Dense regions of skipped columns are shown as a run of `~` characters rather tha
 
 Gap filtering and translation cannot be used at the same time. If translation is active, `filter-gaps` will be
 rejected. Likewise if a gap filter is active, translation cannot be enabled until the filter is cleared.
+
+### Constant filtering
+
+`filter-constant` hides columns where any given value in the column meets the threshold you give it. Like gap filtering, the
+threshold is also a percentage so `filter-constant 100` hides columns where 100% of the positions are the same (i.e removes constant sites).
+
+Like gap filtering - removing columns can change the visible coordinate space - see gap filtering for a more detailed breakdown of what that means.
+
+`filter-constant 99` hides columns where 99% of the positions are the same and so on. `filter-constant 0` clears the filter.
+
+NOTE:
+Gaps and Unknown symbols (`N`/`X`) are not counted when calculating constants
+
+### GFF support
+
+`salti` can load and display GFF3 annotations from a file with the `load-gff` command. This is currently experimental.
+
+Currently annotations are treated as "global" - and per sequence annotations are not supported. This also means there is no fancy business that
+tries to match GFF coordinates to gaps etc. This is mainly useful in specific use cases e.g:
+
+When you have multiple alignments to a reference sequence where that reference does not have gaps inserted (i.e insertions are ignored). 
+For example running mafft something like `mafft --add --keeplength` or using alignments from [nextclade](https://github.com/nextstrain/nextclade)
+or [fastalign](https://github.com/Sam-Sims/fastalign).
 
 ### Pinned behaviour
 
