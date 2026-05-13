@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-13
+
+### Added
+
+- `filter-constant` command to hide highly conserved columns by threshold - ignores gaps and unknown symbols in DNA and protein alignments.
+- `reload-as-protein` command and `Shift+T` shortcut to toggle a full protein-translated alignment view alongside the existing quick translation overlay (`t`).
+- Experimental GFF3 annotation support via `load-gff`, including a global feature pane and a local feature track above the alignment.
+  - This is only visible if a GFF is loaded
+- `jump-feature` command to jump to named features from a loaded GFF file.
+
+### Changed
+
+- Translation handling is now split more cleanly between quick overlay translation and full protein reload, with reading frame changes updating both modes correctly.
+- Sequence type detection is now deterministic.
+- Significant under-the-hood performance improvements in `libmsa`, including faster translation
+- Refactored the UI into panes and layers to simplify, and migrated them so each component implements the ratatui widget trait
+- Some UI changes to make the interface a bit sleeker - dropping obvious titles in panes etc
+
+### Fixed
+
+- Mouse selection highlighting in the `terminal-default` theme using background colour making selection unusable.
+- Ruler rendering bugs that could happen with filtered columns.
+
 ## [0.8.0] - 2026-02-26
 
 ### Added
