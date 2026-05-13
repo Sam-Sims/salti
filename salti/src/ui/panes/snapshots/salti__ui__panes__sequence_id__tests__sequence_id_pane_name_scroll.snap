@@ -1,8 +1,8 @@
 ---
-source: salti/src/ui/sequence_id_pane.rs
+source: salti/src/ui/panes/sequence_id.rs
 expression: "render_sequence_id_pane_text(&alignment, &window)"
 ---
-┌Sequence Name───────────────┐
+┌────────────────────────────┐
 │                            │
 │                            │
 │1 loooooooooooong-na        │

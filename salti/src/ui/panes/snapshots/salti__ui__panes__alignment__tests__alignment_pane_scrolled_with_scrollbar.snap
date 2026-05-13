@@ -1,9 +1,8 @@
 ---
-source: salti/src/ui/alignment_pane.rs
-assertion_line: 825
+source: salti/src/ui/panes/alignment.rs
 expression: "render_alignment_pane_text(&alignment, &ColumnStatsCache::default(),\nRect::new(0, 0, 60, 12), 0, 10,)"
 ---
-┌Alignment──────────────────────────────────────┐
+┌───────────────────────────────────────────────┐
 │        20        30                           │
 │    .    |    .    |    .                      │
 │ATCATCATCATCATCATCATCATCAT                     │

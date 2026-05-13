@@ -1,10 +1,9 @@
 ---
 source: salti/src/ui/render.rs
-assertion_line: 563
 expression: "render_text(Some(&alignment), &ui, &metrics, area)"
 ---
                         File: Unknown | Status: Loaded | 3 alignments | Length: 36 | Positions: 1-36
-┌Sequence Name─────┬Alignment──────────────────────────────────────────────────────────────────────┐
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
 │                  │1       10        20        30                                                 │
 │                  │.   .    |    .    |    .    |    .                                            │
 │1 seq1            │CATCATCATCATCATCATCATCATCATCATCATCAT                                           │

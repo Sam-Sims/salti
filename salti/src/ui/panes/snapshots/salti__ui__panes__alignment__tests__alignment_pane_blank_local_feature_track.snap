@@ -1,12 +1,13 @@
 ---
 source: salti/src/ui/panes/alignment.rs
-expression: "render_alignment_pane_text(&alignment, &ColumnStatsCache::default(),\nRect::new(0, 0, 100, 12), 0, 0,)"
+assertion_line: 520
+expression: "render_alignment_pane_text_with_gff(&alignment, &ColumnStatsCache::default(),\nSome(&gff), Rect::new(0, 0, 100, 12), 0, 0,)"
 ---
 ┌───────────────────────────────────────────────────────────────────────────────┐
+│                                                                               │
 │1       10                                                                     │
 │.   .    |    .                                                                │
-│......G...........                                                             │
-│............G.....                                                             │
-│                                                                               │
-│                                                                               │
+│CATCATCATCATCATCAT                                                             │
+│CATCATCATCATCATCAT                                                             │
+│CATCATCATCATCATCAT                                                             │
 └───────────────────────────────────────────────────────────────────────────────┘

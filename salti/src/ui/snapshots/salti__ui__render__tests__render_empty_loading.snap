@@ -1,6 +1,0 @@
----
-source: salti/src/ui/render.rs
-assertion_line: 455
-expression: "render_text(None, &loading_ui, &ColumnStatsCache::default(), area)"
----
-                         File: Unknown | Status: Loading | 0 alignments | Length: 0 | Positions: 0-0
