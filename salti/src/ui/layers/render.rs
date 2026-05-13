@@ -1,11 +1,12 @@
-use crate::core::model::AlignmentModel;
-use crate::ui::layers::minimap::Minimap;
-use crate::ui::layers::notification::render_notification;
-use crate::ui::layers::state::ActiveLayer;
-use crate::ui::ui_state::UiState;
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::widgets::Block;
+use ratatui::{Frame, layout::Rect, widgets::Block};
+
+use crate::{
+    core::model::AlignmentModel,
+    ui::{
+        layers::{minimap::Minimap, notification::render_notification, state::ActiveLayer},
+        ui_state::UiState,
+    },
+};
 
 pub fn render_overlays(
     f: &mut Frame,

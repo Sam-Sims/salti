@@ -1,9 +1,11 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Styled, Stylize};
-use ratatui::symbols::merge::MergeStrategy;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Styled, Stylize},
+    symbols::merge::MergeStrategy,
+    text::Line,
+    widgets::{Block, Paragraph, Widget},
+};
 
 use crate::{
     core::{

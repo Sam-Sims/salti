@@ -1,12 +1,12 @@
-use std::fs::{File, OpenOptions};
-use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::{
+    fs::{File, OpenOptions},
+    io::ErrorKind,
+    path::PathBuf,
+};
 
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// fallback filter used when `RUST_LOG` env is not set.
 const DEFAULT_LOG_LEVEL: &str = "salti=debug";

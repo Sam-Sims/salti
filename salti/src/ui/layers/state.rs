@@ -1,5 +1,4 @@
-use crate::ui::layers::minimap::MinimapState;
-use crate::ui::layers::palette::CommandPaletteState;
+use crate::ui::layers::{minimap::MinimapState, palette::CommandPaletteState};
 
 #[derive(Debug)]
 pub enum ActiveLayer {

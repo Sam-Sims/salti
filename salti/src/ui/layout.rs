@@ -1,5 +1,7 @@
-use ratatui::layout::{Rect, Spacing};
-use ratatui::macros::{horizontal, vertical};
+use ratatui::{
+    layout::{Rect, Spacing},
+    macros::{horizontal, vertical},
+};
 
 /// fixed height (rows) for the bottom consensus pane.
 /// the remaining vertical space is used for the alignment pane.

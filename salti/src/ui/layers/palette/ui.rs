@@ -1,9 +1,16 @@
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Styled;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Clear, Paragraph, Widget};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Styled,
+    text::Line,
+    widgets::{Block, Clear, Paragraph, Widget},
+};
 
+use super::{
+    command_spec::PaletteCommand,
+    input::{CommandPaletteState, PaletteState},
+    utils::{pad_label, wrap_text},
+};
 use crate::core::search::SearchableList;
 
 use super::command_spec::PaletteCommand;

@@ -1,19 +1,25 @@
-use anyhow::format_err;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use libmsa::AlignmentType;
 
-use crate::command::Command;
-use crate::core::gff::Gff;
-use crate::core::model::AlignmentModel;
-use crate::core::search::{Direction, FilterMode, SearchableList};
-use crate::ui::layers::notification::{Notification, NotificationLevel};
-use crate::ui::panes::gff::FeatureMap;
-
-use super::command_definitions::COMMAND_SPECS;
-use super::command_spec::{PaletteCommand, TypableCommand};
-use super::utils::parse_argument;
+use super::{
+    command_definitions::COMMAND_SPECS,
+    command_spec::{PaletteCommand, TypableCommand},
+    utils::parse_argument,
+};
+use crate::{
+    command::Command,
+    core::{
+        gff::Gff,
+        model::AlignmentModel,
+        search::{Direction, FilterMode, SearchableList},
+    },
+    ui::{
+        features::FeatureMap,
+        layers::notification::{Notification, NotificationLevel},
+    },
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum PaletteState {

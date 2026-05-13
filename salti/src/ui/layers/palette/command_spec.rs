@@ -1,5 +1,3 @@
-use crate::command::Command;
-
 use super::input::CommandPaletteState;
 
 pub(super) type CompleterFunc = fn(&CommandPaletteState, &str) -> Vec<String>;

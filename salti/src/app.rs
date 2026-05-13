@@ -2,8 +2,7 @@ use std::{env, path::Path, time::Duration};
 
 use anyhow::{Result, format_err};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
-use ratatui::DefaultTerminal;
-use ratatui::layout::Rect;
+use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::{
     sync::mpsc::{UnboundedSender, unbounded_channel},
     task::{JoinError, JoinHandle, JoinSet},
@@ -12,21 +11,31 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::cli::StartupState;
-use crate::command::Command;
-use crate::core::gff::{self, Gff};
-use crate::core::model::{AlignmentModel, StatsView};
-use crate::core::parser;
-use crate::core::stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult};
-use crate::input;
-use crate::input::MouseTracker;
-use crate::ui::layers::notification::{Notification, NotificationLevel};
-use crate::ui::layers::palette::CommandPaletteState;
-use crate::ui::layout::{AppLayout, FrameLayout, gff_pane_height, pinned_section_layout};
-use crate::ui::panes::gff::feature_row_count;
-use crate::ui::render::render;
-use crate::ui::ui_state::{LoadingState, UiState};
-use crate::update::UpdateResult;
+use crate::{
+    cli::StartupState,
+    command::Command,
+    core::{
+        gff::{self, Gff},
+        model::{AlignmentModel, StatsView},
+        parser,
+        stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult},
+    },
+    input,
+    input::MouseTracker,
+    ui::{
+        layers::{
+            notification::{Notification, NotificationLevel},
+            palette::CommandPaletteState,
+        },
+        layout::{
+            AlignmentHeaderLayout, AppLayout, FrameLayout, gff_pane_height, pinned_section_layout,
+        },
+        panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
+        render::render,
+        ui_state::{LoadingState, UiState},
+    },
+    update::UpdateResult,
+};
 
 const RENDER_FPS: f32 = 120.0;
 

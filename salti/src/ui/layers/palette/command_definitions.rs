@@ -1,9 +1,13 @@
-use super::command_runners::{
-    run_check_update, run_clear_filter, run_clear_reference, run_consensus_method, run_diff_mode,
-    run_filter_constant, run_filter_gaps, run_filter_rows, run_jump_feature, run_jump_position,
-    run_jump_sequence, run_load_alignment, run_load_gff, run_pin_sequence, run_quit,
-    run_reload_as_protein, run_set_active_type, run_set_reference, run_theme,
-    run_toggle_translation, run_translation_frame, run_unpin_sequence,
+use super::{
+    command_runners::{
+        run_check_update, run_clear_filter, run_clear_reference, run_consensus_method,
+        run_diff_mode, run_filter_constant, run_filter_gaps, run_filter_rows, run_jump_feature,
+        run_jump_position, run_jump_sequence, run_load_alignment, run_load_gff, run_pin_sequence,
+        run_quit, run_reload_as_protein, run_set_active_type, run_set_reference, run_theme,
+        run_toggle_translation, run_translation_frame, run_unpin_sequence,
+    },
+    command_spec::{PaletteCommand, StaticCommand, TypableCommand},
+    completers,
 };
 use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
 use super::completers;

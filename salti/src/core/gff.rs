@@ -1,9 +1,4 @@
-use std::cmp::Reverse;
-use std::fmt;
-use std::fs::File;
-use std::io::BufReader;
-use std::ops::Range;
-use std::path::Path;
+use std::{cmp::Reverse, fmt, fs::File, io::BufReader, ops::Range, path::Path};
 
 use anyhow::{Result, format_err};
 use noodles_gff as gff;

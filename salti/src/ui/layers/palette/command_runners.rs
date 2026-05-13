@@ -1,10 +1,11 @@
-use crate::command::Command;
 use anyhow::format_err;
 use tracing::warn;
 
-use super::input::CommandPaletteState;
-use super::input::VisibleSequence;
-use super::utils::parse_argument;
+use super::{
+    input::{CommandPaletteState, VisibleSequence},
+    utils::parse_argument,
+};
+use crate::command::Command;
 
 fn ensure_no_argument(arguments: &str) -> anyhow::Result<()> {
     if parse_argument(arguments).is_some() {

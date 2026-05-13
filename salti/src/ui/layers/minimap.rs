@@ -1,17 +1,18 @@
 use std::ops::Range;
 
 use crossterm::event::MouseEvent;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Color;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Widget};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Color,
+    text::{Line, Span},
+    widgets::{Block, Clear, Paragraph, Widget},
+};
 
-use crate::command::Command;
-use crate::config::theme::Theme;
-use crate::core::model::AlignmentModel;
-use crate::input::movement::HorizontalDrag;
-use crate::ui::ui_state::UiState;
+use crate::{
+    command::Command, config::theme::Theme, core::model::AlignmentModel,
+    input::movement::HorizontalDrag, ui::ui_state::UiState,
+};
 
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;

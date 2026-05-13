@@ -1,8 +1,10 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
-use crate::ui::layers::state::ActiveLayer;
-use crate::ui::layout::{AppLayout, FrameLayout};
-use crate::ui::ui_state::UiState;
+use crate::ui::{
+    layers::state::ActiveLayer,
+    layout::{AppLayout, FrameLayout},
+    ui_state::UiState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum KeyRoute {

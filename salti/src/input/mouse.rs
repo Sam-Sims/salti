@@ -1,15 +1,17 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::command::Command;
-use crate::core::gff::Gff;
-use crate::core::model::AlignmentModel;
-use crate::input::route::{MouseRoute, route_mouse};
-use crate::ui::layers::minimap::MinimapState;
-use crate::ui::layers::state::ActiveLayer;
-use crate::ui::layout::{AppLayout, FrameLayout};
-use crate::ui::panes::gff;
-use crate::ui::selection::selection_point_crosshair;
-use crate::ui::ui_state::{MouseSelection, UiState};
+use crate::{
+    command::Command,
+    core::{gff::Gff, model::AlignmentModel},
+    input::route::{MouseRoute, route_mouse},
+    ui::{
+        layers::{minimap::MinimapState, state::ActiveLayer},
+        layout::{AppLayout, FrameLayout},
+        panes::gff,
+        selection::selection_point_crosshair,
+        ui_state::{MouseSelection, UiState},
+    },
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MouseAnchor {

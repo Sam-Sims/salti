@@ -1,10 +1,12 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::macros::vertical;
-use ratatui::style::Styled;
-use ratatui::symbols::merge::MergeStrategy;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    macros::vertical,
+    style::Styled,
+    symbols::merge::MergeStrategy,
+    text::Line,
+    widgets::{Block, Paragraph, Widget},
+};
 
 use crate::{
     core::{

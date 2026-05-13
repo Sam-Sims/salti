@@ -1,3 +1,12 @@
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Style, Styled},
+    symbols::merge::MergeStrategy,
+    text::Line,
+    widgets::{Block, Paragraph, Widget},
+};
+
 use crate::{
     core::{model::AlignmentModel, viewport::ViewportWindow},
     ui::{
@@ -5,12 +14,6 @@ use crate::{
         ui_state::ThemeState,
     },
 };
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Style, Styled};
-use ratatui::symbols::merge::MergeStrategy;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph, Widget};
 
 pub(crate) struct SequenceIdPane<'a> {
     pub(crate) alignment: &'a AlignmentModel,
@@ -131,10 +134,10 @@ fn render_sequence_id_rows(
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{buffer::Buffer, layout::Rect};
+
     use super::*;
     use crate::ui::layout::AppLayout;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {

@@ -1,10 +1,11 @@
 use crossterm::event::KeyEvent;
 
-use crate::command::Command;
-use crate::config::keybindings;
-use crate::input::route::{KeyRoute, route_key};
-use crate::ui::layers::state::ActiveLayer;
-use crate::ui::ui_state::UiState;
+use crate::{
+    command::Command,
+    config::keybindings,
+    input::route::{KeyRoute, route_key},
+    ui::{layers::state::ActiveLayer, ui_state::UiState},
+};
 
 pub(crate) fn handle_key_event(ui: &mut UiState, key: KeyEvent) -> Vec<Command> {
     match route_key(ui) {
