@@ -87,6 +87,14 @@ dedicated translation tool.
 
 ![viz](assets/viz.gif)
 
+### GFF support
+
+Support for loading GFF3 annotations with a global minimap + local feature track, and jump straight to features with `jump-feature`.
+
+See [### GFF support](GFF support) for more detail.
+
+![gff](assets/gff.gif)
+
 ### Themes
 
 `salti` supports multiple colour themes, which can be switched with the `set-theme` command. Available themes so far
