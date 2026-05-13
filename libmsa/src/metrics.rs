@@ -1,13 +1,16 @@
-use rand::seq::IndexedRandom;
-use rayon::prelude::*;
 use std::{num::NonZeroU8, ops::Range};
 
-use crate::AlignmentType;
-use crate::data::AlignmentData;
-use crate::error::AlignmentError;
-use crate::model::Alignment;
-use crate::projection::Projection;
-use crate::translation::{ReadingFrame, TranslationTable, translated_byte_at};
+use rand::seq::IndexedRandom;
+use rayon::prelude::*;
+
+use crate::{
+    AlignmentType,
+    data::AlignmentData,
+    error::AlignmentError,
+    model::Alignment,
+    projection::Projection,
+    translation::{ReadingFrame, TranslationTable, translated_byte_at},
+};
 
 /// Calculated values for a single alignment column.
 #[derive(Debug, Clone, PartialEq)]
@@ -527,9 +530,8 @@ mod conservation_count_tests {
 
 #[cfg(test)]
 mod constant_fraction_count_tests {
-    use crate::AlignmentType;
-
     use super::max_counted_symbol_fraction_from_counts;
+    use crate::AlignmentType;
 
     fn counts_for(symbols: &[u8]) -> [u32; 256] {
         let mut counts = [0u32; 256];

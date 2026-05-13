@@ -2,9 +2,7 @@ use std::num::NonZeroUsize;
 
 use rand::seq::IndexedRandom;
 
-use crate::alignment_type::AlignmentType;
-use crate::data::AlignmentData;
-use crate::error::AlignmentError;
+use crate::{alignment_type::AlignmentType, data::AlignmentData, error::AlignmentError};
 
 const DEFAULT_SAMPLE_SIZE: usize = 100;
 const DEFAULT_CLASSIFICATION_THRESHOLD: f32 = 0.5;
@@ -112,8 +110,7 @@ mod detect_alignment_type_tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     use super::{DetectionOptions, detect_alignment_type};
-    use crate::data::AlignmentData;
-    use crate::{AlignmentError, AlignmentType, RawSequence};
+    use crate::{AlignmentError, AlignmentType, RawSequence, data::AlignmentData};
 
     fn raw(id: &str, sequence: &[u8]) -> RawSequence {
         RawSequence {

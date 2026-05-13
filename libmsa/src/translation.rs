@@ -2,11 +2,13 @@ use std::ops::Range;
 
 use rayon::prelude::*;
 
-use crate::Alignment;
-use crate::alignment_type::AlignmentType;
-use crate::error::AlignmentError;
-use crate::metrics::{
-    ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
+use crate::{
+    Alignment,
+    alignment_type::AlignmentType,
+    error::AlignmentError,
+    metrics::{
+        ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
+    },
 };
 
 const NUCLEOTIDE_INDEX_TABLE: [u8; 256] = build_nucleotide_index_table();

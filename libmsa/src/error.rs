@@ -1,7 +1,6 @@
-use crate::alignment_type::AlignmentType;
 use thiserror::Error;
 
-use crate::translation::ReadingFrame;
+use crate::{alignment_type::AlignmentType, translation::ReadingFrame};
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum AlignmentError {

@@ -1,13 +1,9 @@
-use std::borrow::Borrow;
-use std::sync::Arc;
+use std::{borrow::Borrow, sync::Arc};
 
 use rayon::prelude::*;
 use regex::Regex;
 
-use crate::error::AlignmentError;
-use crate::metrics;
-use crate::model::Alignment;
-use crate::projection::Projection;
+use crate::{error::AlignmentError, metrics, model::Alignment, projection::Projection};
 
 /// Builder for a filtered view over an unfiltered [`Alignment`].
 ///
