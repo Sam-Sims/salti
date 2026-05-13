@@ -18,7 +18,7 @@ tokio-stream = "0.1.18"
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = "0.7"
 paraseq = { version = "0.4.8", features = ["url", "ssh"] }
-libmsa = { path = "../libmsa", version = "0.1.0" }
+libmsa = { path = "../libmsa", version = "0.2.0" }
 clap = { version = "4.5.57", features = ["derive"] }
 nucleo-matcher = "0.3.1"
 regex = "1.12.3"
