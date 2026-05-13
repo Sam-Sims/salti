@@ -193,8 +193,8 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Ctrl + Left click` - Select a range of sequences or positions
 - `Middle click + drag` - Pan.
 - `m` - Open the minimap
-- `t` - Quick translate the current view.
-- `Shift+t` - Full translate the current view.
+- `t` - Toggle between quick translate of the current view.
+- `Shift+t` - Toggle between the original alignment and the reloaded protein alignment.
 - `Alt+1|2|3` - Change reading frame for translation.
 
 ### Command palette
@@ -228,7 +228,7 @@ Commands:
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
-- `set-sequence-type` - Override auto-detection if it fails (`dna`, `aa`, or `full`).
+- `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `full`).
 - `check-update` - Check for updates and show the latest version.
 - `quit` - Quit the app.
 
@@ -251,7 +251,7 @@ Two methods are available for consensus calculation:
 
 If there is a tie for most common character, one is chosen at random.
 
-Consensus is calculated in the background
+The defailt is `majority-non-gap`
 
 ### Quick translate vs full translate
 
@@ -283,8 +283,11 @@ Gap filtering changes the visible coordinate space. The ruler still shows absolu
 hidden columns have been skipped. A single jump is shown with an arrow pointing towards the side that has a jump.
 Dense regions of skipped columns are shown as a run of `~` characters rather than individual arrows.
 
-Gap filtering and translation cannot be used at the same time. If translation is active, `filter-gaps` will be
-rejected. Likewise if a gap filter is active, translation cannot be enabled until the filter is cleared.
+Gap filtering and quick translation cannot be used at the same time. If quick translation is active, `filter-gaps` will be
+rejected. Likewise if a gap filter is active, quick translation cannot be enabled until the filter is cleared. The full translation 
+(e.g using `reload-as-protein`) supports column filtering however.
+
+All column filters are applied after row filters.
 
 ### Constant filtering
 
@@ -296,7 +299,7 @@ Like gap filtering - removing columns can change the visible coordinate space - 
 `filter-constant 99` hides columns where 99% of the positions are the same and so on. `filter-constant 0` clears the filter.
 
 NOTE:
-Gaps and Unknown symbols (`N`/`X`) are not counted when calculating constants
+Gaps are ignored when calculating constant fractions, in DNA alignments `N` is also ignored and in protein, `X` is also ignored
 
 ### GFF support
 
