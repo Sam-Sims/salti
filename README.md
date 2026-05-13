@@ -195,7 +195,7 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `m` - Open the minimap
 - `t` - Toggle between quick translate of the current view.
 - `Shift+t` - Toggle between the original alignment and the reloaded protein alignment.
-- `Alt+1|2|3` - Change reading frame for translation.
+- `Alt+1|2|3` - Change reading frame for quick/full translation.
 
 ### Command palette
 
@@ -221,14 +221,14 @@ Commands:
 - `clear-filter` - Clear the active filter.
 - `set-reference` - Set a reference sequence .
 - `toggle-translate` - Toggle AA translation.
-- `reload-as-protein` - Reloads the entire alignment as a protien alignment.
+- `reload-as-protein` - Reloads the entire alignment as a protein alignment.
 - `set-diff-mode` - Set diff rendering mode (`off`, `reference`, or `consensus`).
 - `load-alignment` (alias: `load`) - Load an alignment file.
-- `load-gff` - Load an GFF3 annotation file.
+- `load-gff` - Load a GFF3 annotation file.
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`1`, `2`, or `3`).
 - `set-theme` - Set active theme (`everforest-dark`, `solarized-light`, `tokyo-night`, or `terminal-default`).
-- `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `full`).
+- `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `generic`).
 - `check-update` - Check for updates and show the latest version.
 - `quit` - Quit the app.
 
@@ -305,12 +305,29 @@ Gaps are ignored when calculating constant fractions, in DNA alignments `N` is a
 
 `salti` can load and display GFF3 annotations from a file with the `load-gff` command. This is currently experimental.
 
+At the moment only `gene` features are supported.
+
+When a GFF is loaded `salti` will show:
+- a global feature pane
+- a local feature track above the alignment
+- feature details in the `Feature Info` pane when you hover over a feature
+- support for the `jump-feature` command in the command palette
+
+You can also drag in the global feature pane to pan around the alignment.
+
 Currently annotations are treated as "global" - and per sequence annotations are not supported. This also means there is no fancy business that
 tries to match GFF coordinates to gaps etc. This is mainly useful in specific use cases e.g:
 
 When you have multiple alignments to a reference sequence where that reference does not have gaps inserted (i.e insertions are ignored). 
-For example running mafft something like `mafft --add --keeplength` or using alignments from [nextclade](https://github.com/nextstrain/nextclade)
+For example running mafft with something like `mafft --add --keeplength` or using alignments from something like [nextclade](https://github.com/nextstrain/nextclade)
 or [fastalign](https://github.com/Sam-Sims/fastalign).
+
+In the normal nucleotide view, GFF coordinates are shown in nucleotide space.
+Quick translate keeps this the same - because quick translate is just an amino acid overlay on top of the nucleotide view.
+In full translate / `reload-as-protein`, the features are projected into protein columns using the active reading frame.
+
+If columns are filtered, features are projected onto the remaining visible columns. This means a feature can look compressed, or disappear entirely if all
+of its columns are filtered out.
 
 ### Pinned behaviour
 
@@ -322,7 +339,7 @@ or [fastalign](https://github.com/Sam-Sims/fastalign).
 - Input must be FASTA with equal sequence lengths across records.
 - Sequence type is auto-detected on load; you can override it if its wrong.
     - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it
-      falls back to `full` mode.
+      falls back to `generic` mode.
 
 ### Update check:
 
