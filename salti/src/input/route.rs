@@ -90,7 +90,10 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::*;
-    use crate::cli::StartupState;
+    use crate::{
+        cli::StartupState,
+        ui::{layers::palette::CommandPaletteState, layout::AlignmentHeaderLayout},
+    };
 
     fn ui_state() -> UiState {
         UiState::new(StartupState {
@@ -99,12 +102,142 @@ mod tests {
         })
     }
 
+    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn key_uses_palette_when_open() {
+        let mut ui = ui_state();
+        ui.layers.open_palette(CommandPaletteState::empty());
+
+        let route = route_key(&ui);
+
+        assert_eq!(route, KeyRoute::Palette);
+    }
+
+    #[test]
+    fn key_uses_global_without_palette() {
+        let ui = ui_state();
+
+        let route = route_key(&ui);
+
+        assert_eq!(route, KeyRoute::Global);
+    }
+
+    #[test]
+    fn palette_captures_mouse() {
+        let mut ui = ui_state();
+        ui.layers.open_palette(CommandPaletteState::empty());
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            5,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(
+            MouseEventKind::Moved,
+            app_layout.gff_pane_rows.x,
+            app_layout.gff_pane_rows.y,
+        );
+
+        let route = route_mouse(&ui, &frame_layout, &app_layout, mouse, true);
+
+        assert_eq!(route, MouseRoute::Palette);
+    }
+
+    #[test]
+    fn minimap_captures_left_mouse_inside_track() {
+        let mut ui = ui_state();
+        ui.layers.toggle_minimap();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            frame_layout.overlay_area.x + frame_layout.overlay_area.width - 2,
+            frame_layout.overlay_area.y + frame_layout.overlay_area.height - 2,
+        );
+
+        let route = route_mouse(&ui, &frame_layout, &app_layout, mouse, false);
+
+        assert_eq!(route, MouseRoute::Minimap);
+    }
+
+    #[test]
+    fn gff_pane_captures_hover() {
+        let ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            5,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(
+            MouseEventKind::Moved,
+            app_layout.gff_pane_rows.x,
+            app_layout.gff_pane_rows.y,
+        );
+
+        let route = route_mouse(&ui, &frame_layout, &app_layout, mouse, true);
+
+        assert_eq!(route, MouseRoute::GffPane);
+    }
+
+    #[test]
+    fn gff_pane_ignored_without_gff() {
+        let ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            5,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(
+            MouseEventKind::Moved,
+            app_layout.gff_pane_rows.x,
+            app_layout.gff_pane_rows.y,
+        );
+
+        let route = route_mouse(&ui, &frame_layout, &app_layout, mouse, false);
+
+        assert_eq!(route, MouseRoute::Alignment);
+    }
+
+    #[test]
+    fn mouse_defaults_to_alignment() {
+        let ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(MouseEventKind::Moved, 0, 0);
+
+        let route = route_mouse(&ui, &frame_layout, &app_layout, mouse, false);
+
+        assert_eq!(route, MouseRoute::Alignment);
+    }
+
     #[test]
     fn minimap_falls_through_to_gff_pane_outside_track() {
         let mut ui = ui_state();
         ui.layers.toggle_minimap();
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area, 5);
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            5,
+            AlignmentHeaderLayout::without_features(),
+        );
         let mouse = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: app_layout.gff_pane_rows.x,

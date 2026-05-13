@@ -112,7 +112,6 @@ pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};
 
     fn palette_state_with_gff_features(

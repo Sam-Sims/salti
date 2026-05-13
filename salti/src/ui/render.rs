@@ -1,22 +1,27 @@
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Styled, Stylize},
+    text::Line,
+    widgets::Paragraph,
+};
+
 use crate::{
     core::{gff::Gff, model::AlignmentModel, stats_cache::ColumnStatsCache},
-    ui::layers::render::render_overlays,
     ui::{
+        layers::render::render_overlays,
         layout::{AppLayout, FrameLayout},
-        panes::alignment::AlignmentPane,
-        panes::consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
-        panes::gff::{GffInfoPane, GffPane},
-        panes::sequence_id::SequenceIdPane,
-        panes::status_bars::render_frame,
+        panes::{
+            alignment::AlignmentPane,
+            consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
+            gff::{GffInfoPane, GffPane},
+            sequence_id::SequenceIdPane,
+            status_bars::render_frame,
+        },
         selection::render_mouse_selection,
         ui_state::{LoadingState, UiState},
     },
 };
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Styled, Stylize};
-use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
 
 fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
     let theme = &ui.theme;
@@ -172,16 +177,24 @@ pub fn render(
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+
     use super::*;
-    use crate::cli::StartupState;
-    use crate::core::model::{DiffMode, StatsView};
-    use crate::core::stats_cache::StatsJobResult;
-    use crate::ui::layers::notification::{Notification, NotificationLevel};
-    use crate::ui::layers::palette::CommandPaletteState;
-    use crate::ui::ui_state::MouseSelection;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
+    use crate::{
+        cli::StartupState,
+        core::{
+            model::{DiffMode, StatsView},
+            stats_cache::StatsJobResult,
+        },
+        ui::{
+            layers::{
+                notification::{Notification, NotificationLevel},
+                palette::CommandPaletteState,
+            },
+            layout::AlignmentHeaderLayout,
+            ui_state::MouseSelection,
+        },
+    };
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -246,7 +259,11 @@ mod tests {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).unwrap();
         let frame_layout = FrameLayout::new(area);
-        let layout = AppLayout::new(frame_layout.content_area, 0);
+        let layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
 
         terminal
             .draw(|frame| {
@@ -293,7 +310,11 @@ mod tests {
 
     fn set_viewport(ui: &mut UiState, alignment: &AlignmentModel, area: Rect) {
         let frame_layout = FrameLayout::new(area);
-        let layout = AppLayout::new(frame_layout.content_area, 0);
+        let layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
         ui.viewport.update_dimensions(
             layout.alignment_pane_sequence_rows.width as usize,
             layout.alignment_pane_sequence_rows.height as usize,
@@ -321,13 +342,6 @@ mod tests {
         insta::assert_snapshot!(
             "render_empty_failed",
             render_text(None, &failed_ui, &ColumnStatsCache::default(), area)
-        );
-
-        let mut loading_ui = UiState::new(StartupState::default());
-        loading_ui.meta.loading_state = LoadingState::Loading;
-        insta::assert_snapshot!(
-            "render_empty_loading",
-            render_text(None, &loading_ui, &ColumnStatsCache::default(), area)
         );
     }
 

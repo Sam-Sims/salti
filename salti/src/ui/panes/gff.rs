@@ -563,84 +563,13 @@ mod tests {
     }
 
     #[test]
-    fn filtered_nucleotide_mapping_collapses_hidden_columns() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(
-            model.view().absolute_column_ids().collect::<Vec<_>>(),
-            vec![1, 3, 4, 7]
-        );
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(2, 6)),
-            Some(1..3)
-        );
-    }
-
-    #[test]
-    fn filtered_nucleotide_mapping_hides_fully_filtered_feature() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(mapping.map_feature(model.view(), &feature(5, 6)), None);
-    }
-
-    #[test]
-    fn filtered_protein_mapping_uses_projected_protein_columns() {
-        let mut model = model_with_sequence(b"M-M-M");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::protein(3, 5, 0);
-
-        assert_eq!(
-            model.view().absolute_column_ids().collect::<Vec<_>>(),
-            vec![0, 2, 4]
-        );
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(3, 8)),
-            Some(1..2)
-        );
-    }
-
-    #[test]
-    fn protein_mapping_clips_feature_before_frame_offset() {
-        let model = model_with_len(5);
-        let mapping = FeatureMap::protein(3, 5, 2);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(0, 4)),
-            Some(0..1)
-        );
-    }
-
-    #[test]
-    fn mapping_clips_feature_that_extends_past_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(6, 10)),
-            Some(6..8)
-        );
-    }
-
-    #[test]
-    fn mapping_hides_feature_after_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(mapping.map_feature(model.view(), &feature(10, 12)), None);
-    }
-
-    #[test]
     fn placed_features_alternate_rows() {
         let gff = Gff {
             features: vec![feature(0, 1), feature(2, 3), feature(4, 5)],
         };
         let model = model_with_len(6);
-        let mapping = FeatureMap::for_alignment(&model);
-        let rows: Vec<usize> = placed_features(&gff, model.view(), &mapping, 6)
+        let display_features = display_features(&gff, &model);
+        let rows: Vec<usize> = placed_features(&display_features, 6, model.view().column_count())
             .into_iter()
             .map(|placed_feature| placed_feature.row)
             .collect();

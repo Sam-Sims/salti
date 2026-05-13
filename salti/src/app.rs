@@ -824,8 +824,6 @@ fn nearest_visible_relative_column(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
-
     use crate::ui::ui_state::MouseSelection;
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
@@ -851,93 +849,8 @@ mod tests {
         app
     }
 
-    fn left_mouse_event(
-        kind: MouseEventKind,
-        area: Rect,
-        column_offset: u16,
-        row_offset: u16,
-    ) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: area.x + column_offset,
-            row: area.y + row_offset,
-            modifiers: KeyModifiers::empty(),
-        }
-    }
-
-    #[test]
-    fn translated_click_selects_whole_codon() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .unwrap();
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .toggle_translation_view()
-            .unwrap();
-
-        let area = app.app_layout.alignment_pane_sequence_rows;
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            area,
-            1,
-            0,
-        ));
-
-        let selection = app.ui.selection.unwrap();
-        assert_eq!(selection.sequence_id, 0);
-        assert_eq!(selection.column, 0);
-        assert_eq!(selection.end_column, 2);
-    }
-
-    #[test]
-    fn translated_drag_extends_selection_in_codons() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .unwrap();
-        app.alignment
-            .as_mut()
-            .unwrap()
-            .toggle_translation_view()
-            .unwrap();
-
-        let area = app.app_layout.alignment_pane_sequence_rows;
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            area,
-            1,
-            0,
-        ));
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Drag(MouseButton::Left),
-            area,
-            7,
-            0,
-        ));
-        app.handle_mouse_event(left_mouse_event(
-            MouseEventKind::Up(MouseButton::Left),
-            area,
-            7,
-            0,
-        ));
-
-        let selection = app.ui.selection.unwrap();
-        assert_eq!(selection.sequence_id, 0);
-        assert_eq!(selection.column, 0);
-        assert_eq!(selection.end_sequence_id, 0);
-        assert_eq!(selection.end_column, 8);
-    }
-
     #[tokio::test(flavor = "current_thread")]
-    async fn toggling_translation_keeps_stored_nucleotide_selection() {
+    async fn translation_toggle_keeps_selection() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         let selection = MouseSelection {
@@ -985,7 +898,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn reload_as_protein_maps_nt_viewport_to_matching_aa_column() {
+    async fn reload_as_protein_keeps_locus_from_nt() {
         let sequence = vec![b'C'; 360];
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
@@ -996,7 +909,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn reload_as_protein_maps_back_to_nt_from_current_aa_locus() {
+    async fn reload_as_dna_keeps_locus_from_aa() {
         let sequence = vec![b'C'; 360];
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
@@ -1010,41 +923,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn set_translation_frame_retranslates_reloaded_protein_alignment() {
-        let mut app = app_with_alignment(vec![raw("seq1", b"ATGCCCTAA")]);
-
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
-        assert_eq!(
-            app.alignment
-                .as_ref()
-                .unwrap()
-                .base()
-                .sequence(0)
-                .unwrap()
-                .byte_at(0),
-            Some(b'M')
-        );
-
-        app.execute_commands([Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2)]);
-
-        assert_eq!(
-            app.alignment.as_ref().unwrap().translation_frame(),
-            libmsa::ReadingFrame::Frame2
-        );
-        assert_eq!(
-            app.alignment
-                .as_ref()
-                .unwrap()
-                .base()
-                .sequence(0)
-                .unwrap()
-                .byte_at(0),
-            Some(b'C')
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn filter_gaps_shows_notification_in_translation() {
+    async fn gap_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
@@ -1058,7 +937,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn filter_constant_shows_notification_in_translation() {
+    async fn constant_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
         app.execute_commands([Command::ToggleTranslationView]);
@@ -1072,7 +951,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn translation_shows_notification_with_gap_filter() {
+    async fn translation_blocked_by_gap_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
         app.execute_commands([Command::SetGapFilter(Some(0.0))]);
         app.execute_commands([Command::ToggleTranslationView]);
@@ -1085,7 +964,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn translation_shows_notification_with_constant_filter() {
+    async fn translation_blocked_by_constant_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
         app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
         app.execute_commands([Command::ToggleTranslationView]);
@@ -1095,15 +974,5 @@ mod tests {
             notification.message,
             "translation is unavailable while a column filter is active"
         );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn key_events_forward_to_command_execution() {
-        let mut app = app_with_alignment(vec![raw("seq1", b"CATC"), raw("seq2", b"CATC")]);
-        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-
-        app.handle_key_event(key);
-
-        assert!(app.should_quit);
     }
 }

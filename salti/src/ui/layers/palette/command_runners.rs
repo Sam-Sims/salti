@@ -355,11 +355,14 @@ pub(super) fn run_load_gff(_: &CommandPaletteState, arguments: &str) -> anyhow::
 mod tests {
     use std::ops::Range;
 
-    use crate::core::gff::{Feature, FeatureType, Gff, Strand};
-    use crate::core::model::AlignmentModel;
-    use crate::ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};
-
     use super::*;
+    use crate::{
+        core::{
+            gff::{Feature, FeatureType, Gff, Strand},
+            model::AlignmentModel,
+        },
+        ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget},
+    };
 
     fn raw(sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {

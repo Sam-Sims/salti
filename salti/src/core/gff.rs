@@ -126,8 +126,9 @@ fn extract_name(record: &gff::feature::RecordBuf) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
+
+    use super::*;
 
     fn write_gff(content: &str) -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();

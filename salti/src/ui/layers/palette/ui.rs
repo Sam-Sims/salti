@@ -13,10 +13,6 @@ use super::{
 };
 use crate::core::search::SearchableList;
 
-use super::command_spec::PaletteCommand;
-use super::input::{CommandPaletteState, PaletteState};
-use super::utils::{pad_label, wrap_text};
-
 /// maximum number of rows shown in the command/preview grid at once.
 const COMMAND_GRID_MAX_VISIBLE_ROWS: usize = 6;
 /// maximum number of columns shown in the command/preview grid.

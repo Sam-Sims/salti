@@ -1,5 +1,13 @@
 use std::fmt::Write as _;
 
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Styled,
+    text::{Line, Span},
+    widgets::Paragraph,
+};
+
 use crate::{
     core::model::AlignmentModel,
     ui::{
@@ -8,11 +16,6 @@ use crate::{
         utils::truncate_label,
     },
 };
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Styled;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
@@ -199,8 +202,7 @@ pub fn render_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::StartupState;
-    use crate::ui::ui_state::MouseSelection;
+    use crate::{cli::StartupState, ui::ui_state::MouseSelection};
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -225,105 +227,162 @@ mod tests {
     }
 
     #[test]
-    fn top_status_bar_snapshots() {
+    fn top_status_loaded_alignment() {
         let alignment = alignment_model(vec![
             raw("seq1", b"ACGTACGT"),
             raw("seq2", b"ACGTAC-T"),
             raw("seq3", b"ACGTACGA"),
         ]);
-
-        let mut loaded_ui = ui_state();
-        loaded_ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
-        loaded_ui.viewport.update_dimensions(5, 3, 0);
-        loaded_ui.viewport.set_bounds(
+        let mut ui = ui_state();
+        ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
+        ui.viewport.update_dimensions(5, 3, 0);
+        ui.viewport.set_bounds(
             alignment.view().row_count(),
             alignment.view().column_count(),
             alignment.base().max_id_len(),
         );
 
-        insta::assert_snapshot!(
-            "frame_top_status_loaded_alignment",
-            status_text(&build_top_status_bar(Some(&alignment), &loaded_ui))
-        );
-
-        let mut failed_ui = UiState::new(StartupState::default());
-        failed_ui.meta.loading_state = LoadingState::Failed("boom".to_string());
-
-        insta::assert_snapshot!(
-            "frame_top_status_failed_load",
-            status_text(&build_top_status_bar(None, &failed_ui))
+        assert_eq!(
+            status_text(&build_top_status_bar(Some(&alignment), &ui)),
+            "File: iamnotreal.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5"
         );
     }
 
     #[test]
-    fn bottom_status_bar_snapshots() {
-        let mut filtered_alignment = alignment_model(vec![
+    fn top_status_failed_load() {
+        let mut ui = UiState::new(StartupState::default());
+        ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+
+        assert_eq!(
+            status_text(&build_top_status_bar(None, &ui)),
+            "File: Unknown | Status: Failed | 0 alignments | Length: 0 | Positions: 0-0"
+        );
+    }
+
+    #[test]
+    fn bottom_status_filters_translation() {
+        let mut alignment = alignment_model(vec![
             raw("seq1", b"ATGAAATTT"),
             raw("seq2", b"ATG---TTT"),
             raw("seq3", b"ATGAAGTTT"),
         ]);
-        filtered_alignment
-            .set_filter("seq1|seq2".to_string())
-            .unwrap();
-        filtered_alignment.set_gap_filter(Some(0.5)).unwrap();
-        filtered_alignment
+        alignment.set_filter("seq1|seq2".to_string()).unwrap();
+        alignment.set_gap_filter(Some(0.5)).unwrap();
+        alignment
             .set_translation(Some(libmsa::ReadingFrame::Frame2))
             .unwrap();
 
-        insta::assert_snapshot!(
-            "frame_bottom_status_filters_translation",
-            status_text(&build_bottom_status_bar(
-                Some(&filtered_alignment),
-                &ui_state()
-            ))
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui_state())),
+            "Filters: [rows: seq1|seq2] [gaps: <= 50%] (2 rows) (9 cols) | Translation frame: 2"
         );
+    }
 
-        let mut constant_filter_alignment = alignment_model(vec![
+    #[test]
+    fn bottom_status_constant_filter() {
+        let mut alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCAT"),
             raw("seq2", b"CATCATCATCAT"),
             raw("seq3", b"CATCATCATCAT"),
         ]);
-        constant_filter_alignment
-            .set_constant_filter(Some(1.0))
-            .unwrap();
+        alignment.set_constant_filter(Some(1.0)).unwrap();
 
-        insta::assert_snapshot!(
-            "frame_bottom_status_constant_filter",
-            status_text(&build_bottom_status_bar(
-                Some(&constant_filter_alignment),
-                &ui_state(),
-            ))
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui_state())),
+            "Filters: [constant: >= 100%] (3 rows) (0 cols)"
         );
 
-        let selected_alignment =
-            alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
-        let mut single_selection_ui = ui_state();
-        single_selection_ui.selection = Some(MouseSelection {
+    #[test]
+    fn bottom_status_single_selection() {
+        let alignment = alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
             sequence_id: 0,
             column: 5,
             end_sequence_id: 0,
             end_column: 5,
         });
 
-        insta::assert_snapshot!(
-            "frame_bottom_status_single_selection",
-            status_text(&build_bottom_status_bar(
-                Some(&selected_alignment),
-                &single_selection_ui
-            ))
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Selected: seq1 @ 6"
         );
+    }
 
-        let mut multi_selection_ui = ui_state();
-        multi_selection_ui.selection = Some(MouseSelection {
+    #[test]
+    fn bottom_status_single_range_selection() {
+        let alignment = alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 2,
+            end_sequence_id: 0,
+            end_column: 8,
+        });
+
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Selected: seq1 @ 3-9"
+        );
+    }
+
+    #[test]
+    fn bottom_status_translated_codon_selection() {
+        let mut alignment =
+            alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        alignment
+            .set_translation_frame(libmsa::ReadingFrame::Frame1)
+            .unwrap();
+        alignment.toggle_translation_view().unwrap();
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 0,
+            end_sequence_id: 0,
+            end_column: 2,
+        });
+
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Translation frame: 1 | Selected: seq1 @ 1"
+        );
+    }
+
+    #[test]
+    fn bottom_status_translated_range_selection() {
+        let mut alignment =
+            alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        alignment
+            .set_translation_frame(libmsa::ReadingFrame::Frame1)
+            .unwrap();
+        alignment.toggle_translation_view().unwrap();
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 0,
+            end_sequence_id: 0,
+            end_column: 8,
+        });
+
+        assert_eq!(
+            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
+            "Translation frame: 1 | Selected: seq1 @ 1-3"
+        );
+    }
+
+    #[test]
+    fn bottom_status_multi_selection() {
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
             sequence_id: 0,
             column: 1,
             end_sequence_id: 2,
             end_column: 4,
         });
 
-        insta::assert_snapshot!(
-            "frame_bottom_status_multi_selection",
-            status_text(&build_bottom_status_bar(None, &multi_selection_ui))
+        assert_eq!(
+            status_text(&build_bottom_status_bar(None, &ui)),
+            "3 sequence(s) selected @ 2-5"
         );
     }
 }

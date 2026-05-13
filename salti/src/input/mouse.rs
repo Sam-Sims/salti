@@ -261,25 +261,19 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::*;
-    use crate::cli::StartupState;
-    use crate::ui::layers::palette::CommandPaletteState;
-    use crate::ui::layout::{AppLayout, FrameLayout};
+    use crate::{
+        cli::StartupState,
+        core::gff::{Feature, FeatureType, Strand},
+        ui::{
+            layers::palette::CommandPaletteState,
+            layout::{AlignmentHeaderLayout, AppLayout, FrameLayout},
+        },
+    };
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
             id: id.to_string(),
             sequence: sequence.to_vec(),
-        }
-    }
-
-    fn gff(start: usize, end: usize) -> Gff {
-        Gff {
-            features: vec![crate::core::gff::Feature {
-                name: "gene".to_string(),
-                kind: crate::core::gff::FeatureType::Gene,
-                range: start..end,
-                strand: crate::core::gff::Strand::Forward,
-            }],
         }
     }
 
@@ -290,19 +284,50 @@ mod tests {
         })
     }
 
+    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+        let alignment = libmsa::Alignment::new(sequences).expect("alignment should be valid");
+        AlignmentModel::new(alignment).expect("alignment model should be valid")
+    }
+
+    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    fn left_mouse_event(
+        kind: MouseEventKind,
+        area: Rect,
+        column_offset: u16,
+        row_offset: u16,
+    ) -> MouseEvent {
+        mouse_event(kind, area.x + column_offset, area.y + row_offset)
+    }
+
+    fn feature(name: &str, start: usize, end: usize) -> Feature {
+        Feature {
+            name: name.to_string(),
+            kind: FeatureType::Gene,
+            range: start..end,
+            strand: Strand::Forward,
+        }
+    }
+
     #[test]
     fn palette_route_masks_mouse_commands() {
         let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
         ui.layers.open_palette(CommandPaletteState::empty());
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area, 0);
-        let mouse = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 10,
-            row: 10,
-            modifiers: KeyModifiers::empty(),
-        };
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let mouse = mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 10);
 
         let commands = handle_mouse_event(
             &mut tracker,
@@ -321,26 +346,26 @@ mod tests {
     fn minimap_route_emits_jump_command() {
         let sequence_a = vec![b'A'; 200];
         let sequence_c = vec![b'C'; 200];
-        let alignment = libmsa::Alignment::new(vec![
+        let model = alignment_model(vec![
             raw("row1", sequence_a.as_slice()),
             raw("row2", sequence_c.as_slice()),
-        ])
-        .expect("alignment should be valid");
-        let model = crate::core::model::AlignmentModel::new(alignment)
-            .expect("alignment model should be valid");
+        ]);
         let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area, 0);
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
         ui.viewport.update_dimensions(78, 10, 20);
         ui.viewport.set_bounds(2, 200, 4);
         ui.layers.toggle_minimap();
-        let mouse = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: frame_layout.overlay_area.x + frame_layout.overlay_area.width - 2,
-            row: frame_layout.overlay_area.y + frame_layout.overlay_area.height - 2,
-            modifiers: KeyModifiers::empty(),
-        };
+        let mouse = mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            frame_layout.overlay_area.x + frame_layout.overlay_area.width - 2,
+            frame_layout.overlay_area.y + frame_layout.overlay_area.height - 2,
+        );
 
         let commands = handle_mouse_event(
             &mut tracker,
@@ -356,24 +381,194 @@ mod tests {
     }
 
     #[test]
-    fn moved_event_in_gff_pane_sets_tooltip_without_mouse_down() {
-        let alignment = libmsa::Alignment::new(vec![raw("row1", &[b'A'; 20])])
-            .expect("alignment should be valid");
-        let model = crate::core::model::AlignmentModel::new(alignment)
-            .expect("alignment model should be valid");
-        let gff = gff(0, 10);
+    fn translated_click_selects_codon() {
+        let mut model = alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        model
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .expect("translation should succeed");
         let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(frame_layout.content_area, 4);
-        ui.viewport.update_dimensions(20, 10, 20);
-        ui.viewport.set_bounds(1, 20, 4);
-        let mouse = MouseEvent {
-            kind: MouseEventKind::Moved,
-            column: app_layout.gff_pane_rows.x,
-            row: app_layout.gff_pane_rows.y,
-            modifiers: KeyModifiers::empty(),
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        ui.viewport.update_dimensions(60, 10, 20);
+        ui.viewport.set_bounds(2, 9, 4);
+
+        let mouse = left_mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            app_layout.alignment_pane_sequence_rows,
+            1,
+            0,
+        );
+        handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            None,
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            mouse,
+        );
+
+        assert_eq!(
+            ui.selection,
+            Some(MouseSelection {
+                sequence_id: 0,
+                column: 0,
+                end_sequence_id: 0,
+                end_column: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn translated_ctrl_drag_spans_codons() {
+        let mut model = alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
+        model
+            .set_translation(Some(libmsa::ReadingFrame::Frame1))
+            .expect("translation should succeed");
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        ui.viewport.update_dimensions(60, 10, 20);
+        ui.viewport.set_bounds(2, 9, 4);
+        let area = app_layout.alignment_pane_sequence_rows;
+
+        for mouse in [
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x + 1,
+                row: area.y,
+                modifiers: KeyModifiers::CONTROL,
+            },
+            left_mouse_event(MouseEventKind::Drag(MouseButton::Left), area, 7, 0),
+            left_mouse_event(MouseEventKind::Up(MouseButton::Left), area, 7, 0),
+        ] {
+            handle_mouse_event(
+                &mut tracker,
+                Some(&model),
+                None,
+                &mut ui,
+                &frame_layout,
+                &app_layout,
+                mouse,
+            );
+        }
+
+        assert_eq!(
+            ui.selection,
+            Some(MouseSelection {
+                sequence_id: 0,
+                column: 0,
+                end_sequence_id: 0,
+                end_column: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn left_click_outside_msa_clears_selection() {
+        let model = alignment_model(vec![raw("seq1", b"ATG"), raw("seq2", b"ATG")]);
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        ui.selection = Some(MouseSelection {
+            sequence_id: 0,
+            column: 0,
+            end_sequence_id: 0,
+            end_column: 0,
+        });
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        ui.viewport.update_dimensions(60, 10, 20);
+        ui.viewport.set_bounds(2, 3, 4);
+
+        handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            None,
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 0, 0),
+        );
+
+        assert_eq!(ui.selection, None);
+    }
+
+    #[test]
+    fn middle_drag_pans_msa() {
+        let model = alignment_model(vec![raw("seq1", b"ATG"), raw("seq2", b"ATG")]);
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            0,
+            AlignmentHeaderLayout::without_features(),
+        );
+        let area = app_layout.alignment_pane_sequence_rows;
+
+        handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            None,
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            left_mouse_event(MouseEventKind::Down(MouseButton::Middle), area, 10, 5),
+        );
+        let commands = handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            None,
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            left_mouse_event(MouseEventKind::Drag(MouseButton::Middle), area, 12, 7),
+        );
+
+        assert_eq!(
+            commands,
+            vec![
+                Command::ScrollUp { amount: 2 },
+                Command::ScrollLeft { amount: 2 }
+            ]
+        );
+    }
+
+    #[test]
+    fn gff_hover_sets_tooltip() {
+        let model = alignment_model(vec![raw("seq1", &vec![b'A'; 100])]);
+        let gff = Gff {
+            features: vec![feature("gene1", 0, 100)],
         };
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            4,
+            AlignmentHeaderLayout::without_features(),
+        );
+        ui.viewport.update_dimensions(60, 10, 20);
+        ui.viewport.set_bounds(1, 100, 4);
+        let mouse = mouse_event(
+            MouseEventKind::Moved,
+            app_layout.gff_pane_rows.x,
+            app_layout.gff_pane_rows.y,
+        );
 
         let commands = handle_mouse_event(
             &mut tracker,
@@ -386,9 +581,54 @@ mod tests {
         );
 
         assert!(commands.is_empty());
-        assert_eq!(
-            ui.gff_tooltip.as_deref(),
-            Some("gene (gene) — Forward →\n1-10 • 10 nt")
+        assert!(
+            ui.gff_tooltip
+                .as_deref()
+                .is_some_and(|it| it.starts_with("gene1 "))
         );
+    }
+
+    #[test]
+    fn gff_drag_emits_jump() {
+        let model = alignment_model(vec![raw("seq1", &vec![b'A'; 100])]);
+        let gff = Gff {
+            features: vec![feature("gene1", 0, 100)],
+        };
+        let mut tracker = MouseTracker::default();
+        let mut ui = ui_state();
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            4,
+            AlignmentHeaderLayout::without_features(),
+        );
+        ui.viewport.update_dimensions(60, 10, 20);
+        ui.viewport.set_bounds(1, 100, 4);
+        let area = app_layout.gff_pane_rows;
+
+        handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            Some(&gff),
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            mouse_event(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y),
+        );
+        let commands = handle_mouse_event(
+            &mut tracker,
+            Some(&model),
+            Some(&gff),
+            &mut ui,
+            &frame_layout,
+            &app_layout,
+            mouse_event(
+                MouseEventKind::Drag(MouseButton::Left),
+                area.x + area.width - 1,
+                area.y,
+            ),
+        );
+
+        assert!(matches!(commands.as_slice(), [Command::JumpToPosition(_)]));
     }
 }

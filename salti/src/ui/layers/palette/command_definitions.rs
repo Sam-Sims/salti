@@ -9,8 +9,6 @@ use super::{
     command_spec::{PaletteCommand, StaticCommand, TypableCommand},
     completers,
 };
-use super::command_spec::{PaletteCommand, StaticCommand, TypableCommand};
-use super::completers;
 
 /// Defines all commands available in the command palette.
 ///

@@ -336,8 +336,7 @@ fn translated_selection_visible_col_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Viewport;
-    use crate::core::model::AlignmentModel;
+    use crate::core::{Viewport, model::AlignmentModel};
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {

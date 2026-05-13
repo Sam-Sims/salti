@@ -25,8 +25,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent};
 
     use super::*;
-    use crate::cli::StartupState;
-    use crate::ui::layers::palette::CommandPaletteState;
+    use crate::{cli::StartupState, ui::layers::palette::CommandPaletteState};
 
     fn ui_state() -> UiState {
         UiState::new(StartupState {

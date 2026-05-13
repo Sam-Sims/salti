@@ -83,8 +83,9 @@ fn open_fasta_reader(input: &str) -> Result<fasta::Reader<paraseq::BoxedReader>>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     fn create_temp_fasta(content: &str) -> NamedTempFile {
         let temp_file = NamedTempFile::new().unwrap();

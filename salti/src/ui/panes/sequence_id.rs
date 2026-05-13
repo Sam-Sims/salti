@@ -152,14 +152,27 @@ mod tests {
     }
 
     fn render_sequence_id_pane_text(alignment: &AlignmentModel, window: &ViewportWindow) -> String {
+        render_sequence_id_pane_text_with_header(
+            alignment,
+            window,
+            AlignmentHeaderLayout::without_features(),
+        )
+    }
+
+    fn render_sequence_id_pane_text_with_header(
+        alignment: &AlignmentModel,
+        window: &ViewportWindow,
+        header: AlignmentHeaderLayout,
+    ) -> String {
         let area = Rect::new(0, 0, 150, 12);
         let mut buffer = Buffer::empty(area);
-        let layout = AppLayout::new(area, 0);
+        let layout = AppLayout::new(area, 0, header);
         let theme = ThemeState::default();
 
         SequenceIdPane {
             alignment,
             window,
+            header: layout.alignment_header,
             theme: &theme,
         }
         .render(layout.sequence_id_pane, &mut buffer);
@@ -195,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn sequence_id_pane_basic_snapshot() {
+    fn basic_sequence_ids_snapshot() {
         let alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCATCATCAT"),
             raw("seq2", b"CATCATCATCATCATCAT"),
@@ -214,7 +227,30 @@ mod tests {
     }
 
     #[test]
-    fn sequence_id_pane_pinned_snapshot() {
+    fn local_feature_rows_reserved_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+        let window = ViewportWindow {
+            row_range: 0..alignment.view().row_count(),
+            col_range: 0..alignment.view().column_count(),
+            name_range: 0..18,
+        };
+
+        insta::assert_snapshot!(
+            "sequence_id_pane_local_feature_rows",
+            render_sequence_id_pane_text_with_header(
+                &alignment,
+                &window,
+                AlignmentHeaderLayout::with_features(2),
+            )
+        );
+    }
+
+    #[test]
+    fn pinned_sequence_ids_snapshot() {
         let mut alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCATCATCAT"),
             raw("seq2", b"CATCATCATCATCATCAT"),
@@ -237,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn sequence_id_pane_name_scroll_snapshot() {
+    fn scrolled_sequence_names_snapshot() {
         let alignment = alignment_model(vec![
             raw("seq1-loooooooooooong-name", b"CATCATCATCATCATCAT"),
             raw("seq2-loooooooooooong-name", b"CATCATCATCATCATCAT"),

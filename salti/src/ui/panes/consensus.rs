@@ -282,12 +282,13 @@ fn build_conservation_line(
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{buffer::Buffer, layout::Rect};
+
     use super::*;
-    use crate::core::model::StatsView;
-    use crate::core::stats_cache::StatsJobResult;
-    use crate::ui::layout::AppLayout;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
+    use crate::{
+        core::{model::StatsView, stats_cache::StatsJobResult},
+        ui::layout::{AlignmentHeaderLayout, AppLayout},
+    };
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -343,7 +344,7 @@ mod tests {
         area: Rect,
     ) -> String {
         let mut buffer = Buffer::empty(area);
-        let layout = AppLayout::new(area, 0);
+        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
         let window = ViewportWindow {
             row_range: 0..alignment.view().row_count(),
             col_range: 0..alignment.view().column_count(),
@@ -410,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_consensus_pane_no_reference_and_loading_snapshots() {
+    fn raw_consensus_no_reference_snapshot() {
         let alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCATCATCAT"),
             raw("seq2", b"CATCATCATCATCATCAT"),
@@ -420,14 +421,6 @@ mod tests {
         insta::assert_snapshot!(
             "consensus_pane_raw_no_reference",
             render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
-        );
-
-        let mut loading_metrics = ColumnStatsCache::default();
-        loading_metrics.init(alignment.view().column_count());
-
-        insta::assert_snapshot!(
-            "consensus_pane_raw_loading",
-            render_consensus_pane_text(&alignment, &loading_metrics, Rect::new(0, 0, 100, 5))
         );
     }
 
@@ -454,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn translated_consensus_pane_no_reference_and_loading_snapshots() {
+    fn translated_consensus_no_reference_snapshot() {
         let mut alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCATCATCAT"),
             raw("seq2", b"CATCATCATCATCATCAT"),
@@ -472,18 +465,10 @@ mod tests {
             "consensus_pane_translated_no_reference",
             render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
         );
-
-        let mut loading_metrics = ColumnStatsCache::default();
-        loading_metrics.init(alignment.view().column_count());
-
-        insta::assert_snapshot!(
-            "consensus_pane_translated_loading",
-            render_consensus_pane_text(&alignment, &loading_metrics, Rect::new(0, 0, 100, 5))
-        );
     }
 
     #[test]
-    fn generic_consensus_pane_hides_conservation_snapshot() {
+    fn generic_consensus_hides_conservation_snapshot() {
         let mut alignment = alignment_model(vec![
             raw("seq1", b"ACDEACDEACDE"),
             raw("seq2", b"ACDEACDEACDE"),

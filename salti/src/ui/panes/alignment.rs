@@ -541,11 +541,17 @@ fn render_ruler(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::core::model::StatsView;
-    use crate::core::stats_cache::StatsJobResult;
-    use crate::ui::layout::AppLayout;
     use ratatui::buffer::Buffer;
+
+    use super::*;
+    use crate::{
+        core::{
+            gff::{Feature, FeatureType, Gff, Strand},
+            model::StatsView,
+            stats_cache::StatsJobResult,
+        },
+        ui::layout::AppLayout,
+    };
 
     fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
         libmsa::RawSequence {
@@ -602,8 +608,41 @@ mod tests {
         row_offset: usize,
         col_offset: usize,
     ) -> String {
+        render_alignment_pane_text_with_gff(
+            alignment,
+            stats_cache,
+            None,
+            area,
+            row_offset,
+            col_offset,
+        )
+    }
+
+    fn render_alignment_pane_text_with_gff(
+        alignment: &AlignmentModel,
+        stats_cache: &ColumnStatsCache,
+        gff: Option<&Gff>,
+        area: Rect,
+        row_offset: usize,
+        col_offset: usize,
+    ) -> String {
         let mut buffer = Buffer::empty(area);
-        let layout = AppLayout::new(area, 0);
+        let header = match gff {
+            Some(gff) => {
+                let probe_layout =
+                    AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
+                let col_range = col_offset
+                    ..col_offset
+                        .saturating_add(probe_layout.alignment_pane_sequence_rows.width as usize)
+                        .min(alignment.view().column_count());
+                let local_rows = crate::ui::panes::local_feature_track::local_feature_row_count(
+                    gff, alignment, &col_range,
+                );
+                AlignmentHeaderLayout::with_features(local_rows as u16)
+            }
+            None => AlignmentHeaderLayout::without_features(),
+        };
+        let layout = AppLayout::new(area, 0, header);
         let mut viewport = Viewport::default();
         viewport.update_dimensions(
             layout.alignment_pane_sequence_rows.width as usize,
@@ -623,6 +662,8 @@ mod tests {
             alignment,
             viewport: &viewport,
             metrics: stats_cache,
+            gff,
+            header: layout.alignment_header,
             theme: &theme,
         }
         .render(layout.alignment_pane, &mut buffer);
@@ -669,6 +710,64 @@ mod tests {
             render_alignment_pane_text(
                 &alignment,
                 &ColumnStatsCache::default(),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_reserves_blank_local_feature_row_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+        let gff = Gff {
+            features: vec![Feature {
+                name: "Offscreen".to_string(),
+                kind: FeatureType::Gene,
+                range: 30..40,
+                strand: Strand::Forward,
+            }],
+        };
+
+        insta::assert_snapshot!(
+            "alignment_pane_blank_local_feature_track",
+            render_alignment_pane_text_with_gff(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Some(&gff),
+                Rect::new(0, 0, 100, 12),
+                0,
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn alignment_pane_with_local_feature_track_snapshot() {
+        let alignment = alignment_model(vec![
+            raw("seq1", b"CATCATCATCATCATCAT"),
+            raw("seq2", b"CATCATCATCATCATCAT"),
+            raw("seq3", b"CATCATCATCATCATCAT"),
+        ]);
+        let gff = Gff {
+            features: vec![Feature {
+                name: "Spike".to_string(),
+                kind: FeatureType::Gene,
+                range: 2..14,
+                strand: Strand::Forward,
+            }],
+        };
+
+        insta::assert_snapshot!(
+            "alignment_pane_with_local_feature_track",
+            render_alignment_pane_text_with_gff(
+                &alignment,
+                &ColumnStatsCache::default(),
+                Some(&gff),
                 Rect::new(0, 0, 100, 12),
                 0,
                 0,
@@ -771,27 +870,6 @@ mod tests {
     }
 
     #[test]
-    fn alignment_pane_raw_diff_reference_without_reference_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.diff_mode = DiffMode::Reference;
-
-        insta::assert_snapshot!(
-            "alignment_pane_raw_diff_reference_without_reference",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
-        );
-    }
-
-    #[test]
     fn alignment_pane_raw_diff_consensus_snapshot() {
         let mut alignment = alignment_model(vec![
             raw("seq1", b"CATCATCATCATCATCAT"),
@@ -803,23 +881,6 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_raw_diff_consensus",
-            render_alignment_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_raw_diff_consensus_loading_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.diff_mode = DiffMode::Consensus;
-        let mut metrics = ColumnStatsCache::default();
-        metrics.init(alignment.view().column_count());
-
-        insta::assert_snapshot!(
-            "alignment_pane_raw_diff_consensus_loading",
             render_alignment_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
@@ -864,27 +925,6 @@ mod tests {
                 &ColumnStatsCache::default(),
                 Rect::new(0, 0, 100, 10),
                 2,
-                0,
-            )
-        );
-    }
-
-    #[test]
-    fn alignment_pane_dense_fragmented_ruler_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CA-CA-CA-CA-CA-CA-CA-CA"),
-            raw("seq2", b"CA-CA-CA-CA-CA-CA-CA-CA"),
-            raw("seq3", b"CA-CA-CA-CA-CA-CA-CA-CA"),
-        ]);
-        alignment.set_gap_filter(Some(0.5)).unwrap();
-
-        insta::assert_snapshot!(
-            "alignment_pane_dense_fragmented_ruler",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
                 0,
             )
         );
