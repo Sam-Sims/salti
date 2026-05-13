@@ -348,6 +348,11 @@ impl<'a> RowView<'a> {
         self.columns.len()
     }
 
+    /// Returns true if this sequence view has no visible columns.
+    pub fn is_empty(&self) -> bool {
+        self.columns.len() == 0
+    }
+
     /// Returns the byte at `relative_col`, or `None` if the column is out of bounds.
     ///
     /// The column index is relative to this view's column projection.
