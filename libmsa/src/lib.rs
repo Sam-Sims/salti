@@ -1,4 +1,5 @@
 mod alignment_type;
+mod counts;
 mod data;
 pub mod detection;
 mod error;

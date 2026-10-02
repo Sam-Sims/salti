@@ -381,16 +381,7 @@ impl<'a> RowView<'a> {
         &self,
         range: Range<usize>,
     ) -> Result<impl Iterator<Item = (usize, u8)> + '_, AlignmentError> {
-        if range.is_empty() {
-            return Err(AlignmentError::EmptyRange);
-        }
-
-        if range.end > self.columns.len() {
-            return Err(AlignmentError::ColumnOutOfBounds {
-                index: range.end - 1,
-                length: self.columns.len(),
-            });
-        }
+        validate_column_range(&range, self.columns.len())?;
 
         let columns = self.columns;
         let data = self.data;
@@ -399,6 +390,24 @@ impl<'a> RowView<'a> {
             (abs_col, data[abs_col])
         }))
     }
+}
+
+pub(crate) fn validate_column_range(
+    range: &Range<usize>,
+    length: usize,
+) -> Result<(), AlignmentError> {
+    if range.is_empty() {
+        return Err(AlignmentError::EmptyRange);
+    }
+
+    if range.end > length {
+        return Err(AlignmentError::ColumnOutOfBounds {
+            index: range.end - 1,
+            length,
+        });
+    }
+
+    Ok(())
 }
 
 fn data_from_raw_sequences(

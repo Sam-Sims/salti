@@ -5,10 +5,10 @@ use rayon::prelude::*;
 use crate::{
     Alignment,
     alignment_type::AlignmentType,
+    counts::count_translated_columns,
     error::AlignmentError,
-    metrics::{
-        ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
-    },
+    metrics::{ColumnSummary, ConsensusMethod, summaries_from_counts},
+    model::validate_column_range,
     residue::{UNKNOWN_AMINO_ACID, nucleotide_index},
 };
 
@@ -252,16 +252,19 @@ impl<'a> TranslatedAlignment<'a> {
         range: Range<usize>,
         method: ConsensusMethod,
     ) -> Result<Vec<ColumnSummary>, AlignmentError> {
-        let columns = counted_translated_columns_range(
+        validate_column_range(&range, self.translated_column_count)?;
+
+        let counts = count_translated_columns(
             &self.source.data,
             &self.source.rows,
-            range,
+            range.clone(),
             self.frame,
             &self.table,
-        )?;
+        );
         let mut rng = rand::rng();
-        Ok(summaries_from_columns(
-            &columns,
+        Ok(summaries_from_counts(
+            range,
+            &counts,
             method,
             AlignmentType::Protein.conservation_alphabet_size(),
             &mut rng,
@@ -291,7 +294,7 @@ impl<'a> TranslatedAlignment<'a> {
             return Err(AlignmentError::EmptyRowSubset);
         }
 
-        let translated_column_count = translated_length(source.columns.len(), frame);
+        let translated_column_count = frame.translated_length(source.columns.len());
         if translated_column_count == 0 {
             return Err(AlignmentError::TranslationEmpty {
                 frame,
@@ -342,48 +345,33 @@ impl<'a> TranslatedSequenceView<'a> {
         &self,
         range: Range<usize>,
     ) -> Result<impl Iterator<Item = (usize, u8)> + '_, AlignmentError> {
-        if range.is_empty() {
-            return Err(AlignmentError::EmptyRange);
-        }
+        validate_column_range(&range, self.translated_len)?;
 
-        if range.end > self.translated_len {
-            return Err(AlignmentError::ColumnOutOfBounds {
-                index: range.end - 1,
-                length: self.translated_len,
-            });
-        }
-
-        let bytes = range
-            .map(|protein_col| {
-                let byte = translated_byte_at(self.data, protein_col, self.frame, &self.table)
-                    .ok_or(AlignmentError::ColumnOutOfBounds {
-                        index: protein_col,
-                        length: self.translated_len,
-                    })?;
-                Ok((protein_col, byte))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(bytes.into_iter())
+        let view = *self;
+        Ok(range.map(move |protein_col| {
+            let byte = view.byte_at(protein_col).expect("validated range");
+            (protein_col, byte)
+        }))
     }
 }
 
 fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationTable) -> Vec<u8> {
-    let offset = frame.offset();
-    if sequence.len() <= offset {
-        return Vec::new();
-    }
+    sequence
+        .get(frame.offset()..)
+        .map_or_else(Vec::new, |nucleotides| {
+            translate_codons(nucleotides, table).collect()
+        })
+}
 
-    let translated_len = translated_length(sequence.len(), frame);
-    let complete_codons = frame.complete_codons(sequence.len());
-    let complete_end = offset + (complete_codons * 3);
-    let has_incomplete_terminal_codon = complete_codons < translated_len;
-
-    sequence[offset..complete_end]
-        .chunks_exact(3)
-        .map(|codon| table.translate_codon([codon[0], codon[1], codon[2]]))
-        .chain(has_incomplete_terminal_codon.then_some(UNKNOWN_AMINO_ACID))
-        .collect()
+pub(crate) fn translate_codons<'a>(
+    nucleotides: &'a [u8],
+    table: &'a TranslationTable,
+) -> impl Iterator<Item = u8> + 'a {
+    let (codons, incomplete) = nucleotides.as_chunks::<3>();
+    codons
+        .iter()
+        .map(|&codon| table.translate_codon(codon))
+        .chain((!incomplete.is_empty()).then_some(UNKNOWN_AMINO_ACID))
 }
 
 pub(crate) fn translated_byte_at(
@@ -401,10 +389,6 @@ pub(crate) fn translated_byte_at(
     };
 
     Some(table.translate_codon([first, second, third]))
-}
-
-pub(crate) fn translated_length(sequence_len: usize, frame: ReadingFrame) -> usize {
-    frame.translated_length(sequence_len)
 }
 
 #[cfg(test)]
@@ -577,7 +561,7 @@ mod translation_table_tests {
 
 #[cfg(test)]
 mod reading_frame_tests {
-    use super::{ReadingFrame, translated_length};
+    use super::{ReadingFrame, TranslationTable, translate_sequence};
 
     #[test]
     fn protein_col_maps_absolute_columns() {
@@ -597,16 +581,13 @@ mod reading_frame_tests {
     }
 
     #[test]
-    fn translated_length_matches_helper_for_edge_cases() {
-        for frame in [
-            ReadingFrame::Frame1,
-            ReadingFrame::Frame2,
-            ReadingFrame::Frame3,
-        ] {
+    fn translated_length_matches_translated_sequence_for_edge_cases() {
+        for frame in ReadingFrame::all() {
             for length in 0..8 {
+                let sequence = vec![b'A'; length];
                 assert_eq!(
                     frame.translated_length(length),
-                    translated_length(length, frame)
+                    translate_sequence(&sequence, frame, &TranslationTable::STANDARD).len()
                 );
             }
         }
