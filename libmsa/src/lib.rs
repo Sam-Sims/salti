@@ -7,6 +7,7 @@ mod metrics;
 mod model;
 mod projection;
 mod translation;
+pub mod residue;
 
 pub use alignment_type::AlignmentType;
 pub use data::RawSequence;
