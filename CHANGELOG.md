@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Under the hood changes to how residues are handled in `libmsa`.
+
+### Fixed
+
+- `U` is now coloured the same as `T` in DNA alignments instead of being left uncoloured.
+
 ## [0.9.0] - 2026-05-13
 
 ### Added
