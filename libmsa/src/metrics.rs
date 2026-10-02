@@ -9,6 +9,7 @@ use crate::{
     error::AlignmentError,
     model::Alignment,
     projection::Projection,
+    residue,
     translation::{ReadingFrame, TranslationTable, translated_byte_at},
 };
 
@@ -163,11 +164,6 @@ pub(crate) fn counted_translated_columns_range(
         .collect())
 }
 
-#[inline]
-const fn is_gap_byte(byte: u8) -> bool {
-    matches!(byte, b'-')
-}
-
 pub(crate) fn summaries_from_columns(
     columns: &[CountedColumn],
     method: ConsensusMethod,
@@ -193,7 +189,7 @@ pub(crate) fn gap_fraction_from_counts(counts: &[u32; 256]) -> f32 {
         .enumerate()
         .filter(|&(_, &count)| count != 0)
         .fold((0u32, 0u32), |(gap_count, total), (symbol, &count)| {
-            let gap_count = if is_gap_byte(symbol as u8) {
+            let gap_count = if residue::is_gap(symbol as u8) {
                 gap_count + count
             } else {
                 gap_count
@@ -246,7 +242,7 @@ fn consensus_from_counts(
         if count == 0 {
             continue;
         }
-        if exclude_gap && is_gap_byte(index as u8) {
+        if exclude_gap && residue::is_gap(index as u8) {
             continue;
         }
 
@@ -275,7 +271,7 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
         }
         total += count;
 
-        if is_gap_byte(symbol as u8) {
+        if residue::is_gap(symbol as u8) {
             gap_count += count;
             continue;
         }
@@ -310,15 +306,7 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
 
 #[inline]
 const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
-    if is_gap_byte(byte) {
-        return true;
-    }
-
-    match kind {
-        AlignmentType::Dna => matches!(byte, b'N' | b'n'),
-        AlignmentType::Protein => matches!(byte, b'X' | b'x'),
-        AlignmentType::Generic => false,
-    }
+    residue::is_gap(byte) || residue::is_unknown(byte, kind)
 }
 
 fn column_byte_counts(data: &AlignmentData, rows: &Projection, abs_col: usize) -> [u32; 256] {

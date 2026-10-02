@@ -9,7 +9,7 @@ use crate::{
     metrics::{
         ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
     },
-    residue::nucleotide_index,
+    residue::{UNKNOWN_AMINO_ACID, nucleotide_index},
 };
 
 /// Reading frames for translating.
@@ -146,7 +146,7 @@ impl TranslationTable {
             nucleotide_index(codon[2]),
         ) {
             (Some(first), Some(second), Some(third)) => self.codons[first][second][third],
-            _ => b'X',
+            _ => UNKNOWN_AMINO_ACID,
         }
     }
 }
@@ -373,7 +373,7 @@ fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationT
     sequence[offset..complete_end]
         .chunks_exact(3)
         .map(|codon| table.translate_codon([codon[0], codon[1], codon[2]]))
-        .chain(has_incomplete_terminal_codon.then_some(b'X'))
+        .chain(has_incomplete_terminal_codon.then_some(UNKNOWN_AMINO_ACID))
         .collect()
 }
 
@@ -388,7 +388,7 @@ pub(crate) fn translated_byte_at(
     let (Some(&second), Some(&third)) =
         (sequence.get(codon_start + 1), sequence.get(codon_start + 2))
     else {
-        return Some(b'X');
+        return Some(UNKNOWN_AMINO_ACID);
     };
 
     Some(table.translate_codon([first, second, third]))
