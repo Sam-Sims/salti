@@ -1,6 +1,6 @@
 use std::{fmt, ops::Range, str::FromStr};
 
-use crate::core::codon::{TranslationOverlay, complete_protein_len, visible_protein_range};
+use crate::core::codon::{TranslationOverlay, visible_protein_range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatsView {
@@ -12,7 +12,6 @@ pub enum StatsView {
 pub struct StatsContext {
     pub view: StatsView,
     pub range: Range<usize>,
-    pub total_columns: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -437,27 +436,20 @@ impl AlignmentModel {
             TranslationMode::Overlay => {
                 let frame = self.translation_frame;
                 let nucleotide_len = self.view().column_count();
-                let total_columns = complete_protein_len(frame, nucleotide_len);
-                if total_columns == 0 {
-                    return None;
-                }
                 let range = visible_protein_range(&visible_col_range, frame, nucleotide_len)?;
                 Some(StatsContext {
                     view: StatsView::Translated(frame),
                     range,
-                    total_columns,
                 })
             }
             TranslationMode::Off | TranslationMode::ReloadedProtein { .. } => {
-                let total_columns = self.view().column_count();
-                if total_columns == 0 || visible_col_range.is_empty() {
+                if visible_col_range.is_empty() {
                     return None;
                 }
 
                 Some(StatsContext {
                     view: StatsView::Raw,
                     range: visible_col_range,
-                    total_columns,
                 })
             }
         }
@@ -979,7 +971,6 @@ mod tests {
             Some(StatsContext {
                 view: StatsView::Raw,
                 range: 1..3,
-                total_columns: 4,
             })
         );
     }
@@ -996,7 +987,6 @@ mod tests {
             Some(StatsContext {
                 view: StatsView::Translated(libmsa::ReadingFrame::Frame2),
                 range: 0..2,
-                total_columns: 2,
             })
         );
     }
