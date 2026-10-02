@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Under the hood changes to how residues are handled in `libmsa`.
+- Column stats (Consensus, conservation etc) are now calculated for visible display region only.
+- Consensus, conservation and column filtering are faster, especially for alignments with many sequences.
+- `libmsa` now rejects sequences containing non-ASCII bytes.
 
 ### Fixed
 
