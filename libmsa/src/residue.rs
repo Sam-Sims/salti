@@ -2,6 +2,9 @@ use crate::alignment_type::AlignmentType;
 
 pub const GAP: u8 = b'-';
 
+/// The amino acid symbol for a residue that is unknown or cannot be translated.
+pub const UNKNOWN_AMINO_ACID: u8 = b'X';
+
 const INVALID_NUCLEOTIDE: u8 = 4;
 
 const NUCLEOTIDE_INDEX_TABLE: [u8; 256] = build_nucleotide_index_table();
@@ -55,7 +58,7 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GAP, is_gap, is_unknown, nucleotide_index};
+    use super::{GAP, UNKNOWN_AMINO_ACID, is_gap, is_unknown, nucleotide_index};
     use crate::alignment_type::AlignmentType;
 
     const fn test_is_gap(byte: u8) -> bool {
@@ -94,6 +97,11 @@ mod tests {
     fn gap_symbol_is_dash() {
         assert_eq!(GAP, b'-');
         assert!(!is_gap(b'.'));
+    }
+
+    #[test]
+    fn unknown_amino_acid_is_protein_unknown() {
+        assert!(is_unknown(UNKNOWN_AMINO_ACID, AlignmentType::Protein));
     }
 
     #[test]
