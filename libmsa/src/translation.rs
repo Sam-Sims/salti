@@ -135,7 +135,16 @@ impl TranslationTable {
     /// The matrix is stored as `[first][second][third]` in `A, T, C, G` order on
     /// each axis. Each entry is the amino-acid byte returned for the translated
     /// codon.
+    ///
+    /// # Panics
+    ///
+    /// If any amino-acid byte is outside ASCII. Column counting indexes
+    /// 128-entry tables by byte value.
     pub const fn new(codons: [[[u8; 4]; 4]; 4]) -> Self {
+        assert!(
+            codons.as_flattened().as_flattened().is_ascii(),
+            "translation table outputs must be ASCII"
+        );
         Self { codons }
     }
 
@@ -518,6 +527,14 @@ mod translation_table_tests {
             translated_byte_at(b"---", 0, ReadingFrame::Frame1, &TranslationTable::STANDARD),
             Some(b'X')
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "translation table outputs must be ASCII")]
+    fn new_rejects_non_ascii_output() {
+        let mut codons = [[[b'A'; 4]; 4]; 4];
+        codons[3][2][1] = 0x80;
+        TranslationTable::new(codons);
     }
 
     #[test]
