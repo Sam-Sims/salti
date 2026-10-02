@@ -1,4 +1,4 @@
-use libmsa::AlignmentType;
+use libmsa::{AlignmentType, residue};
 use ratatui::style::{Color, Style};
 
 // Generated from iwanthue
@@ -406,15 +406,19 @@ impl SequenceTheme {
     }
 
     pub fn dna_colour(&self, byte: u8) -> Option<Color> {
+        if residue::is_gap(byte) {
+            return Some(self.dna.gap);
+        }
+        if residue::is_unknown(byte, AlignmentType::Dna) {
+            return Some(self.dna.n);
+        }
+        if let Some(index) = residue::nucleotide_index(byte) {
+            return Some([self.dna.a, self.dna.t, self.dna.c, self.dna.g][index]);
+        }
+
         match byte {
-            b'A' | b'a' => Some(self.dna.a),
-            b'T' | b't' => Some(self.dna.t),
-            b'C' | b'c' => Some(self.dna.c),
-            b'G' | b'g' => Some(self.dna.g),
-            b'N' | b'n' => Some(self.dna.n),
             b'R' | b'r' | b'Y' | b'y' | b'M' | b'm' | b'K' | b'k' | b'S' | b's' | b'W' | b'w'
             | b'H' | b'h' | b'B' | b'b' | b'V' | b'v' | b'D' | b'd' => Some(self.dna.ambiguity),
-            b'-' => Some(self.dna.gap),
             _ => None,
         }
     }
@@ -423,6 +427,10 @@ impl SequenceTheme {
     // http://www.jalview.org/help/html/colourSchemes/clustal.html
 
     pub fn amino_acid_colour(&self, byte: u8) -> Option<Color> {
+        if residue::is_gap(byte) || residue::is_unknown(byte, AlignmentType::Protein) {
+            return Some(self.amino_acid.special);
+        }
+
         match byte {
             b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f'
             | b'W' | b'w' | b'C' | b'c' => Some(self.amino_acid.hydrophobic),
@@ -432,7 +440,6 @@ impl SequenceTheme {
             b'D' | b'd' | b'E' | b'e' => Some(self.amino_acid.negative),
             b'G' | b'g' => Some(self.amino_acid.glycine),
             b'P' | b'p' => Some(self.amino_acid.proline),
-            b'-' | b'X' | b'x' => Some(self.amino_acid.special),
             _ => None,
         }
     }
