@@ -5,7 +5,7 @@ use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
 use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::{
     sync::mpsc::{UnboundedSender, unbounded_channel},
-    task::{JoinError, JoinHandle, JoinSet},
+    task::JoinHandle,
 };
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -16,10 +16,9 @@ use crate::{
     command::Command,
     core::{
         gff::{self, Gff},
-        model::{AlignmentModel, StatsView},
+        model::AlignmentModel,
         parser,
         stats::Stats,
-        stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult},
     },
     input,
     input::MouseTracker,
@@ -61,9 +60,6 @@ pub(crate) struct App {
     gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
-    stats_cache: ColumnStatsCache,
-    raw_stats_jobs: JoinSet<StatsJobResult>,
-    translated_stats_jobs: JoinSet<StatsJobResult>,
     load_job: Option<AsyncJob<Result<Vec<libmsa::RawSequence>, String>>>,
     event_tx: Option<UnboundedSender<AppEvent>>,
     should_quit: bool,
@@ -88,9 +84,6 @@ impl App {
             gff: None,
             ui: UiState::new(startup),
             mouse_tracker: MouseTracker::default(),
-            stats_cache: ColumnStatsCache::default(),
-            raw_stats_jobs: JoinSet::new(),
-            translated_stats_jobs: JoinSet::new(),
             load_job: None,
             event_tx: None,
             should_quit: false,
@@ -119,8 +112,6 @@ impl App {
                 warn!(error = ?error, "Failed to capture initial terminal size");
             }
         }
-
-        self.extend_stats_if_needed();
 
         let period = Duration::from_secs_f32(1.0 / RENDER_FPS);
         let mut interval = tokio::time::interval(period);
@@ -169,7 +160,6 @@ impl App {
                     match event {
                         TermEvent::Resize(width, height) => {
                             self.rebuild_layout(Rect::new(0, 0, width, height));
-                            self.extend_stats_if_needed();
                         }
                         TermEvent::Key(key) => {
                             self.handle_key_event(key);
@@ -186,14 +176,6 @@ impl App {
                     self.handle_app_event(event);
                     needs_redraw = true;
                 }
-                Some(join_result) = self.raw_stats_jobs.join_next() => {
-                    self.handle_stats_result(join_result);
-                    needs_redraw = true;
-                }
-                Some(join_result) = self.translated_stats_jobs.join_next() => {
-                    self.handle_stats_result(join_result);
-                    needs_redraw = true;
-                }
                 Some(join_result) = async {
                     match self.load_job.as_mut() {
                         Some(job) => Some((&mut job.handle).await),
@@ -205,16 +187,12 @@ impl App {
                         Ok(Ok(raw_sequences)) => match libmsa::Alignment::new(raw_sequences)
                             .and_then(AlignmentModel::new) {
                             Ok(model) => {
-                                self.raw_stats_jobs.abort_all();
-                                self.translated_stats_jobs.abort_all();
-                                self.stats_cache.init(model.view().column_count());
                                 self.alignment = Some(model);
                                 self.ui.meta.loading_state = LoadingState::Loaded;
                                 self.ui.clear_transient_state();
                                 self.mouse_tracker.clear_anchors();
                                 self.refresh_viewport_bounds();
                                 self.ui.viewport.jump_to_position(self.ui.meta.initial_position);
-                                self.try_spawn_stats_jobs();
                             }
                             Err(error) => {
                                 self.ui.meta.loading_state = LoadingState::Failed(error.to_string());
@@ -239,8 +217,6 @@ impl App {
             job.cancel.cancel();
             job.handle.abort();
         }
-        self.raw_stats_jobs.abort_all();
-        self.translated_stats_jobs.abort_all();
         Ok(())
     }
 
@@ -513,31 +489,26 @@ impl App {
                 self.alignment_mut()?.pin(abs_row)?;
                 self.clear_mouse_selection();
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::UnpinSequence(abs_row) => {
                 self.alignment_mut()?.unpin(abs_row)?;
                 self.clear_mouse_selection();
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::SetReference(abs_row) => {
                 self.alignment_mut()?.set_reference(abs_row)?;
                 self.clear_mouse_selection();
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::ClearReference => {
                 self.alignment_mut()?.clear_reference()?;
                 self.clear_mouse_selection();
                 self.on_view_rebuilt();
-                return Ok(());
             }
 
             Command::SetFilter(pattern) => {
                 self.alignment_mut()?.set_filter(pattern)?;
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::SetGapFilter(max_gap_fraction) => {
                 let alignment = self.alignment_mut()?;
@@ -548,7 +519,6 @@ impl App {
                 }
                 alignment.set_gap_filter(max_gap_fraction)?;
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::SetConstantFilter(min_constant_fraction) => {
                 let alignment = self.alignment_mut()?;
@@ -559,17 +529,14 @@ impl App {
                 }
                 alignment.set_constant_filter(min_constant_fraction)?;
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::ClearFilter => {
                 self.alignment_mut()?.clear_filter()?;
                 self.on_view_rebuilt();
-                return Ok(());
             }
             Command::SetActiveType(kind) => {
                 self.alignment_mut()?.set_active_kind(kind)?;
                 self.on_view_rebuilt();
-                return Ok(());
             }
 
             Command::ToggleTranslationView => {
@@ -580,8 +547,6 @@ impl App {
                     ));
                 }
                 alignment.toggle_translation_view()?;
-                self.invalidate_all_stats();
-                return Ok(());
             }
             Command::ReloadAsProtein { frame } => {
                 let viewport_target = self.reload_as_protein_viewport_target(frame);
@@ -589,35 +554,24 @@ impl App {
                 self.clear_mouse_selection();
                 self.rebuild_layout(self.layout_area);
                 self.jump_to_reloaded_viewport_target(viewport_target);
-                self.invalidate_all_stats();
-                return Ok(());
             }
             Command::SetTranslationFrame(frame) => {
                 let alignment = self.alignment_mut()?;
-                let was_enabled = alignment.translation().is_some();
                 let was_reloaded = alignment.is_reloaded_as_protein();
                 alignment.set_translation_frame(frame)?;
                 if was_reloaded {
                     self.on_view_rebuilt();
-                    return Ok(());
                 }
-                if was_enabled {
-                    self.invalidate_translated_stats();
-                }
-                return Ok(());
             }
 
             Command::SetConsensusMethod(method) => {
                 self.alignment_mut()?.consensus_method = method;
-                self.invalidate_all_stats();
-                return Ok(());
             }
             Command::SetDiffMode(mode) => {
                 self.alignment_mut()?.diff_mode = mode;
             }
         }
 
-        self.extend_stats_if_needed();
         Ok(())
     }
 
@@ -632,7 +586,6 @@ impl App {
 
     fn on_view_rebuilt(&mut self) {
         self.rebuild_layout(self.layout_area);
-        self.invalidate_all_stats();
     }
 
     fn reload_as_protein_viewport_target(
@@ -767,120 +720,6 @@ impl App {
             }
         });
     }
-
-    fn handle_stats_result(&mut self, join_result: std::result::Result<StatsJobResult, JoinError>) {
-        let Ok(result) = join_result else {
-            return;
-        };
-        let error_message = result.summaries.as_ref().err().cloned();
-        if !self.stats_cache.store(result)
-            && let Some(error_message) = error_message
-        {
-            warn!(error = %error_message, "Stats chunk failed");
-        }
-    }
-
-    fn try_spawn_stats_jobs(&mut self) {
-        let Some(alignment) = self.alignment.as_ref() else {
-            return;
-        };
-        let col_range = self.ui.viewport.window().col_range;
-        let generation = self.stats_cache.generation;
-
-        for chunk_idx in self.stats_cache.raw_chunks_to_spawn(&col_range) {
-            self.stats_cache.mark_raw_pending(chunk_idx);
-            let request = StatsJobRequest {
-                alignment: alignment.view().clone(),
-                view: StatsView::Raw,
-                chunk_idx,
-                range: self.stats_cache.raw_chunk_range(chunk_idx),
-                method: alignment.consensus_method,
-                generation,
-            };
-            self.raw_stats_jobs.spawn_blocking(move || {
-                let StatsJobRequest {
-                    alignment,
-                    view,
-                    chunk_idx,
-                    range,
-                    method,
-                    generation,
-                } = request;
-                let summaries = alignment
-                    .column_summaries_range(range.clone(), method)
-                    .map_err(|error| error.to_string());
-                StatsJobResult {
-                    generation,
-                    chunk_idx,
-                    view,
-                    summaries,
-                }
-            });
-        }
-
-        let Some(ctx) = alignment.stats_context(col_range) else {
-            return;
-        };
-        if let StatsView::Translated(frame) = ctx.view {
-            for chunk_idx in
-                self.stats_cache
-                    .translated_chunks_to_spawn(&ctx.range, frame, ctx.total_columns)
-            {
-                self.stats_cache.mark_translated_pending(chunk_idx);
-                let request = StatsJobRequest {
-                    alignment: alignment.view().clone(),
-                    view: StatsView::Translated(frame),
-                    chunk_idx,
-                    range: self.stats_cache.translated_chunk_range(chunk_idx),
-                    method: alignment.consensus_method,
-                    generation,
-                };
-                self.translated_stats_jobs.spawn_blocking(move || {
-                    let StatsJobRequest {
-                        alignment,
-                        view,
-                        chunk_idx,
-                        range,
-                        method,
-                        generation,
-                    } = request;
-                    let summaries = alignment
-                        .translated(frame)
-                        .and_then(|translated| {
-                            translated.column_summaries_range(range.clone(), method)
-                        })
-                        .map_err(|error| error.to_string());
-                    StatsJobResult {
-                        generation,
-                        chunk_idx,
-                        view,
-                        summaries,
-                    }
-                });
-            }
-        }
-    }
-
-    fn extend_stats_if_needed(&mut self) {
-        self.try_spawn_stats_jobs();
-    }
-
-    fn invalidate_all_stats(&mut self) {
-        let Some(alignment) = self.alignment.as_ref() else {
-            return;
-        };
-        self.raw_stats_jobs.abort_all();
-        self.translated_stats_jobs.abort_all();
-        self.stats_cache
-            .invalidate_all(alignment.view().column_count());
-        self.try_spawn_stats_jobs();
-    }
-
-    fn invalidate_translated_stats(&mut self) {
-        self.translated_stats_jobs.abort_all();
-        self.stats_cache.invalidate_translated();
-        self.try_spawn_stats_jobs();
-    }
 }
 
 fn nearest_visible_relative_column(
@@ -922,7 +761,6 @@ mod tests {
         let mut app = App::new(startup);
         let alignment = libmsa::Alignment::new(sequences).unwrap();
         let model = AlignmentModel::new(alignment).unwrap();
-        app.stats_cache.init(model.view().column_count());
         app.alignment = Some(model);
         app.ui.meta.loading_state = LoadingState::Loaded;
         app.refresh_viewport_bounds();
