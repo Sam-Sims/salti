@@ -11,7 +11,7 @@ use crate::{
     core::{
         codon::{TranslatedByteRange, TranslationOverlay, nuc_start},
         model::AlignmentModel,
-        stats_cache::ColumnStatsCache,
+        stats::Stats,
         viewport::ViewportWindow,
     },
     ui::{
@@ -28,7 +28,7 @@ const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "
 pub(crate) struct ConsensusAlignmentPane<'a> {
     pub(crate) alignment: &'a AlignmentModel,
     pub(crate) window: &'a ViewportWindow,
-    pub(crate) metrics: &'a ColumnStatsCache,
+    pub(crate) stats: Option<&'a Stats>,
     pub(crate) theme: &'a ThemeState,
 }
 
@@ -41,8 +41,7 @@ impl Widget for ConsensusAlignmentPane<'_> {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let lines =
-            consensus_alignment_lines(self.alignment, self.window, self.metrics, self.theme);
+        let lines = consensus_alignment_lines(self.alignment, self.window, self.stats, self.theme);
         Paragraph::new(lines)
             .style(self.theme.styles.base_block)
             .render(inner_area, buf);
@@ -93,6 +92,21 @@ fn shows_conservation_line(alignment: &AlignmentModel) -> bool {
     alignment.base().active_type() != libmsa::AlignmentType::Generic
 }
 
+fn consensus_at(stats: Option<&Stats>, col: usize) -> u8 {
+    stats
+        .and_then(|stats| stats.summary_at(col))
+        .and_then(|summary| summary.consensus)
+        .unwrap_or(b' ')
+}
+
+fn spark_at(stats: Option<&Stats>, col: usize) -> &'static str {
+    stats
+        .and_then(|stats| stats.summary_at(col))
+        .and_then(|summary| summary.conservation)
+        .filter(|value| value.is_finite())
+        .map_or(" ", conservation_to_spark)
+}
+
 fn blank_line(width: usize) -> Line<'static> {
     Line::raw(" ".repeat(width))
 }
@@ -128,24 +142,17 @@ fn translated_reference_line(
 fn translated_consensus_line(
     overlay: &TranslationOverlay,
     window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     theme: &ThemeState,
 ) -> Line<'static> {
     let Some(protein_range) = overlay.visible_protein_range(&window.col_range) else {
         return blank_line(window.col_range.len());
     };
 
-    let consensus_bytes: Option<Vec<u8>> = protein_range
+    let consensus_bytes: Vec<u8> = protein_range
         .clone()
-        .map(|protein_col: usize| {
-            metrics
-                .translated_summary_at(overlay.frame, protein_col)
-                .map(|summary| summary.consensus.unwrap_or(b' '))
-        })
+        .map(|protein_col| consensus_at(stats, protein_col))
         .collect();
-    let Some(consensus_bytes) = consensus_bytes else {
-        return Line::from("Calculating consensus...".fg(theme.theme.text_dim).italic());
-    };
     let spans = format_translated_byte_range_spans(
         TranslatedByteRange::new(protein_range.start, &consensus_bytes),
         &window.col_range,
@@ -159,7 +166,7 @@ fn translated_consensus_line(
 fn translated_conservation_line(
     overlay: &TranslationOverlay,
     window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     theme: &ThemeState,
 ) -> Line<'static> {
     let width = window.col_range.len();
@@ -170,17 +177,7 @@ fn translated_conservation_line(
     };
 
     for protein_col in protein_range {
-        let Some(summary) = metrics.translated_summary_at(overlay.frame, protein_col) else {
-            return Line::from(
-                "Calculating conservation..."
-                    .fg(theme.theme.text_dim)
-                    .italic(),
-            );
-        };
-        let spark = summary
-            .conservation
-            .filter(|value| value.is_finite())
-            .map_or(" ", conservation_to_spark);
+        let spark = spark_at(stats, protein_col);
         let codon_nuc_start = nuc_start(protein_col, overlay.frame);
 
         for absolute_col in codon_nuc_start..=codon_nuc_start + 2 {
@@ -201,14 +198,14 @@ fn translated_conservation_line(
 fn consensus_alignment_lines(
     alignment: &AlignmentModel,
     window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     theme: &ThemeState,
 ) -> Vec<Line<'static>> {
     if let Some(overlay) = alignment.translation_overlay() {
         return vec![
             translated_reference_line(alignment, &overlay, window, theme),
-            translated_consensus_line(&overlay, window, metrics, theme),
-            translated_conservation_line(&overlay, window, metrics, theme),
+            translated_consensus_line(&overlay, window, stats, theme),
+            translated_conservation_line(&overlay, window, stats, theme),
         ];
     }
 
@@ -233,26 +230,19 @@ fn consensus_alignment_lines(
         },
     );
 
-    let consensus_bytes: Option<Vec<u8>> = window
+    let consensus_bytes: Vec<u8> = window
         .col_range
         .clone()
-        .map(|rel_col| {
-            metrics
-                .raw_summary_at(rel_col)
-                .map(|summary| summary.consensus.unwrap_or(b' '))
-        })
+        .map(|col| consensus_at(stats, col))
         .collect();
-
-    let consensus_line = consensus_bytes.map_or_else(
-        || Line::from("Calculating consensus...".fg(theme.theme.text_dim).italic()),
-        |bytes| {
-            let spans = format_row_spans(&bytes, &theme.theme.sequence, no_diff_mode);
-            Line::from(spans)
-        },
-    );
+    let consensus_line = Line::from(format_row_spans(
+        &consensus_bytes,
+        &theme.theme.sequence,
+        no_diff_mode,
+    ));
 
     if shows_conservation_line(alignment) {
-        let conservation_line = build_conservation_line(metrics, window, theme);
+        let conservation_line = build_conservation_line(stats, window, theme);
         vec![reference_line, consensus_line, conservation_line]
     } else {
         vec![reference_line, consensus_line]
@@ -260,25 +250,14 @@ fn consensus_alignment_lines(
 }
 
 fn build_conservation_line(
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     window: &ViewportWindow,
     theme: &ThemeState,
 ) -> Line<'static> {
     let mut sparkline = String::with_capacity(window.col_range.len());
 
-    for relative_col in window.col_range.clone() {
-        let Some(summary) = metrics.raw_summary_at(relative_col) else {
-            return Line::from(
-                "Calculating conservation..."
-                    .fg(theme.theme.text_dim)
-                    .italic(),
-            );
-        };
-        let spark = summary
-            .conservation
-            .filter(|value| value.is_finite())
-            .map_or(" ", conservation_to_spark);
-        sparkline.push_str(spark);
+    for col in window.col_range.clone() {
+        sparkline.push_str(spark_at(stats, col));
     }
 
     Line::from(sparkline).set_style(theme.styles.accent_alt)
@@ -290,7 +269,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::{model::StatsView, stats_cache::StatsJobResult},
+        core::stats::tests::from_consensus,
         ui::layout::{AlignmentHeaderLayout, AppLayout},
     };
 
@@ -306,45 +285,9 @@ mod tests {
         AlignmentModel::new(alignment).unwrap()
     }
 
-    fn metrics_with(
-        view: StatsView,
-        consensus: &[u8],
-        conservation: Option<f32>,
-    ) -> ColumnStatsCache {
-        let mut cache = ColumnStatsCache::default();
-        match view {
-            StatsView::Raw => cache.init(consensus.len()),
-            StatsView::Translated(frame) => {
-                cache.init(consensus.len() * 3);
-                let _ =
-                    cache.translated_chunks_to_spawn(&(0..consensus.len()), frame, consensus.len());
-            }
-        }
-
-        let summaries = consensus
-            .iter()
-            .enumerate()
-            .map(|(position, &byte)| libmsa::ColumnSummary {
-                position,
-                consensus: Some(byte),
-                conservation,
-            })
-            .collect();
-        let generation = cache.generation;
-        let chunk_idx = 0;
-        let stored = cache.store(StatsJobResult {
-            generation,
-            chunk_idx,
-            view,
-            summaries: Ok(summaries),
-        });
-        assert!(stored);
-        cache
-    }
-
     fn render_consensus_pane_text(
         alignment: &AlignmentModel,
-        metrics: &ColumnStatsCache,
+        stats: Option<&Stats>,
         area: Rect,
     ) -> String {
         let mut buffer = Buffer::empty(area);
@@ -364,7 +307,7 @@ mod tests {
         ConsensusAlignmentPane {
             alignment,
             window: &window,
-            metrics,
+            stats,
             theme: &theme,
         }
         .render(layout.consensus_alignment_pane, &mut buffer);
@@ -406,11 +349,11 @@ mod tests {
             raw("seq2", b"CATCATCATCATCATCAT"),
         ]);
         alignment.set_reference(0).unwrap();
-        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
 
         insta::assert_snapshot!(
             "consensus_pane_raw",
-            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+            render_consensus_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 5))
         );
     }
 
@@ -420,11 +363,11 @@ mod tests {
             raw("seq1", b"CATCATCATCATCATCAT"),
             raw("seq2", b"CATCATCATCATCATCAT"),
         ]);
-        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
 
         insta::assert_snapshot!(
             "consensus_pane_raw_no_reference",
-            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+            render_consensus_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 5))
         );
     }
 
@@ -438,15 +381,11 @@ mod tests {
         alignment
             .set_translation(Some(libmsa::ReadingFrame::Frame1))
             .unwrap();
-        let metrics = metrics_with(
-            StatsView::Translated(libmsa::ReadingFrame::Frame1),
-            b"HHHHHH",
-            Some(1.0),
-        );
+        let stats = from_consensus(0, b"HHHHHH");
 
         insta::assert_snapshot!(
             "consensus_pane_translated",
-            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+            render_consensus_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 5))
         );
     }
 
@@ -459,15 +398,11 @@ mod tests {
         alignment
             .set_translation(Some(libmsa::ReadingFrame::Frame1))
             .unwrap();
-        let metrics = metrics_with(
-            StatsView::Translated(libmsa::ReadingFrame::Frame1),
-            b"HHHHHH",
-            Some(1.0),
-        );
+        let stats = from_consensus(0, b"HHHHHH");
 
         insta::assert_snapshot!(
             "consensus_pane_translated_no_reference",
-            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 5))
+            render_consensus_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 5))
         );
     }
 
@@ -478,11 +413,11 @@ mod tests {
             raw("seq2", b"ACDEACDEACDE"),
         ]);
         alignment.set_reference(0).unwrap();
-        let metrics = metrics_with(StatsView::Raw, b"ACDEACDEACDE", Some(1.0));
+        let stats = from_consensus(0, b"ACDEACDEACDE");
 
         insta::assert_snapshot!(
             "consensus_pane_generic_without_conservation",
-            render_consensus_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 4))
+            render_consensus_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 4))
         );
     }
 }

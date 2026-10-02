@@ -18,6 +18,7 @@ use crate::{
         gff::{self, Gff},
         model::{AlignmentModel, StatsView},
         parser,
+        stats::Stats,
         stats_cache::{ColumnStatsCache, StatsJobRequest, StatsJobResult},
     },
     input,
@@ -145,12 +146,15 @@ impl App {
                             if area != self.layout_area {
                                 self.rebuild_layout(area);
                             }
+                            let stats = self.alignment.as_ref().and_then(|alignment| {
+                                Stats::compute(alignment, self.ui.viewport.window().col_range)
+                            });
                             render(
                                 frame,
                                 self.alignment.as_ref(),
                                 self.gff.as_ref(),
                                 &self.ui,
-                                &self.stats_cache,
+                                stats.as_ref(),
                                 &self.frame_layout,
                                 &self.app_layout,
                             )
