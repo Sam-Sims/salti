@@ -9,27 +9,8 @@ use crate::{
     metrics::{
         ColumnSummary, ConsensusMethod, counted_translated_columns_range, summaries_from_columns,
     },
+    residue::nucleotide_index,
 };
-
-const NUCLEOTIDE_INDEX_TABLE: [u8; 256] = build_nucleotide_index_table();
-
-const fn build_nucleotide_index_table() -> [u8; 256] {
-    // 4 is invalid, only maps valid nts to 0-3
-    let mut table = [4; 256];
-
-    table[b'A' as usize] = 0;
-    table[b'a' as usize] = 0;
-    table[b'T' as usize] = 1;
-    table[b't' as usize] = 1;
-    table[b'U' as usize] = 1;
-    table[b'u' as usize] = 1;
-    table[b'C' as usize] = 2;
-    table[b'c' as usize] = 2;
-    table[b'G' as usize] = 3;
-    table[b'g' as usize] = 3;
-
-    table
-}
 
 /// Reading frames for translating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -159,17 +140,14 @@ impl TranslationTable {
     }
 
     pub(crate) fn translate_codon(&self, codon: [u8; 3]) -> u8 {
-        let Some(first) = index_nucleotide(codon[0]) else {
-            return b'X';
-        };
-        let Some(second) = index_nucleotide(codon[1]) else {
-            return b'X';
-        };
-        let Some(third) = index_nucleotide(codon[2]) else {
-            return b'X';
-        };
-
-        self.codons[first][second][third]
+        match (
+            nucleotide_index(codon[0]),
+            nucleotide_index(codon[1]),
+            nucleotide_index(codon[2]),
+        ) {
+            (Some(first), Some(second), Some(third)) => self.codons[first][second][third],
+            _ => b'X',
+        }
     }
 }
 
@@ -381,16 +359,6 @@ impl<'a> TranslatedSequenceView<'a> {
     }
 }
 
-pub(crate) fn normalise_nucleotide(byte: u8) -> Option<u8> {
-    let byte = byte.to_ascii_uppercase();
-
-    match byte {
-        b'A' | b'C' | b'G' | b'T' => Some(byte),
-        b'U' => Some(b'T'),
-        _ => None,
-    }
-}
-
 fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationTable) -> Vec<u8> {
     let offset = frame.offset();
     if sequence.len() <= offset {
@@ -404,17 +372,7 @@ fn translate_sequence(sequence: &[u8], frame: ReadingFrame, table: &TranslationT
 
     sequence[offset..complete_end]
         .chunks_exact(3)
-        .map(|codon| {
-            let first = nucleotide_index(codon[0]);
-            let second = nucleotide_index(codon[1]);
-            let third = nucleotide_index(codon[2]);
-
-            if first == 4 || second == 4 || third == 4 {
-                b'X'
-            } else {
-                table.codons[usize::from(first)][usize::from(second)][usize::from(third)]
-            }
-        })
+        .map(|codon| table.translate_codon([codon[0], codon[1], codon[2]]))
         .chain(has_incomplete_terminal_codon.then_some(b'X'))
         .collect()
 }
@@ -426,53 +384,23 @@ pub(crate) fn translated_byte_at(
     table: &TranslationTable,
 ) -> Option<u8> {
     let codon_start = frame.offset().checked_add(protein_col.checked_mul(3)?)?;
-    let first_raw = *sequence.get(codon_start)?;
-    let codon = [
-        normalise_nucleotide(first_raw),
-        sequence
-            .get(codon_start + 1)
-            .and_then(|&byte| normalise_nucleotide(byte)),
-        sequence
-            .get(codon_start + 2)
-            .and_then(|&byte| normalise_nucleotide(byte)),
-    ];
+    let first = *sequence.get(codon_start)?;
+    let (Some(&second), Some(&third)) =
+        (sequence.get(codon_start + 1), sequence.get(codon_start + 2))
+    else {
+        return Some(b'X');
+    };
 
-    match codon {
-        [Some(first), Some(second), Some(third)] => {
-            Some(table.translate_codon([first, second, third]))
-        }
-        _ => Some(b'X'),
-    }
+    Some(table.translate_codon([first, second, third]))
 }
 
 pub(crate) fn translated_length(sequence_len: usize, frame: ReadingFrame) -> usize {
     frame.translated_length(sequence_len)
 }
 
-#[inline]
-fn nucleotide_index(base: u8) -> u8 {
-    NUCLEOTIDE_INDEX_TABLE[base as usize]
-}
-
-fn index_nucleotide(base: u8) -> Option<usize> {
-    match nucleotide_index(base) {
-        4 => None,
-        index => Some(index as usize),
-    }
-}
-
 #[cfg(test)]
 mod translation_table_tests {
-    use super::{
-        ReadingFrame, TranslationTable, normalise_nucleotide, translate_sequence,
-        translated_byte_at,
-    };
-
-    #[test]
-    fn normalises_u_to_t() {
-        assert_eq!(normalise_nucleotide(b'U'), Some(b'T'));
-        assert_eq!(normalise_nucleotide(b'u'), Some(b'T'));
-    }
+    use super::{ReadingFrame, TranslationTable, translate_sequence, translated_byte_at};
 
     // https://www.hgmd.cf.ac.uk/docs/cd_amino.html
     #[test]
