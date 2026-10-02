@@ -13,7 +13,7 @@ use crate::{
         codon::TranslatedDiffRange,
         gff::Gff,
         model::{AlignmentModel, DiffMode},
-        stats_cache::ColumnStatsCache,
+        stats::Stats,
         viewport::{Viewport, ViewportWindow},
     },
     ui::{
@@ -30,7 +30,7 @@ const SCROLLBAR_THUMB_MIN_WIDTH: usize = 1;
 pub(crate) struct AlignmentPane<'a> {
     pub(crate) alignment: &'a AlignmentModel,
     pub(crate) viewport: &'a Viewport,
-    pub(crate) metrics: &'a ColumnStatsCache,
+    pub(crate) stats: Option<&'a Stats>,
     pub(crate) gff: Option<&'a Gff>,
     pub(crate) header: AlignmentHeaderLayout,
     pub(crate) theme: &'a ThemeState,
@@ -70,7 +70,7 @@ impl Widget for AlignmentPane<'_> {
         render_sequence_rows(
             self.alignment,
             &window,
-            self.metrics,
+            self.stats,
             sequence_rows_area,
             self.theme,
             buf,
@@ -161,7 +161,7 @@ fn emit_band_rows(
 fn build_sequence_row_lines(
     alignment: &AlignmentModel,
     window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     area: Rect,
     theme: &ThemeState,
 ) -> Vec<Line<'static>> {
@@ -188,8 +188,8 @@ fn build_sequence_row_lines(
             protein_range
                 .clone()
                 .map(|protein_col: usize| {
-                    metrics
-                        .translated_summary_at(overlay.frame, protein_col)
+                    stats
+                        .and_then(|stats| stats.summary_at(protein_col))
                         .map(|summary| summary.consensus.unwrap_or(b' '))
                 })
                 .collect()
@@ -235,8 +235,8 @@ fn build_sequence_row_lines(
         .col_range
         .clone()
         .map(|relative_col| {
-            metrics
-                .raw_summary_at(relative_col)
+            stats
+                .and_then(|stats| stats.summary_at(relative_col))
                 .map(|summary| summary.consensus.unwrap_or(b' '))
         })
         .collect();
@@ -271,12 +271,12 @@ fn build_sequence_row_lines(
 fn render_sequence_rows(
     alignment: &AlignmentModel,
     window: &ViewportWindow,
-    metrics: &ColumnStatsCache,
+    stats: Option<&Stats>,
     area: Rect,
     theme: &ThemeState,
     buf: &mut Buffer,
 ) {
-    let lines = build_sequence_row_lines(alignment, window, metrics, area, theme);
+    let lines = build_sequence_row_lines(alignment, window, stats, area, theme);
     Paragraph::new(lines)
         .style(theme.styles.base_block)
         .render(area, buf);
@@ -348,8 +348,7 @@ mod tests {
     use crate::{
         core::{
             gff::{Feature, FeatureType, Gff, Strand},
-            model::StatsView,
-            stats_cache::StatsJobResult,
+            stats::tests::from_consensus,
         },
         ui::layout::AppLayout,
     };
@@ -366,62 +365,19 @@ mod tests {
         AlignmentModel::new(alignment).unwrap()
     }
 
-    fn metrics_with(
-        view: StatsView,
-        consensus: &[u8],
-        conservation: Option<f32>,
-    ) -> ColumnStatsCache {
-        let mut cache = ColumnStatsCache::default();
-        match view {
-            StatsView::Raw => cache.init(consensus.len()),
-            StatsView::Translated(frame) => {
-                cache.init(consensus.len() * 3);
-                let _ =
-                    cache.translated_chunks_to_spawn(&(0..consensus.len()), frame, consensus.len());
-            }
-        }
-
-        let summaries = consensus
-            .iter()
-            .enumerate()
-            .map(|(position, &byte)| libmsa::ColumnSummary {
-                position,
-                consensus: Some(byte),
-                conservation,
-            })
-            .collect();
-        let generation = cache.generation;
-        let chunk_idx = 0;
-        let stored = cache.store(StatsJobResult {
-            generation,
-            chunk_idx,
-            view,
-            summaries: Ok(summaries),
-        });
-        assert!(stored);
-        cache
-    }
-
     fn render_alignment_pane_text(
         alignment: &AlignmentModel,
-        stats_cache: &ColumnStatsCache,
+        stats: Option<&Stats>,
         area: Rect,
         row_offset: usize,
         col_offset: usize,
     ) -> String {
-        render_alignment_pane_text_with_gff(
-            alignment,
-            stats_cache,
-            None,
-            area,
-            row_offset,
-            col_offset,
-        )
+        render_alignment_pane_text_with_gff(alignment, stats, None, area, row_offset, col_offset)
     }
 
     fn render_alignment_pane_text_with_gff(
         alignment: &AlignmentModel,
-        stats_cache: &ColumnStatsCache,
+        stats: Option<&Stats>,
         gff: Option<&Gff>,
         area: Rect,
         row_offset: usize,
@@ -462,7 +418,7 @@ mod tests {
         AlignmentPane {
             alignment,
             viewport: &viewport,
-            metrics: stats_cache,
+            stats,
             gff,
             header: layout.alignment_header,
             theme: &theme,
@@ -508,13 +464,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_basic",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -538,7 +488,7 @@ mod tests {
             "alignment_pane_blank_local_feature_track",
             render_alignment_pane_text_with_gff(
                 &alignment,
-                &ColumnStatsCache::default(),
+                None,
                 Some(&gff),
                 Rect::new(0, 0, 100, 12),
                 0,
@@ -567,7 +517,7 @@ mod tests {
             "alignment_pane_with_local_feature_track",
             render_alignment_pane_text_with_gff(
                 &alignment,
-                &ColumnStatsCache::default(),
+                None,
                 Some(&gff),
                 Rect::new(0, 0, 100, 12),
                 0,
@@ -590,13 +540,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_pinned_and_fragmented",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -613,13 +557,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_translated",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -635,13 +573,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_raw_diff_reference",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -660,13 +592,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_translated_diff_reference",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -678,11 +604,11 @@ mod tests {
             raw("seq3", b"CATCATCATCATGATCAT"),
         ]);
         alignment.diff_mode = DiffMode::Consensus;
-        let metrics = metrics_with(StatsView::Raw, b"CATCATCATCATCATCAT", Some(1.0));
+        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
 
         insta::assert_snapshot!(
             "alignment_pane_raw_diff_consensus",
-            render_alignment_pane_text(&alignment, &metrics, Rect::new(0, 0, 100, 12), 0, 0,)
+            render_alignment_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 12), 0, 0,)
         );
     }
 
@@ -696,13 +622,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_scrolled_with_scrollbar",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 60, 12),
-                0,
-                10,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 60, 12), 0, 10,)
         );
     }
 
@@ -721,13 +641,7 @@ mod tests {
 
         insta::assert_snapshot!(
             "alignment_pane_pinned_with_vertical_scroll",
-            render_alignment_pane_text(
-                &alignment,
-                &ColumnStatsCache::default(),
-                Rect::new(0, 0, 100, 10),
-                2,
-                0,
-            )
+            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 10), 2, 0,)
         );
     }
 }
