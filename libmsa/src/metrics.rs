@@ -1,16 +1,13 @@
 use std::{num::NonZeroU8, ops::Range};
 
 use rand::seq::IndexedRandom;
-use rayon::prelude::*;
 
 use crate::{
     AlignmentType,
-    data::AlignmentData,
+    counts::count_columns,
     error::AlignmentError,
-    model::Alignment,
-    projection::Projection,
+    model::{Alignment, validate_column_range},
     residue,
-    translation::{ReadingFrame, TranslationTable, translated_byte_at},
 };
 
 /// Calculated values for a single alignment column.
@@ -84,14 +81,13 @@ impl Alignment {
         range: Range<usize>,
         method: ConsensusMethod,
     ) -> Result<Vec<ColumnSummary>, AlignmentError> {
-        if range.is_empty() {
-            return Err(AlignmentError::EmptyRange);
-        }
+        validate_column_range(&range, self.columns.len())?;
 
-        let columns = counted_columns_range(&self.data, &self.rows, &self.columns, range)?;
+        let counts = count_columns(&self.data, &self.rows, &self.columns, range.clone());
         let mut rng = rand::rng();
-        Ok(summaries_from_columns(
-            &columns,
+        Ok(summaries_from_counts(
+            range,
+            &counts,
             method,
             self.active_type().conservation_alphabet_size(),
             &mut rng,
@@ -99,104 +95,33 @@ impl Alignment {
     }
 }
 
-pub(crate) struct CountedColumn {
-    pub position: usize,
-    pub counts: [u32; 256],
-}
-
-pub(crate) fn counted_columns_range(
-    data: &AlignmentData,
-    rows: &Projection,
-    columns: &Projection,
-    range: Range<usize>,
-) -> Result<Vec<CountedColumn>, AlignmentError> {
-    if range.is_empty() {
-        return Err(AlignmentError::EmptyRange);
-    }
-
-    if range.end > columns.len() {
-        return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end - 1,
-            length: columns.len(),
-        });
-    }
-
-    Ok(range
-        .into_par_iter()
-        .map(|rel_col| CountedColumn {
-            position: rel_col,
-            counts: column_byte_counts(
-                data,
-                rows,
-                columns
-                    .absolute(rel_col)
-                    .expect("validated range positions map into the projection"),
-            ),
-        })
-        .collect())
-}
-
-pub(crate) fn counted_translated_columns_range(
-    data: &AlignmentData,
-    rows: &Projection,
-    range: Range<usize>,
-    frame: ReadingFrame,
-    table: &TranslationTable,
-) -> Result<Vec<CountedColumn>, AlignmentError> {
-    if range.is_empty() {
-        return Err(AlignmentError::EmptyRange);
-    }
-
-    let translated_len = frame.translated_length(data.length);
-    if range.end > translated_len {
-        return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end - 1,
-            length: translated_len,
-        });
-    }
-
-    Ok(range
-        .into_par_iter()
-        .map(|protein_col| CountedColumn {
-            position: protein_col,
-            counts: translated_column_byte_counts(data, rows, protein_col, frame, table),
-        })
-        .collect())
-}
-
-pub(crate) fn summaries_from_columns(
-    columns: &[CountedColumn],
+pub(crate) fn summaries_from_counts(
+    positions: Range<usize>,
+    counts: &[[u32; 128]],
     method: ConsensusMethod,
     alphabet_size: Option<NonZeroU8>,
     rng: &mut impl rand::Rng,
 ) -> Vec<ColumnSummary> {
+    debug_assert_eq!(positions.len(), counts.len());
     let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
 
-    columns
-        .iter()
-        .map(|column| ColumnSummary {
-            position: column.position,
-            consensus: consensus_from_counts(&column.counts, method, rng),
+    positions
+        .zip(counts)
+        .map(|(position, counts)| ColumnSummary {
+            position,
+            consensus: consensus_from_counts(counts, method, rng),
             conservation: max_entropy
-                .map(|max_entropy| conservation_from_counts(&column.counts, max_entropy)),
+                .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
         })
         .collect()
 }
 
-pub(crate) fn gap_fraction_from_counts(counts: &[u32; 256]) -> f32 {
-    let (gap_count, total) = counts
-        .iter()
-        .enumerate()
-        .filter(|&(_, &count)| count != 0)
-        .fold((0u32, 0u32), |(gap_count, total), (symbol, &count)| {
-            let gap_count = if residue::is_gap(symbol as u8) {
-                gap_count + count
-            } else {
-                gap_count
-            };
-
-            (gap_count, total + count)
-        });
+pub(crate) fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
+    let total: u32 = counts.iter().sum();
+    let gap_count: u32 = symbol_counts(counts)
+        .filter(|&(symbol, _)| residue::is_gap(symbol))
+        .map(|(_, count)| count)
+        .sum();
 
     if total == 0 {
         0.0
@@ -206,18 +131,14 @@ pub(crate) fn gap_fraction_from_counts(counts: &[u32; 256]) -> f32 {
 }
 
 pub(crate) fn max_counted_symbol_fraction_from_counts(
-    counts: &[u32; 256],
+    counts: &[u32; 128],
     kind: AlignmentType,
 ) -> Option<f32> {
     let mut counted_total = 0u32;
     let mut max_count = 0u32;
 
-    for (symbol, &count) in counts.iter().enumerate() {
-        if count == 0 {
-            continue;
-        }
-
-        if is_ignored_constant_symbol(symbol as u8, kind) {
+    for (symbol, count) in symbol_counts(counts) {
+        if count == 0 || is_ignored_constant_symbol(symbol, kind) {
             continue;
         }
 
@@ -229,30 +150,26 @@ pub(crate) fn max_counted_symbol_fraction_from_counts(
 }
 
 fn consensus_from_counts(
-    counts: &[u32; 256],
+    counts: &[u32; 128],
     method: ConsensusMethod,
     rng: &mut impl rand::Rng,
 ) -> Option<u8> {
     let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
     let mut max_count = 0u32;
-    let mut candidates = [0u8; 256];
+    let mut candidates = [0u8; 128];
     let mut candidate_count = 0usize;
 
-    for (index, &count) in counts.iter().enumerate() {
-        if count == 0 {
-            continue;
-        }
-        if exclude_gap && residue::is_gap(index as u8) {
+    for (symbol, count) in symbol_counts(counts) {
+        if count == 0 || (exclude_gap && residue::is_gap(symbol)) {
             continue;
         }
 
         if count > max_count {
             max_count = count;
             candidate_count = 0;
-            candidates[candidate_count] = index as u8;
-            candidate_count += 1;
-        } else if count == max_count {
-            candidates[candidate_count] = index as u8;
+        }
+        if count == max_count {
+            candidates[candidate_count] = symbol;
             candidate_count += 1;
         }
     }
@@ -260,31 +177,25 @@ fn consensus_from_counts(
     candidates[..candidate_count].choose(rng).copied()
 }
 
-fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
+fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f32 {
     let mut total = 0u32;
     let mut gap_count = 0u32;
-    let mut merged_non_gap_counts = [0u32; 256];
+    let mut merged_non_gap_counts = [0u32; 128];
 
-    for (symbol, &count) in counts.iter().enumerate() {
+    for (symbol, count) in symbol_counts(counts) {
         if count == 0 {
             continue;
         }
+
         total += count;
-
-        if residue::is_gap(symbol as u8) {
+        if residue::is_gap(symbol) {
             gap_count += count;
-            continue;
+        } else {
+            merged_non_gap_counts[usize::from(symbol.to_ascii_uppercase())] += count;
         }
-
-        let upper = usize::from((symbol as u8).to_ascii_uppercase());
-        merged_non_gap_counts[upper] += count;
     }
 
-    if total == 0 {
-        return 0.0;
-    }
-
-    let non_gap_total = total.saturating_sub(gap_count);
+    let non_gap_total = total - gap_count;
     if non_gap_total == 0 {
         return 0.0;
     }
@@ -304,45 +215,13 @@ fn conservation_from_counts(counts: &[u32; 256], max_entropy: f64) -> f32 {
     (conservation * (1.0 - gap_fraction)) as f32
 }
 
+fn symbol_counts(counts: &[u32; 128]) -> impl Iterator<Item = (u8, u32)> + '_ {
+    (0..128).zip(counts.iter().copied())
+}
+
 #[inline]
 const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
     residue::is_gap(byte) || residue::is_unknown(byte, kind)
-}
-
-fn column_byte_counts(data: &AlignmentData, rows: &Projection, abs_col: usize) -> [u32; 256] {
-    let mut counts = [0u32; 256];
-
-    for abs_row in rows.iter() {
-        let sequence = data
-            .sequences
-            .get(abs_row)
-            .expect("selected row must exist");
-        counts[usize::from(sequence.sequence[abs_col])] += 1;
-    }
-
-    counts
-}
-
-fn translated_column_byte_counts(
-    data: &AlignmentData,
-    rows: &Projection,
-    protein_col: usize,
-    frame: ReadingFrame,
-    table: &TranslationTable,
-) -> [u32; 256] {
-    let mut counts = [0u32; 256];
-
-    for abs_row in rows.iter() {
-        let sequence = data
-            .sequences
-            .get(abs_row)
-            .expect("selected row must exist");
-        let byte = translated_byte_at(&sequence.sequence, protein_col, frame, table)
-            .expect("validated translated range");
-        counts[usize::from(byte)] += 1;
-    }
-
-    counts
 }
 
 #[cfg(test)]
@@ -351,10 +230,10 @@ mod consensus_count_tests {
 
     use super::{ConsensusMethod, consensus_from_counts};
 
-    fn counts_for(symbols: &[u8]) -> [u32; 256] {
-        let mut counts = [0u32; 256];
-        for &s in symbols {
-            counts[usize::from(s)] += 1;
+    fn counts_for(symbols: &[u8]) -> [u32; 128] {
+        let mut counts = [0u32; 128];
+        for &symbol in symbols {
+            counts[usize::from(symbol)] += 1;
         }
         counts
     }
@@ -391,7 +270,7 @@ mod consensus_count_tests {
 
     #[test]
     fn consensus_no_candidates_returns_none() {
-        let counts = [0u32; 256];
+        let counts = [0u32; 128];
         let mut rng = rand::rng();
         assert_eq!(
             consensus_from_counts(&counts, ConsensusMethod::Majority, &mut rng),
@@ -414,23 +293,23 @@ mod derived_column_tests {
 
     use rand::{SeedableRng, rngs::StdRng};
 
-    use super::{ConsensusMethod, CountedColumn, summaries_from_columns};
+    use super::{ConsensusMethod, summaries_from_counts};
 
-    fn counted_column(position: usize, symbols: &[u8]) -> CountedColumn {
-        let mut counts = [0u32; 256];
+    fn counts_for(symbols: &[u8]) -> [u32; 128] {
+        let mut counts = [0u32; 128];
         for &symbol in symbols {
             counts[usize::from(symbol)] += 1;
         }
-
-        CountedColumn { position, counts }
+        counts
     }
 
     #[test]
-    fn summaries_from_columns_return_none_for_all_gap_column() {
-        let columns = vec![counted_column(3, b"---")];
+    fn summaries_from_counts_return_none_for_all_gap_column() {
+        let counts = [counts_for(b"---")];
         let mut rng = StdRng::seed_from_u64(8);
-        let summaries = summaries_from_columns(
-            &columns,
+        let summaries = summaries_from_counts(
+            3..4,
+            &counts,
             ConsensusMethod::MajorityNonGap,
             Some(NonZeroU8::new(4).unwrap()),
             &mut rng,
@@ -443,11 +322,12 @@ mod derived_column_tests {
     }
 
     #[test]
-    fn summaries_from_columns_report_conservation_extremes() {
-        let columns = vec![counted_column(0, b"AAAA"), counted_column(1, b"----")];
+    fn summaries_from_counts_report_conservation_extremes() {
+        let counts = [counts_for(b"AAAA"), counts_for(b"----")];
         let mut rng = StdRng::seed_from_u64(9);
-        let summaries = summaries_from_columns(
-            &columns,
+        let summaries = summaries_from_counts(
+            0..2,
+            &counts,
             ConsensusMethod::MajorityNonGap,
             Some(NonZeroU8::new(4).unwrap()),
             &mut rng,
@@ -467,10 +347,10 @@ mod derived_column_tests {
 mod conservation_count_tests {
     use super::conservation_from_counts;
 
-    fn counts_for(symbols: &[u8]) -> [u32; 256] {
-        let mut counts = [0u32; 256];
-        for &s in symbols {
-            counts[usize::from(s)] += 1;
+    fn counts_for(symbols: &[u8]) -> [u32; 128] {
+        let mut counts = [0u32; 128];
+        for &symbol in symbols {
+            counts[usize::from(symbol)] += 1;
         }
         counts
     }
@@ -503,7 +383,7 @@ mod conservation_count_tests {
 
     #[test]
     fn empty_column() {
-        let counts = [0u32; 256];
+        let counts = [0u32; 128];
         assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 0.0);
     }
 
@@ -521,10 +401,10 @@ mod constant_fraction_count_tests {
     use super::max_counted_symbol_fraction_from_counts;
     use crate::AlignmentType;
 
-    fn counts_for(symbols: &[u8]) -> [u32; 256] {
-        let mut counts = [0u32; 256];
-        for &s in symbols {
-            counts[usize::from(s)] += 1;
+    fn counts_for(symbols: &[u8]) -> [u32; 128] {
+        let mut counts = [0u32; 128];
+        for &symbol in symbols {
+            counts[usize::from(symbol)] += 1;
         }
         counts
     }

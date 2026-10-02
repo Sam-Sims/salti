@@ -3,7 +3,10 @@ use std::{borrow::Borrow, sync::Arc};
 use rayon::prelude::*;
 use regex::Regex;
 
-use crate::{error::AlignmentError, metrics, model::Alignment, projection::Projection};
+use crate::{
+    AlignmentType, counts, data::AlignmentData, error::AlignmentError, metrics, model::Alignment,
+    projection::Projection,
+};
 
 /// Builder for a filtered view over an unfiltered [`Alignment`].
 ///
@@ -97,44 +100,24 @@ impl<'a> FilterBuilder<'a> {
         }
         row_ids.retain(|&row_id| membership[row_id]);
 
-        let mut column_ids: Vec<usize> = (0..column_count).collect();
-        if self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some() {
-            let data = &self.source.data;
-            let active_type = self.source.active_type();
-            let max_gap_fraction = self.max_gap_fraction;
-            let min_constant_fraction = self.min_constant_fraction;
-
-            column_ids = (0..column_count)
-                .into_par_iter()
-                .filter_map(|abs_col| {
-                    let mut counts = [0u32; 256];
-
-                    for &abs_row in &row_ids {
-                        let sequence = data
-                            .sequences
-                            .get(abs_row)
-                            .expect("selected row must exist");
-                        counts[usize::from(sequence.sequence[abs_col])] += 1;
-                    }
-
-                    let gap_ok = max_gap_fraction.is_none_or(|threshold| {
-                        metrics::gap_fraction_from_counts(&counts) <= threshold
-                    });
-                    let constant_ok = min_constant_fraction.is_none_or(|threshold| {
-                        metrics::max_counted_symbol_fraction_from_counts(&counts, active_type)
-                            .is_none_or(|fraction| fraction < threshold)
-                    });
-
-                    (gap_ok && constant_ok).then_some(abs_col)
-                })
-                .collect();
-        }
-
         let rows_proj = if row_ids.len() == row_count {
             Projection::Full { len: row_count }
         } else {
             Projection::Filtered(Arc::from(row_ids))
         };
+
+        let column_ids: Vec<usize> =
+            if self.max_gap_fraction.is_some() || self.min_constant_fraction.is_some() {
+                kept_column_ids(
+                    &self.source.data,
+                    &rows_proj,
+                    self.source.active_type(),
+                    self.max_gap_fraction,
+                    self.min_constant_fraction,
+                )
+            } else {
+                (0..column_count).collect()
+            };
 
         let cols_proj = if column_ids.len() == column_count {
             Projection::Full { len: column_count }
@@ -144,6 +127,32 @@ impl<'a> FilterBuilder<'a> {
 
         Ok(self.source.with_projections(rows_proj, cols_proj))
     }
+}
+
+fn kept_column_ids(
+    data: &AlignmentData,
+    rows: &Projection,
+    active_type: AlignmentType,
+    max_gap_fraction: Option<f32>,
+    min_constant_fraction: Option<f32>,
+) -> Vec<usize> {
+    counts::count_all_columns(data, rows)
+        .flat_map_iter(|(abs_cols, counts)| {
+            abs_cols
+                .zip(counts)
+                .filter(move |(_, counts)| {
+                    let gap_ok = max_gap_fraction.is_none_or(|threshold| {
+                        metrics::gap_fraction_from_counts(counts) <= threshold
+                    });
+                    let constant_ok = min_constant_fraction.is_none_or(|threshold| {
+                        metrics::max_counted_symbol_fraction_from_counts(counts, active_type)
+                            .is_none_or(|fraction| fraction < threshold)
+                    });
+                    gap_ok && constant_ok
+                })
+                .map(|(abs_col, _)| abs_col)
+        })
+        .collect()
 }
 
 fn validate_row_ids(row_ids: &[usize], row_count: usize) -> Result<(), AlignmentError> {
