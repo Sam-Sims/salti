@@ -10,6 +10,9 @@ pub enum AlignmentError {
     /// A sequence in the alignment is empty.
     #[error("sequence '{id}' is empty")]
     EmptySequence { id: String },
+    /// A sequence contains a byte outside ASCII.
+    #[error("sequence '{id}' contains a non-ASCII byte")]
+    NonAsciiSequence { id: String },
     /// A sequence has a different length from the rest of the alignment.
     #[error("sequence '{id}' has width {actual}, expected {expected}")]
     LengthMismatch {

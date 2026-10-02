@@ -41,6 +41,8 @@ impl Alignment {
     ///
     /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
     ///
+    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
+    ///
     /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
     pub fn new(seqs: impl IntoIterator<Item = RawSequence>) -> Result<Self, AlignmentError> {
         Self::new_with_detection_options(seqs, DetectionOptions::default())
@@ -56,6 +58,8 @@ impl Alignment {
     /// [`AlignmentError::Empty`] if `seqs` is empty.
     ///
     /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
+    ///
+    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
     ///
     /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
     pub fn new_with_detection_options(
@@ -78,6 +82,8 @@ impl Alignment {
     /// [`AlignmentError::Empty`] if `seqs` is empty.
     ///
     /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
+    ///
+    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
     ///
     /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
     pub(crate) fn new_with_type(
@@ -445,6 +451,27 @@ mod alignment_construction_tests {
     fn rejects_mismatched_lengths() {
         let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"ACG")]);
         assert!(matches!(result, Err(AlignmentError::LengthMismatch { .. })));
+    }
+
+    #[test]
+    fn rejects_non_ascii_bytes_with_sequence_id() {
+        for byte in [0x80, 0xc3, 0xff] {
+            let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", &[b'A', byte])]);
+            assert_eq!(
+                result.unwrap_err(),
+                AlignmentError::NonAsciiSequence {
+                    id: "seq-2".to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_every_ascii_byte() {
+        let every_ascii: Vec<u8> = (0..=0x7f).collect();
+        let alignment =
+            Alignment::new(vec![raw("seq-1", &every_ascii), raw("seq-2", &every_ascii)]).unwrap();
+        assert_eq!(alignment.column_count(), 128);
     }
 
     #[test]

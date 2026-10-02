@@ -23,6 +23,12 @@ impl TryFrom<RawSequence> for Sequence {
             });
         }
 
+        if !raw_sequence.sequence.is_ascii() {
+            return Err(AlignmentError::NonAsciiSequence {
+                id: raw_sequence.id,
+            });
+        }
+
         Ok(Self {
             id: raw_sequence.id,
             sequence: raw_sequence.sequence.into_boxed_slice(),
