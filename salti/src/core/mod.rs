@@ -3,6 +3,7 @@ pub(crate) mod gff;
 pub mod model;
 pub mod parser;
 pub mod search;
+pub mod stats;
 pub mod stats_cache;
 pub mod viewport;
 
