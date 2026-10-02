@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use rand::seq::IndexedRandom;
 
-use crate::{alignment_type::AlignmentType, data::AlignmentData, error::AlignmentError};
+use crate::{alignment_type::AlignmentType, data::AlignmentData, error::AlignmentError, residue};
 
 const DEFAULT_SAMPLE_SIZE: usize = 100;
 const DEFAULT_CLASSIFICATION_THRESHOLD: f32 = 0.5;
@@ -69,7 +69,7 @@ pub(crate) fn detect_alignment_type(
         .sequences
         .choose_multiple(rng, options.sample_size())
         .flat_map(|sequence| sequence.sequence.iter().copied())
-        .filter(|byte| !matches!(byte, b'-'))
+        .filter(|&byte| !residue::is_gap(byte))
         .map(|byte| byte.to_ascii_uppercase())
         .fold(
             (0usize, 0usize, 0usize),
