@@ -1,7 +1,5 @@
 use std::{num::NonZeroU8, ops::Range};
 
-use rand::seq::IndexedRandom;
-
 use crate::{
     AlignmentType,
     counts::count_columns,
@@ -14,6 +12,10 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnSummary {
     pub position: usize,
+    /// The most frequent byte in the column under the chosen [`ConsensusMethod`].
+    ///
+    /// Ties go to the lowest byte; see [`ConsensusMethod`]. `None` when no byte
+    /// was counted, such as an all-gap column under [`ConsensusMethod::MajorityNonGap`].
     pub consensus: Option<u8>,
     pub conservation: Option<f32>,
 }
@@ -21,8 +23,17 @@ pub struct ColumnSummary {
 /// Selects how consensus bytes are chosen for alignment columns.
 ///
 /// Different methods vary in whether gap characters are considered when
-/// determining the representative byte for a column. Tied winning symbols are
-/// resolved randomly.
+/// determining the representative byte for a column.
+///
+/// # Ties
+///
+/// When several bytes share the highest count, the one with the lowest ASCII
+/// value wins, so the result is deterministic. Bytes are compared as-is, which
+/// means:
+///
+/// - `A` beats `C`, and `C` beats `T`.
+/// - Uppercase beats lowercase, so `T` beats `a`.
+/// - Under [`ConsensusMethod::Majority`], gaps (`-`, `.`) and `*` beat every letter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConsensusMethod {
     /// Chooses the most frequent byte, including gap characters.
@@ -84,13 +95,11 @@ impl Alignment {
         validate_column_range(&range, self.columns.len())?;
 
         let counts = count_columns(&self.data, &self.rows, &self.columns, range.clone());
-        let mut rng = rand::rng();
         Ok(summaries_from_counts(
             range,
             &counts,
             method,
             self.active_type().conservation_alphabet_size(),
-            &mut rng,
         ))
     }
 }
@@ -100,7 +109,6 @@ pub(crate) fn summaries_from_counts(
     counts: &[[u32; 128]],
     method: ConsensusMethod,
     alphabet_size: Option<NonZeroU8>,
-    rng: &mut impl rand::Rng,
 ) -> Vec<ColumnSummary> {
     debug_assert_eq!(positions.len(), counts.len());
     let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
@@ -109,7 +117,7 @@ pub(crate) fn summaries_from_counts(
         .zip(counts)
         .map(|(position, counts)| ColumnSummary {
             position,
-            consensus: consensus_from_counts(counts, method, rng),
+            consensus: consensus_from_counts(counts, method),
             conservation: max_entropy
                 .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
         })
@@ -149,32 +157,19 @@ pub(crate) fn max_counted_symbol_fraction_from_counts(
     (counted_total != 0).then_some(max_count as f32 / counted_total as f32)
 }
 
-fn consensus_from_counts(
-    counts: &[u32; 128],
-    method: ConsensusMethod,
-    rng: &mut impl rand::Rng,
-) -> Option<u8> {
+fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option<u8> {
     let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
     let mut max_count = 0u32;
-    let mut candidates = [0u8; 128];
-    let mut candidate_count = 0usize;
+    let mut consensus = None;
 
     for (symbol, count) in symbol_counts(counts) {
-        if count == 0 || (exclude_gap && residue::is_gap(symbol)) {
-            continue;
-        }
-
-        if count > max_count {
+        if count > max_count && !(exclude_gap && residue::is_gap(symbol)) {
             max_count = count;
-            candidate_count = 0;
-        }
-        if count == max_count {
-            candidates[candidate_count] = symbol;
-            candidate_count += 1;
+            consensus = Some(symbol);
         }
     }
 
-    candidates[..candidate_count].choose(rng).copied()
+    consensus
 }
 
 fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f32 {
@@ -226,8 +221,6 @@ const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
 
 #[cfg(test)]
 mod consensus_count_tests {
-    use rand::{SeedableRng, rngs::StdRng};
-
     use super::{ConsensusMethod, consensus_from_counts};
 
     fn counts_for(symbols: &[u8]) -> [u32; 128] {
@@ -241,9 +234,8 @@ mod consensus_count_tests {
     #[test]
     fn consensus_same() {
         let counts = counts_for(b"AAAA");
-        let mut rng = rand::rng();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority, &mut rng),
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
             Some(b'A')
         );
     }
@@ -251,9 +243,8 @@ mod consensus_count_tests {
     #[test]
     fn consensus_majority_gap() {
         let counts = counts_for(b"---AT");
-        let mut rng = rand::rng();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority, &mut rng),
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
             Some(b'-')
         );
     }
@@ -261,9 +252,8 @@ mod consensus_count_tests {
     #[test]
     fn consensus_majority_nongap_excludes_gaps() {
         let counts = counts_for(b"---AAT");
-        let mut rng = rand::rng();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::MajorityNonGap, &mut rng),
+            consensus_from_counts(&counts, ConsensusMethod::MajorityNonGap),
             Some(b'A')
         );
     }
@@ -271,27 +261,52 @@ mod consensus_count_tests {
     #[test]
     fn consensus_no_candidates_returns_none() {
         let counts = [0u32; 128];
-        let mut rng = rand::rng();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority, &mut rng),
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
             None
         );
     }
 
     #[test]
-    fn consensus_tie_breaking_is_seeded() {
-        let counts = counts_for(b"ACACACTT");
-        let mut rng = StdRng::seed_from_u64(5);
-        let result = consensus_from_counts(&counts, ConsensusMethod::Majority, &mut rng);
-        assert!(matches!(result, Some(b'A') | Some(b'C')));
+    fn consensus_tie_picks_lowest_byte() {
+        let counts = counts_for(b"TTCCAA");
+        assert_eq!(
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
+            Some(b'A')
+        );
+    }
+
+    #[test]
+    fn consensus_majority_tie_prefers_gap() {
+        let counts = counts_for(b"--AA");
+        assert_eq!(
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
+            Some(b'-')
+        );
+    }
+
+    #[test]
+    fn consensus_majority_nongap_tie_ignores_gap() {
+        let counts = counts_for(b"---GGTT");
+        assert_eq!(
+            consensus_from_counts(&counts, ConsensusMethod::MajorityNonGap),
+            Some(b'G')
+        );
+    }
+
+    #[test]
+    fn consensus_higher_count_beats_lower_byte() {
+        let counts = counts_for(b"ACCTTT");
+        assert_eq!(
+            consensus_from_counts(&counts, ConsensusMethod::Majority),
+            Some(b'T')
+        );
     }
 }
 
 #[cfg(test)]
 mod derived_column_tests {
     use std::num::NonZeroU8;
-
-    use rand::{SeedableRng, rngs::StdRng};
 
     use super::{ConsensusMethod, summaries_from_counts};
 
@@ -306,13 +321,11 @@ mod derived_column_tests {
     #[test]
     fn summaries_from_counts_return_none_for_all_gap_column() {
         let counts = [counts_for(b"---")];
-        let mut rng = StdRng::seed_from_u64(8);
         let summaries = summaries_from_counts(
             3..4,
             &counts,
             ConsensusMethod::MajorityNonGap,
             Some(NonZeroU8::new(4).unwrap()),
-            &mut rng,
         );
 
         assert_eq!(summaries.len(), 1);
@@ -324,13 +337,11 @@ mod derived_column_tests {
     #[test]
     fn summaries_from_counts_report_conservation_extremes() {
         let counts = [counts_for(b"AAAA"), counts_for(b"----")];
-        let mut rng = StdRng::seed_from_u64(9);
         let summaries = summaries_from_counts(
             0..2,
             &counts,
             ConsensusMethod::MajorityNonGap,
             Some(NonZeroU8::new(4).unwrap()),
-            &mut rng,
         );
 
         assert_eq!(summaries.len(), 2);
