@@ -1,13 +1,12 @@
 use std::num::NonZeroUsize;
 
 use rand::seq::IndexedRandom;
+use rayon::prelude::*;
 
 use crate::{alignment_type::AlignmentType, data::AlignmentData, error::AlignmentError, residue};
 
 const DEFAULT_SAMPLE_SIZE: usize = 100;
 const DEFAULT_CLASSIFICATION_THRESHOLD: f32 = 0.5;
-const NUCLEOTIDE_BYTES: &[u8] = b"ACGTURYSWKMBDHVN-";
-const PROTEIN_BYTES: &[u8] = b"DEFHIKLMNPQRSVWYX-";
 
 /// Options that control alignment type detection.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,19 +64,20 @@ pub(crate) fn detect_alignment_type(
     options: DetectionOptions,
     rng: &mut impl rand::Rng,
 ) -> AlignmentType {
-    let (protein_count, nucleotide_count, total_count) = alignment
+    let sampled = alignment
         .sequences
         .choose_multiple(rng, options.sample_size())
-        .flat_map(|sequence| sequence.sequence.iter().copied())
-        .filter(|&byte| !residue::is_gap(byte))
-        .map(|byte| byte.to_ascii_uppercase())
-        .fold(
-            (0usize, 0usize, 0usize),
-            |(protein, nucleotide, total), byte| {
+        .collect::<Vec<_>>();
+    let (protein_count, nucleotide_count, total_count) = sampled
+        .par_iter()
+        .map(|sequence| count_residues(&sequence.sequence))
+        .reduce(
+            || (0, 0, 0),
+            |(protein_a, nucleotide_a, total_a), (protein_b, nucleotide_b, total_b)| {
                 (
-                    protein + usize::from(PROTEIN_BYTES.contains(&byte)),
-                    nucleotide + usize::from(NUCLEOTIDE_BYTES.contains(&byte)),
-                    total + 1,
+                    protein_a + protein_b,
+                    nucleotide_a + nucleotide_b,
+                    total_a + total_b,
                 )
             },
         );
@@ -101,6 +101,18 @@ pub(crate) fn detect_alignment_type(
             std::cmp::Ordering::Equal => AlignmentType::Generic,
         },
     }
+}
+
+fn count_residues(sequence: &[u8]) -> (usize, usize, usize) {
+    sequence
+        .iter()
+        .fold((0, 0, 0), |(protein, nucleotide, total), &byte| {
+            (
+                protein + usize::from(residue::is_detection_protein(byte)),
+                nucleotide + usize::from(residue::is_detection_nucleotide(byte)),
+                total + usize::from(!residue::is_gap(byte)),
+            )
+        })
 }
 
 #[cfg(test)]
