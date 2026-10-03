@@ -26,6 +26,32 @@ const fn build_nucleotide_index_table() -> [u8; 256] {
     table
 }
 
+const NUCLEOTIDE_BIT: u8 = 1 << 0;
+const PROTEIN_BIT: u8 = 1 << 1;
+const RESIDUE_TABLE_ALL: [u8; 256] = build_residue_table();
+
+const fn build_residue_table() -> [u8; 256] {
+    let mut table = [0; 256];
+
+    let nucleotides = b"ACGTURYSWKMBDHVN";
+    let mut i = 0;
+    while i < nucleotides.len() {
+        table[nucleotides[i] as usize] |= NUCLEOTIDE_BIT;
+        table[nucleotides[i].to_ascii_lowercase() as usize] |= NUCLEOTIDE_BIT;
+        i += 1;
+    }
+
+    let proteins = b"DEFHIKLMNPQRSVWYX";
+    let mut i = 0;
+    while i < proteins.len() {
+        table[proteins[i] as usize] |= PROTEIN_BIT;
+        table[proteins[i].to_ascii_lowercase() as usize] |= PROTEIN_BIT;
+        i += 1;
+    }
+
+    table
+}
+
 /// Returns `true` if `byte` is a gap.
 #[inline]
 pub const fn is_gap(byte: u8) -> bool {
@@ -56,9 +82,28 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     }
 }
 
+/// Returns `true` if `byte` is a nucleotide symbol used for type detection, case-insensitive.
+///
+/// Includes IUPAC ambiguity codes. Gaps are not included.
+#[inline]
+pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
+    RESIDUE_TABLE_ALL[byte as usize] & NUCLEOTIDE_BIT != 0
+}
+
+/// Returns `true` if `byte` is a protein symbol used for type detection, case-insensitive.
+///
+/// Gaps are not included.
+#[inline]
+pub(crate) const fn is_detection_protein(byte: u8) -> bool {
+    RESIDUE_TABLE_ALL[byte as usize] & PROTEIN_BIT != 0
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GAP, UNKNOWN_AMINO_ACID, is_gap, is_unknown, nucleotide_index};
+    use super::{
+        GAP, UNKNOWN_AMINO_ACID, is_detection_nucleotide, is_detection_protein, is_gap, is_unknown,
+        nucleotide_index,
+    };
     use crate::alignment_type::AlignmentType;
 
     const fn test_is_gap(byte: u8) -> bool {
@@ -91,6 +136,14 @@ mod tests {
             AlignmentType::Protein => matches!(byte, b'X' | b'x'),
             AlignmentType::Generic => false,
         }
+    }
+
+    fn test_is_detection_nuc(byte: u8) -> bool {
+        b"ACGTURYSWKMBDHVN".contains(&byte.to_ascii_uppercase())
+    }
+
+    fn test_is_detection_protein(byte: u8) -> bool {
+        b"DEFHIKLMNPQRSVWYX".contains(&byte.to_ascii_uppercase())
     }
 
     #[test]
@@ -133,6 +186,28 @@ mod tests {
         for byte in 0..=u8::MAX {
             let expected = test_norm_nuc(byte).and_then(test_index_nuc);
             assert_eq!(nucleotide_index(byte), expected, "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn is_detection_nucleotide_matches_ref() {
+        for byte in 0..=u8::MAX {
+            assert_eq!(
+                is_detection_nucleotide(byte),
+                test_is_detection_nuc(byte),
+                "byte {byte}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_detection_protein_matches_ref() {
+        for byte in 0..=u8::MAX {
+            assert_eq!(
+                is_detection_protein(byte),
+                test_is_detection_protein(byte),
+                "byte {byte}"
+            );
         }
     }
 
