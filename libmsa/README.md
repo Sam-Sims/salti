@@ -19,5 +19,5 @@ There are some current limits (some obvious, maybe some not so much):
 - All sequences must already be aligned to the same length.
 - Translation only works for DNA alignments, and only when the column view has not been filtered.
 - Conservation is only defined for DNA and protein alignments.
-- Consensus ties are resolved at random, which means tied columns are not deterministic.
+- Consensus ties go to the lowest ASCII byte.
 
