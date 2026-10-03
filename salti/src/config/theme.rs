@@ -390,13 +390,6 @@ pub struct SequenceTheme {
 }
 
 impl SequenceTheme {
-    pub fn style_for(&self, byte: u8, alignment_type: AlignmentType) -> Style {
-        self.colour_for(byte, alignment_type)
-            .map_or(Style::new(), |colour| {
-                Style::new().bg(colour).fg(self.foreground)
-            })
-    }
-
     pub fn colour_for(&self, byte: u8, alignment_type: AlignmentType) -> Option<Color> {
         match alignment_type {
             AlignmentType::Dna => self.dna_colour(byte),
@@ -449,6 +442,106 @@ impl SequenceTheme {
             .get(usize::from(byte.checked_sub(33)?))
             .copied()
     }
+}
+
+pub type ByteStyles = [Style; 256];
+
+#[derive(Debug, Clone)]
+pub struct SequenceStyles {
+    dna: ByteStyles,
+    protein: ByteStyles,
+    generic: ByteStyles,
+    pub diff_match: Style,
+}
+
+impl SequenceStyles {
+    pub fn new(sequence: &SequenceTheme) -> Self {
+        let residue_style = |colour| Style::new().bg(colour).fg(sequence.foreground);
+
+        Self {
+            dna: build_dna_styles(&sequence.dna, residue_style),
+            protein: build_protein_styles(&sequence.amino_acid, residue_style),
+            generic: build_generic_styles(residue_style),
+            diff_match: Style::new().fg(sequence.diff_match),
+        }
+    }
+
+    pub fn for_type(&self, alignment_type: AlignmentType) -> &ByteStyles {
+        match alignment_type {
+            AlignmentType::Dna => &self.dna,
+            AlignmentType::Protein => &self.protein,
+            AlignmentType::Generic => &self.generic,
+        }
+    }
+}
+
+fn fill(table: &mut ByteStyles, bytes: &[u8], style: Style) {
+    for &byte in bytes {
+        table[usize::from(byte.to_ascii_uppercase())] = style;
+        table[usize::from(byte.to_ascii_lowercase())] = style;
+    }
+}
+
+fn fill_where(table: &mut ByteStyles, predicate: impl Fn(u8) -> bool, style: Style) {
+    for byte in 0..=u8::MAX {
+        if predicate(byte) {
+            table[usize::from(byte)] = style;
+        }
+    }
+}
+
+fn build_dna_styles(dna: &DnaPalette, style: impl Fn(Color) -> Style) -> ByteStyles {
+    let mut table = [Style::new(); 256];
+
+    fill(&mut table, b"RYMKSWHBVD", style(dna.ambiguity));
+    let bases = [dna.a, dna.t, dna.c, dna.g];
+    for byte in 0..=u8::MAX {
+        if let Some(index) = residue::nucleotide_index(byte) {
+            table[usize::from(byte)] = style(bases[index]);
+        }
+    }
+    fill_where(
+        &mut table,
+        |byte| residue::is_unknown(byte, AlignmentType::Dna),
+        style(dna.n),
+    );
+    fill_where(&mut table, residue::is_gap, style(dna.gap));
+
+    table
+}
+
+// colours from clustal default
+// http://www.jalview.org/help/html/colourSchemes/clustal.html
+fn build_protein_styles(
+    amino_acid: &AminoAcidPalette,
+    style: impl Fn(Color) -> Style,
+) -> ByteStyles {
+    let mut table = [Style::new(); 256];
+
+    fill(&mut table, b"AVLIMFWC", style(amino_acid.hydrophobic));
+    fill(&mut table, b"YH", style(amino_acid.aromatic));
+    fill(&mut table, b"STNQ", style(amino_acid.polar));
+    fill(&mut table, b"KR", style(amino_acid.positive));
+    fill(&mut table, b"DE", style(amino_acid.negative));
+    fill(&mut table, b"G", style(amino_acid.glycine));
+    fill(&mut table, b"P", style(amino_acid.proline));
+    fill_where(
+        &mut table,
+        |byte| residue::is_gap(byte) || residue::is_unknown(byte, AlignmentType::Protein),
+        style(amino_acid.special),
+    );
+
+    table
+}
+
+fn build_generic_styles(style: impl Fn(Color) -> Style) -> ByteStyles {
+    let mut table = [Style::new(); 256];
+
+    for (byte, &colour) in (33..).zip(FULL_ASCII_COLOURS.iter()) {
+        table[byte] = style(colour);
+    }
+
+    table
 }
 
 pub fn theme_from_id(theme_id: ThemeId) -> Theme {

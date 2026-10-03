@@ -1,9 +1,9 @@
 use std::ops::Range;
 
-use ratatui::{style::Stylize, text::Span};
+use ratatui::text::Span;
 
 use crate::{
-    config::theme::SequenceTheme,
+    config::theme::{ByteStyles, SequenceStyles},
     core::codon::{TranslatedByteRange, TranslatedDiffRange, TranslationOverlay},
 };
 
@@ -37,51 +37,48 @@ pub struct RowRenderMode<'a> {
 }
 
 #[inline]
-fn span_for_sequence_byte(
-    sequence_byte: u8,
-    sequence_theme: &SequenceTheme,
-    alignment_type: libmsa::AlignmentType,
-) -> Span<'static> {
-    let character = BYTE_TO_CHAR[usize::from(sequence_byte)];
-    let style = sequence_theme.style_for(sequence_byte, alignment_type);
-    Span::styled(character, style)
+fn span_for_sequence_byte(sequence_byte: u8, byte_styles: &ByteStyles) -> Span<'static> {
+    let index = usize::from(sequence_byte);
+    Span::styled(BYTE_TO_CHAR[index], byte_styles[index])
 }
 
 #[inline]
 fn format_byte_iter_spans(
     bytes: impl Iterator<Item = u8>,
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
+    let byte_styles = sequence_styles.for_type(mode.alignment_type);
+
     match mode.diff_against {
         Some(diff_against) => bytes
             .zip(diff_against.iter().copied())
             .map(|(byte, diff_byte)| {
                 if byte == diff_byte {
-                    ".".fg(sequence_theme.diff_match)
+                    Span::styled(".", sequence_styles.diff_match)
                 } else {
-                    span_for_sequence_byte(byte, sequence_theme, mode.alignment_type)
+                    span_for_sequence_byte(byte, byte_styles)
                 }
             })
             .collect(),
         None => bytes
-            .map(|byte| span_for_sequence_byte(byte, sequence_theme, mode.alignment_type))
+            .map(|byte| span_for_sequence_byte(byte, byte_styles))
             .collect(),
     }
 }
 
 pub fn format_row_spans(
     visible_bytes: &[u8],
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
-    format_byte_iter_spans(visible_bytes.iter().copied(), sequence_theme, mode)
+    format_byte_iter_spans(visible_bytes.iter().copied(), sequence_styles, mode)
 }
 
 pub fn format_row_view_spans(
     sequence: libmsa::RowView<'_>,
     col_range: &Range<usize>,
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     mode: RowRenderMode<'_>,
 ) -> Vec<Span<'static>> {
     let bytes = sequence
@@ -89,20 +86,20 @@ pub fn format_row_view_spans(
         .expect("viewport range must be within the current view")
         .map(|(_, byte)| byte);
 
-    format_byte_iter_spans(bytes, sequence_theme, mode)
+    format_byte_iter_spans(bytes, sequence_styles, mode)
 }
 
 pub fn format_translated_row_spans(
     sequence: libmsa::TranslatedSequenceView<'_>,
     visible_nucleotide_range: &Range<usize>,
     overlay: &TranslationOverlay,
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     diff_against: Option<TranslatedDiffRange<'_>>,
 ) -> Vec<Span<'static>> {
     format_translated_spans(
         visible_nucleotide_range,
         overlay,
-        sequence_theme,
+        sequence_styles,
         diff_against,
         |protein_col| sequence.byte_at(protein_col),
     )
@@ -112,13 +109,13 @@ pub fn format_translated_byte_range_spans(
     bytes: TranslatedByteRange<'_>,
     visible_nucleotide_range: &Range<usize>,
     overlay: &TranslationOverlay,
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     diff_against: Option<TranslatedDiffRange<'_>>,
 ) -> Vec<Span<'static>> {
     format_translated_spans(
         visible_nucleotide_range,
         overlay,
-        sequence_theme,
+        sequence_styles,
         diff_against,
         |protein_col| bytes.byte_at(protein_col),
     )
@@ -127,10 +124,11 @@ pub fn format_translated_byte_range_spans(
 fn format_translated_spans(
     visible_nucleotide_range: &Range<usize>,
     overlay: &TranslationOverlay,
-    sequence_theme: &SequenceTheme,
+    sequence_styles: &SequenceStyles,
     diff_against: Option<TranslatedDiffRange<'_>>,
     mut byte_at: impl FnMut(usize) -> Option<u8>,
 ) -> Vec<Span<'static>> {
+    let protein_styles = sequence_styles.for_type(libmsa::AlignmentType::Protein);
     let width = visible_nucleotide_range.len();
     let mut spans = vec![Span::raw(" "); width];
 
@@ -138,7 +136,7 @@ fn format_translated_spans(
         let Some(residue) = byte_at(codon.protein_col) else {
             continue;
         };
-        let translated_style = sequence_theme.style_for(residue, libmsa::AlignmentType::Protein);
+        let translated_style = protein_styles[usize::from(residue)];
         let diff_matches =
             diff_against.and_then(|diff| diff.byte_at(codon.protein_col)) == Some(residue);
 
@@ -153,7 +151,7 @@ fn format_translated_spans(
 
             spans[window_offset] = if diff_matches {
                 if absolute_col == codon.centre {
-                    ".".fg(sequence_theme.diff_match)
+                    Span::styled(".", sequence_styles.diff_match)
                 } else {
                     Span::raw(" ")
                 }
@@ -217,7 +215,7 @@ mod tests {
             sequence,
             &(0..9),
             &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &crate::config::theme::EVERFOREST_DARK.sequence,
+            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
             None,
         );
 
@@ -240,7 +238,7 @@ mod tests {
             sequence,
             &(0..9),
             &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &crate::config::theme::EVERFOREST_DARK.sequence,
+            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
             Some(diff_against),
         );
 
@@ -262,7 +260,7 @@ mod tests {
             sequence,
             &(0..9),
             &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &crate::config::theme::EVERFOREST_DARK.sequence,
+            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
             Some(diff_against),
         );
 
@@ -286,7 +284,7 @@ mod tests {
             sequence,
             &(0..9),
             &overlay(libmsa::ReadingFrame::Frame2, 9),
-            &crate::config::theme::EVERFOREST_DARK.sequence,
+            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
             None,
         );
 
