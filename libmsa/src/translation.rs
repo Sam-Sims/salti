@@ -261,13 +261,11 @@ impl<'a> TranslatedAlignment<'a> {
             self.frame,
             &self.table,
         );
-        let mut rng = rand::rng();
         Ok(summaries_from_counts(
             range,
             &counts,
             method,
             AlignmentType::Protein.conservation_alphabet_size(),
-            &mut rng,
         ))
     }
 
