@@ -4,10 +4,10 @@ use crossterm::event::MouseEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Color,
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, Widget},
 };
+use tracing::warn;
 
 use crate::{
     command::Command,
@@ -22,14 +22,12 @@ const MINIMAP_HEIGHT_ROWS: u16 = 7;
 
 /// number of sampled columns per minimap cell when collapsing
 const MINIMAP_COLUMN_SAMPLES_PER_CELL: usize = 8;
-
-/// number of sampled sequences per minimap cell when estimating colour.
-const MINIMAP_ROW_SAMPLES_PER_CELL: usize = 10;
+const MINIMAP_ROW_SAMPLES: usize = 128;
 
 #[derive(Debug, Clone, Copy)]
-pub struct MinimapLayout {
-    pub area: Rect,
-    pub track_area: Rect,
+struct MinimapLayout {
+    area: Rect,
+    track_area: Rect,
 }
 
 pub struct Minimap<'a> {
@@ -65,7 +63,6 @@ impl Widget for Minimap<'_> {
             minimap_layout.track_area,
             self.alignment,
             &self.ui.theme,
-            total_columns,
         );
 
         if let Some(viewport_box) = highlight_box(
@@ -122,55 +119,8 @@ impl MinimapState {
     }
 }
 
-fn sample_alignments(
-    alignment: &AlignmentModel,
-    visible_column_start: usize,
-    visible_column_end: usize,
-) -> Option<u8> {
-    let visible_column_span = visible_column_end.saturating_sub(visible_column_start);
-    let row_count = alignment.view().row_count();
-    if row_count == 0 || visible_column_span == 0 {
-        return None;
-    }
-
-    let row_samples = row_count.min(MINIMAP_ROW_SAMPLES_PER_CELL);
-    let column_samples = visible_column_span.clamp(1, MINIMAP_COLUMN_SAMPLES_PER_CELL);
-    let mut counts = [0u16; 256];
-
-    for column_sample in 0..column_samples {
-        let visible_offset = (column_sample * 2 + 1) * visible_column_span / (column_samples * 2);
-        let visible_column = (visible_column_start + visible_offset).min(visible_column_end - 1);
-
-        for row_sample in 0..row_samples {
-            let relative_row = row_sample * row_count / row_samples;
-            let Some(sequence) = alignment.view().sequence(relative_row) else {
-                continue;
-            };
-            let Some(byte) = sequence.byte_at(visible_column) else {
-                continue;
-            };
-            counts[usize::from(byte)] += 1;
-        }
-    }
-
-    counts
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, count)| *count)
-        .and_then(|(byte, count)| (*count > 0).then_some(byte as u8))
-}
-
-fn calculate_block_colour(
-    alignment: &AlignmentModel,
-    theme: &ThemeState,
-    visible_column_start: usize,
-    visible_column_end: usize,
-) -> Color {
-    let byte_styles = theme.sequence.for_type(alignment.base().active_type());
-
-    sample_alignments(alignment, visible_column_start, visible_column_end)
-        .and_then(|byte| byte_styles[usize::from(byte)].bg)
-        .unwrap_or(theme.theme.panel_bg_dim)
+fn sample(index: usize, samples: usize, len: usize) -> usize {
+    (2 * index + 1) * len / (2 * samples)
 }
 
 fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
@@ -182,7 +132,7 @@ fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
     }
 }
 
-pub fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
+fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
     if total_columns == 0 {
         return None;
     }
@@ -207,29 +157,40 @@ fn render_minimap_track(
     area: Rect,
     alignment: &AlignmentModel,
     theme: &ThemeState,
-    total_columns: usize,
 ) {
+    let view = alignment.view();
+    let row_count = view.row_count();
+    let total_columns = view.column_count();
     let total_width = usize::from(area.width);
+    let empty = theme.theme.panel_bg_dim;
 
-    // render empty block if alignment is empty
-    if total_columns == 0 {
-        for position in area.positions() {
-            if let Some(cell) = buffer.cell_mut(position) {
-                cell.set_char(' ');
-                cell.set_bg(theme.theme.panel_bg_dim);
-            }
-        }
-        return;
-    }
+    let row_samples = row_count.min(MINIMAP_ROW_SAMPLES);
+    let rows: Vec<usize> = (0..row_samples)
+        .map(|index| sample(index, row_samples, row_count))
+        .collect();
+    let column_samples = total_width * MINIMAP_COLUMN_SAMPLES_PER_CELL;
+    let byte_styles = theme.sequence.for_type(alignment.base().active_type());
 
-    for block_index in 0..total_width {
-        let block_start = block_index * total_columns / total_width;
-        let block_end = ((block_index + 1) * total_columns)
-            .div_ceil(total_width)
-            .max(block_start + 1)
-            .min(total_columns);
-        let block_colour = calculate_block_colour(alignment, theme, block_start, block_end);
-        let block_x = area.x + block_index as u16;
+    for (block_index, block_x) in (area.x..area.right()).enumerate() {
+        let block_colour = if row_count == 0 || total_columns == 0 {
+            empty
+        } else {
+            let first = block_index * MINIMAP_COLUMN_SAMPLES_PER_CELL;
+            let columns: Vec<usize> = (first..first + MINIMAP_COLUMN_SAMPLES_PER_CELL)
+                .map(|index| sample(index, column_samples, total_columns))
+                .collect();
+            let consensus = match view.select(&rows, &columns) {
+                Ok(block) => block.consensus(alignment.consensus_method),
+                Err(error) => {
+                    warn!(%error, "Failed to compute minimap colours");
+                    None
+                }
+            };
+            consensus
+                .and_then(|byte| byte_styles[usize::from(byte)].bg)
+                .unwrap_or(empty)
+        };
+
         let block_area = Rect::new(block_x, area.y, 1, area.height);
         for position in block_area.positions() {
             if let Some(cell) = buffer.cell_mut(position) {
@@ -240,7 +201,7 @@ fn render_minimap_track(
     }
 }
 
-pub fn layout(overlay_area: Rect) -> MinimapLayout {
+fn layout(overlay_area: Rect) -> MinimapLayout {
     let height = overlay_area.height.min(MINIMAP_HEIGHT_ROWS);
     let top = overlay_area.y.saturating_add(overlay_area.height - height);
     let area = Rect::new(overlay_area.x, top, overlay_area.width, height);
