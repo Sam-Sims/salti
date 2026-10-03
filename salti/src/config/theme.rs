@@ -105,9 +105,7 @@ pub const EVERFOREST_DARK: Theme = Theme {
     surface_bg: Color::from_u32(0x343f44),
     panel_bg: Color::from_u32(0x3d484d),
     panel_bg_dim: Color::from_u32(0x323b3f),
-    overlay_bg: Color::from_u32(0x3d484d),
     border: Color::from_u32(0x7a8478),
-    border_active: Color::from_u32(0x859289),
     text: Color::from_u32(0xd3c6aa),
     text_muted: Color::from_u32(0x859289),
     text_dim: Color::from_u32(0x7a8478),
@@ -148,9 +146,7 @@ pub const SOLARIZED_LIGHT: Theme = Theme {
     surface_bg: Color::from_u32(0xeee8d5),
     panel_bg: Color::from_u32(0xeee8d5),
     panel_bg_dim: Color::from_u32(0xdddbcc),
-    overlay_bg: Color::from_u32(0xeee8d5),
     border: Color::from_u32(0x93a1a1),
-    border_active: Color::from_u32(0x268bd2),
     text: Color::from_u32(0x586e75),
     text_muted: Color::from_u32(0x93a1a1),
     text_dim: Color::from_u32(0x657b83),
@@ -191,9 +187,7 @@ pub const TOKYO_NIGHT: Theme = Theme {
     surface_bg: Color::from_u32(0x292e42),
     panel_bg: Color::from_u32(0x16161e),
     panel_bg_dim: Color::from_u32(0x343a55),
-    overlay_bg: Color::from_u32(0x16161e),
     border: Color::from_u32(0x15161e),
-    border_active: Color::from_u32(0x27a1b9),
     text: Color::from_u32(0xc0caf5),
     text_muted: Color::from_u32(0x565f89),
     text_dim: Color::from_u32(0x3b4261),
@@ -234,9 +228,7 @@ pub const TERMINAL_DEFAULT: Theme = Theme {
     surface_bg: Color::Black,
     panel_bg: Color::Black,
     panel_bg_dim: Color::DarkGray,
-    overlay_bg: Color::Black,
     border: Color::DarkGray,
-    border_active: Color::Gray,
     text: Color::Reset,
     text_muted: Color::Gray,
     text_dim: Color::DarkGray,
@@ -296,6 +288,15 @@ impl ThemeId {
             ThemeId::TerminalDefault => "terminal-default",
         }
     }
+
+    pub fn theme(self) -> Theme {
+        match self {
+            ThemeId::EverforestDark => EVERFOREST_DARK,
+            ThemeId::SolarizedLight => SOLARIZED_LIGHT,
+            ThemeId::TokyoNight => TOKYO_NIGHT,
+            ThemeId::TerminalDefault => TERMINAL_DEFAULT,
+        }
+    }
 }
 
 impl std::fmt::Display for ThemeId {
@@ -322,10 +323,7 @@ pub struct Theme {
     pub surface_bg: Color,
     pub panel_bg: Color,
     pub panel_bg_dim: Color,
-    #[allow(dead_code)]
-    pub overlay_bg: Color,
     pub border: Color,
-    pub border_active: Color,
     pub text: Color,
     pub text_muted: Color,
     pub text_dim: Color,
@@ -345,8 +343,6 @@ pub struct ThemeStyles {
     pub panel_block: Style,
     pub panel_block_dim: Style,
     pub border: Style,
-    #[allow(dead_code)]
-    pub border_active: Style,
     pub text: Style,
     pub text_muted: Style,
     pub text_dim: Style,
@@ -387,61 +383,6 @@ pub struct SequenceTheme {
     pub dna: DnaPalette,
     pub amino_acid: AminoAcidPalette,
     pub diff_match: Color,
-}
-
-impl SequenceTheme {
-    pub fn colour_for(&self, byte: u8, alignment_type: AlignmentType) -> Option<Color> {
-        match alignment_type {
-            AlignmentType::Dna => self.dna_colour(byte),
-            AlignmentType::Protein => self.amino_acid_colour(byte),
-            AlignmentType::Generic => self.full_colour(byte),
-        }
-    }
-
-    pub fn dna_colour(&self, byte: u8) -> Option<Color> {
-        if residue::is_gap(byte) {
-            return Some(self.dna.gap);
-        }
-        if residue::is_unknown(byte, AlignmentType::Dna) {
-            return Some(self.dna.n);
-        }
-        if let Some(index) = residue::nucleotide_index(byte) {
-            return Some([self.dna.a, self.dna.t, self.dna.c, self.dna.g][index]);
-        }
-
-        match byte {
-            b'R' | b'r' | b'Y' | b'y' | b'M' | b'm' | b'K' | b'k' | b'S' | b's' | b'W' | b'w'
-            | b'H' | b'h' | b'B' | b'b' | b'V' | b'v' | b'D' | b'd' => Some(self.dna.ambiguity),
-            _ => None,
-        }
-    }
-
-    // colours from clustal default
-    // http://www.jalview.org/help/html/colourSchemes/clustal.html
-
-    pub fn amino_acid_colour(&self, byte: u8) -> Option<Color> {
-        if residue::is_gap(byte) || residue::is_unknown(byte, AlignmentType::Protein) {
-            return Some(self.amino_acid.special);
-        }
-
-        match byte {
-            b'A' | b'a' | b'V' | b'v' | b'L' | b'l' | b'I' | b'i' | b'M' | b'm' | b'F' | b'f'
-            | b'W' | b'w' | b'C' | b'c' => Some(self.amino_acid.hydrophobic),
-            b'Y' | b'y' | b'H' | b'h' => Some(self.amino_acid.aromatic),
-            b'S' | b's' | b'T' | b't' | b'N' | b'n' | b'Q' | b'q' => Some(self.amino_acid.polar),
-            b'K' | b'k' | b'R' | b'r' => Some(self.amino_acid.positive),
-            b'D' | b'd' | b'E' | b'e' => Some(self.amino_acid.negative),
-            b'G' | b'g' => Some(self.amino_acid.glycine),
-            b'P' | b'p' => Some(self.amino_acid.proline),
-            _ => None,
-        }
-    }
-
-    pub fn full_colour(&self, byte: u8) -> Option<Color> {
-        FULL_ASCII_COLOURS
-            .get(usize::from(byte.checked_sub(33)?))
-            .copied()
-    }
 }
 
 pub type ByteStyles = [Style; 256];
@@ -544,33 +485,25 @@ fn build_generic_styles(style: impl Fn(Color) -> Style) -> ByteStyles {
     table
 }
 
-pub fn theme_from_id(theme_id: ThemeId) -> Theme {
-    match theme_id {
-        ThemeId::EverforestDark => EVERFOREST_DARK,
-        ThemeId::SolarizedLight => SOLARIZED_LIGHT,
-        ThemeId::TokyoNight => TOKYO_NIGHT,
-        ThemeId::TerminalDefault => TERMINAL_DEFAULT,
-    }
-}
-
-pub fn build_theme_styles(theme: Theme) -> ThemeStyles {
-    ThemeStyles {
-        base_block: Style::new().bg(theme.base_bg).fg(theme.text),
-        panel_block: Style::new().bg(theme.panel_bg).fg(theme.text),
-        panel_block_dim: Style::new().bg(theme.panel_bg_dim).fg(theme.text),
-        border: Style::new().fg(theme.border),
-        border_active: Style::new().fg(theme.border_active),
-        text: Style::new().fg(theme.text),
-        text_muted: Style::new().fg(theme.text_muted),
-        text_dim: Style::new().fg(theme.text_dim),
-        accent: Style::new().fg(theme.accent).bold(),
-        accent_alt: Style::new().fg(theme.accent_alt),
-        success: Style::new().fg(theme.success).bold(),
-        warning: Style::new().fg(theme.warning).bold(),
-        error: Style::new().fg(theme.error).bold(),
-        selection: Style::new()
-            .bg(theme.selection_bg)
-            .fg(theme.selection_fg)
-            .bold(),
+impl ThemeStyles {
+    pub fn new(theme: &Theme) -> Self {
+        Self {
+            base_block: Style::new().bg(theme.base_bg).fg(theme.text),
+            panel_block: Style::new().bg(theme.panel_bg).fg(theme.text),
+            panel_block_dim: Style::new().bg(theme.panel_bg_dim).fg(theme.text),
+            border: Style::new().fg(theme.border),
+            text: Style::new().fg(theme.text),
+            text_muted: Style::new().fg(theme.text_muted),
+            text_dim: Style::new().fg(theme.text_dim),
+            accent: Style::new().fg(theme.accent).bold(),
+            accent_alt: Style::new().fg(theme.accent_alt),
+            success: Style::new().fg(theme.success).bold(),
+            warning: Style::new().fg(theme.warning).bold(),
+            error: Style::new().fg(theme.error).bold(),
+            selection: Style::new()
+                .bg(theme.selection_bg)
+                .fg(theme.selection_fg)
+                .bold(),
+        }
     }
 }
