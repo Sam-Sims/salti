@@ -1,9 +1,6 @@
 use crate::{
     cli::StartupState,
-    config::theme::{
-        EVERFOREST_DARK, SequenceStyles, Theme, ThemeId, ThemeStyles, build_theme_styles,
-        theme_from_id,
-    },
+    config::theme::{SequenceStyles, Theme, ThemeId, ThemeStyles},
     core::Viewport,
     ui::{
         layers::{notification::Notification, state::LayerState},
@@ -64,18 +61,21 @@ pub struct ThemeState {
     pub sequence: Box<SequenceStyles>,
 }
 
-impl Default for ThemeState {
-    fn default() -> Self {
-        let id = ThemeId::EverforestDark;
-        let theme = EVERFOREST_DARK;
-        let styles = build_theme_styles(theme);
-        let sequence = Box::new(SequenceStyles::new(&theme.sequence));
+impl ThemeState {
+    pub fn new(id: ThemeId) -> Self {
+        let theme = id.theme();
         Self {
             id,
             theme,
-            styles,
-            sequence,
+            styles: ThemeStyles::new(&theme),
+            sequence: Box::new(SequenceStyles::new(&theme.sequence)),
         }
+    }
+}
+
+impl Default for ThemeState {
+    fn default() -> Self {
+        Self::new(ThemeId::EverforestDark)
     }
 }
 
@@ -107,10 +107,7 @@ impl UiState {
 
     pub fn set_theme(&mut self, theme_id: ThemeId) {
         if self.theme.id != theme_id {
-            self.theme.id = theme_id;
-            self.theme.theme = theme_from_id(theme_id);
-            self.theme.styles = build_theme_styles(self.theme.theme);
-            *self.theme.sequence = SequenceStyles::new(&self.theme.theme.sequence);
+            self.theme = ThemeState::new(theme_id);
         }
     }
 
