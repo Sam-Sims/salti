@@ -318,6 +318,53 @@ impl Alignment {
     pub fn is_filtered(&self) -> bool {
         !self.rows.is_full() || !self.columns.is_full()
     }
+
+    /// Returns a view of the given rows and columns.
+    ///
+    /// `rows` and `columns` are relative ids into this view the returned view keeps
+    /// each selected id once
+    ///
+    /// # Errors
+    ///
+    /// [`AlignmentError::EmptyRowSubset`] if `rows` is empty.
+    ///
+    /// [`AlignmentError::EmptyRange`] if `columns` is empty.
+    ///
+    /// [`AlignmentError::RowOutOfBounds`] or [`AlignmentError::ColumnOutOfBounds`] if an id is out of range.
+    pub fn select(&self, rows: &[usize], columns: &[usize]) -> Result<Alignment, AlignmentError> {
+        if rows.is_empty() {
+            return Err(AlignmentError::EmptyRowSubset);
+        }
+        if columns.is_empty() {
+            return Err(AlignmentError::EmptyRange);
+        }
+
+        let rows = select_ids(&self.rows, rows, |index| AlignmentError::RowOutOfBounds {
+            index,
+            row_count: self.rows.len(),
+        })?;
+        let columns = select_ids(&self.columns, columns, |index| {
+            AlignmentError::ColumnOutOfBounds {
+                index,
+                length: self.columns.len(),
+            }
+        })?;
+        Ok(self.with_projections(rows, columns))
+    }
+}
+
+fn select_ids(
+    projection: &Projection,
+    ids: &[usize],
+    out_of_bounds: impl Fn(usize) -> AlignmentError,
+) -> Result<Projection, AlignmentError> {
+    let mut absolute = ids
+        .iter()
+        .map(|&id| projection.absolute(id).ok_or_else(|| out_of_bounds(id)))
+        .collect::<Result<Vec<_>, _>>()?;
+    absolute.sort_unstable();
+    absolute.dedup();
+    Ok(Projection::Filtered(absolute.into()))
 }
 
 /// A borrowed view of one sequence row within an [`Alignment`].
@@ -819,5 +866,160 @@ mod alignment_projection_tests {
         assert!(alignment.project_absolute_row(99).is_none());
         assert!(filtered.project_absolute_row(3).is_none());
         assert!(filtered.project_absolute_row(99).is_none());
+    }
+}
+
+#[cfg(test)]
+mod alignment_select_tests {
+    use super::*;
+    use crate::metrics::ConsensusMethod;
+
+    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
+        RawSequence {
+            id: id.to_string(),
+            sequence: sequence.to_vec(),
+        }
+    }
+
+    fn base() -> Alignment {
+        Alignment::new_with_type(
+            vec![
+                raw("r0", b"AAAAAA"),
+                raw("r1", b"CCCCCC"),
+                raw("r2", b"AAGGTT"),
+                raw("r3", b"AAGGTT"),
+                raw("r4", b"ACGTAC"),
+                raw("r5", b"AAGGTT"),
+            ],
+            AlignmentType::Dna,
+        )
+        .unwrap()
+    }
+
+    fn assert_matches_source(source: &Alignment, rows: &[usize], columns: &[usize]) {
+        let selected = source.select(rows, columns).unwrap();
+        assert_eq!(selected.row_count(), rows.len());
+        assert_eq!(selected.column_count(), columns.len());
+
+        let expected_rows: Vec<RawSequence> = rows
+            .iter()
+            .map(|&row| {
+                let view = source.sequence(row).unwrap();
+                let bytes: Vec<u8> = columns.iter().map(|&c| view.byte_at(c).unwrap()).collect();
+                raw(view.id(), &bytes)
+            })
+            .collect();
+
+        for (selected_row, &source_row) in rows.iter().enumerate() {
+            assert_eq!(
+                selected.absolute_row_id(selected_row),
+                source.absolute_row_id(source_row)
+            );
+            let view = selected.sequence(selected_row).unwrap();
+            assert_eq!(view.byte_at(columns.len()), None);
+            for (selected_column, &byte) in expected_rows[selected_row].sequence.iter().enumerate()
+            {
+                assert_eq!(view.byte_at(selected_column), Some(byte));
+            }
+        }
+
+        let expected = Alignment::new_with_type(expected_rows, source.active_type()).unwrap();
+        for method in ConsensusMethod::all() {
+            assert_eq!(
+                selected
+                    .column_summaries_range(0..columns.len(), method)
+                    .unwrap(),
+                expected
+                    .column_summaries_range(0..columns.len(), method)
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn selects_from_full_alignment() {
+        assert_matches_source(&base(), &[0, 2, 3], &[0, 2, 5]);
+    }
+
+    #[test]
+    fn selects_from_row_filtered_view() {
+        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
+        assert_matches_source(&source, &[1, 3, 4], &[1, 3, 4]);
+    }
+
+    #[test]
+    fn selects_from_column_filtered_view() {
+        let base = base();
+        let source = base.with_projections(
+            Projection::Full {
+                len: base.row_count(),
+            },
+            Projection::Filtered(Arc::from(vec![0, 1, 3, 5])),
+        );
+        assert_matches_source(&source, &[0, 2, 3], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn selects_from_row_and_column_filtered_view() {
+        let source = base().with_projections(
+            Projection::Filtered(Arc::from(vec![0, 2, 3, 4, 5])),
+            Projection::Filtered(Arc::from(vec![1, 2, 4, 5])),
+        );
+        assert_matches_source(&source, &[1, 3, 4], &[0, 2, 3]);
+    }
+
+    #[test]
+    fn rejects_empty_rows() {
+        assert_eq!(
+            base().select(&[], &[0]).unwrap_err(),
+            AlignmentError::EmptyRowSubset
+        );
+    }
+
+    #[test]
+    fn rejects_empty_columns() {
+        assert_eq!(
+            base().select(&[0], &[]).unwrap_err(),
+            AlignmentError::EmptyRange
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_row() {
+        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
+        assert_eq!(
+            source.select(&[0, 5], &[0]).unwrap_err(),
+            AlignmentError::RowOutOfBounds {
+                index: 5,
+                row_count: 5
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_column() {
+        assert_eq!(
+            base().select(&[0], &[2, 6]).unwrap_err(),
+            AlignmentError::ColumnOutOfBounds {
+                index: 6,
+                length: 6
+            }
+        );
+    }
+
+    #[test]
+    fn unsorted_and_duplicate_ids_match_sorted_selection() {
+        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
+        let messy = source.select(&[3, 1, 3], &[4, 1, 1, 3]).unwrap();
+        let sorted = source.select(&[1, 3], &[1, 3, 4]).unwrap();
+
+        assert_eq!(messy.row_count(), sorted.row_count());
+        for row in 0..sorted.row_count() {
+            assert_eq!(messy.absolute_row_id(row), sorted.absolute_row_id(row));
+        }
+        assert_eq!(
+            messy.absolute_column_ids().collect::<Vec<_>>(),
+            sorted.absolute_column_ids().collect::<Vec<_>>()
+        );
     }
 }
