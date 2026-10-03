@@ -131,7 +131,7 @@ fn translated_reference_line(
                 sequence,
                 &window.col_range,
                 overlay,
-                &theme.theme.sequence,
+                &theme.sequence,
                 None,
             );
             Line::from(spans)
@@ -157,7 +157,7 @@ fn translated_consensus_line(
         TranslatedByteRange::new(protein_range.start, &consensus_bytes),
         &window.col_range,
         overlay,
-        &theme.theme.sequence,
+        &theme.sequence,
         None,
     );
     Line::from(spans)
@@ -223,7 +223,7 @@ fn consensus_alignment_lines(
             let spans = format_row_view_spans(
                 projected_row,
                 &window.col_range,
-                &theme.theme.sequence,
+                &theme.sequence,
                 no_diff_mode,
             );
             Line::from(spans)
@@ -237,7 +237,7 @@ fn consensus_alignment_lines(
         .collect();
     let consensus_line = Line::from(format_row_spans(
         &consensus_bytes,
-        &theme.theme.sequence,
+        &theme.sequence,
         no_diff_mode,
     ));
 

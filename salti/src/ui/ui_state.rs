@@ -1,7 +1,8 @@
 use crate::{
     cli::StartupState,
     config::theme::{
-        EVERFOREST_DARK, Theme, ThemeId, ThemeStyles, build_theme_styles, theme_from_id,
+        EVERFOREST_DARK, SequenceStyles, Theme, ThemeId, ThemeStyles, build_theme_styles,
+        theme_from_id,
     },
     core::Viewport,
     ui::{
@@ -55,11 +56,12 @@ pub struct MouseSelection {
     pub end_column: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ThemeState {
     pub id: ThemeId,
     pub theme: Theme,
     pub styles: ThemeStyles,
+    pub sequence: Box<SequenceStyles>,
 }
 
 impl Default for ThemeState {
@@ -67,7 +69,13 @@ impl Default for ThemeState {
         let id = ThemeId::EverforestDark;
         let theme = EVERFOREST_DARK;
         let styles = build_theme_styles(theme);
-        Self { id, theme, styles }
+        let sequence = Box::new(SequenceStyles::new(&theme.sequence));
+        Self {
+            id,
+            theme,
+            styles,
+            sequence,
+        }
     }
 }
 
@@ -102,6 +110,7 @@ impl UiState {
             self.theme.id = theme_id;
             self.theme.theme = theme_from_id(theme_id);
             self.theme.styles = build_theme_styles(self.theme.theme);
+            *self.theme.sequence = SequenceStyles::new(&self.theme.theme.sequence);
         }
     }
 

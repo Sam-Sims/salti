@@ -216,7 +216,7 @@ fn build_sequence_row_lines(
                     sequence,
                     &window.col_range,
                     &overlay,
-                    &theme.theme.sequence,
+                    &theme.sequence,
                     diff_against,
                 );
                 Some(Line::from(spans))
@@ -258,7 +258,7 @@ fn build_sequence_row_lines(
             let spans = format_row_view_spans(
                 projected_row,
                 &window.col_range,
-                &theme.theme.sequence,
+                &theme.sequence,
                 render_mode,
             );
             Some(Line::from(spans))
