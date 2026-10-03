@@ -10,8 +10,11 @@ use ratatui::{
 };
 
 use crate::{
-    command::Command, config::theme::Theme, core::model::AlignmentModel,
-    input::movement::HorizontalDrag, ui::ui_state::UiState,
+    command::Command,
+    config::theme::Theme,
+    core::model::AlignmentModel,
+    input::movement::HorizontalDrag,
+    ui::ui_state::{ThemeState, UiState},
 };
 
 /// maximum height of the minimap in rows
@@ -61,7 +64,7 @@ impl Widget for Minimap<'_> {
             buffer,
             minimap_layout.track_area,
             self.alignment,
-            theme,
+            &self.ui.theme,
             total_columns,
         );
 
@@ -159,15 +162,15 @@ fn sample_alignments(
 
 fn calculate_block_colour(
     alignment: &AlignmentModel,
-    theme: &Theme,
+    theme: &ThemeState,
     visible_column_start: usize,
     visible_column_end: usize,
 ) -> Color {
-    let alignment_type = alignment.base().active_type();
+    let byte_styles = theme.sequence.for_type(alignment.base().active_type());
 
     sample_alignments(alignment, visible_column_start, visible_column_end)
-        .and_then(|byte| theme.sequence.colour_for(byte, alignment_type))
-        .unwrap_or(theme.panel_bg_dim)
+        .and_then(|byte| byte_styles[usize::from(byte)].bg)
+        .unwrap_or(theme.theme.panel_bg_dim)
 }
 
 fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
@@ -203,7 +206,7 @@ fn render_minimap_track(
     buffer: &mut Buffer,
     area: Rect,
     alignment: &AlignmentModel,
-    theme: &Theme,
+    theme: &ThemeState,
     total_columns: usize,
 ) {
     let total_width = usize::from(area.width);
@@ -213,7 +216,7 @@ fn render_minimap_track(
         for position in area.positions() {
             if let Some(cell) = buffer.cell_mut(position) {
                 cell.set_char(' ');
-                cell.set_bg(theme.panel_bg_dim);
+                cell.set_bg(theme.theme.panel_bg_dim);
             }
         }
         return;
