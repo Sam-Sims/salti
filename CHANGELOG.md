@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Column stats (Consensus, conservation etc) are now calculated for visible display region only.
 - Consensus, conservation and column filtering are faster, especially for alignments with many sequences.
 - `libmsa` now rejects sequences containing non-ASCII bytes.
+- Consensus ties are no longer broken at random and instead the lowest ASCII byte wins.
 
 ### Fixed
 
