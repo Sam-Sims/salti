@@ -102,6 +102,27 @@ impl Alignment {
             self.active_type().conservation_alphabet_size(),
         ))
     }
+
+    /// Returns the consensus byte over every cell in this view.
+    ///
+    /// All visible rows and columns are counted together, and the byte
+    /// is chosen by `method` with the same tie rule as per-column consensus.
+    ///
+    /// Returns `None` when the view is empty or, under
+    /// [`ConsensusMethod::MajorityNonGap`], contains only gaps.
+    pub fn consensus(&self, method: ConsensusMethod) -> Option<u8> {
+        if self.columns.len() == 0 {
+            return None;
+        }
+
+        let mut pooled = [0u32; 128];
+        for counts in count_columns(&self.data, &self.rows, &self.columns, 0..self.columns.len()) {
+            for (total, count) in pooled.iter_mut().zip(counts) {
+                *total += count;
+            }
+        }
+        consensus_from_counts(&pooled, method)
+    }
 }
 
 pub(crate) fn summaries_from_counts(
@@ -479,5 +500,59 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 1]
         );
+    }
+
+    fn dna(sequences: &[&[u8]]) -> Alignment {
+        let sequences = sequences
+            .iter()
+            .enumerate()
+            .map(|(index, sequence)| raw(&format!("s{index}"), sequence))
+            .collect::<Vec<_>>();
+        Alignment::new_with_type(sequences, AlignmentType::Dna).unwrap()
+    }
+
+    #[test]
+    fn consensus_pools_cells_across_columns() {
+        let alignment = dna(&[b"AT", b"AT", b"GT"]);
+        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'T'));
+    }
+
+    #[test]
+    fn consensus_tie_picks_lowest_byte() {
+        let alignment = dna(&[b"CA", b"AC"]);
+        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'A'));
+    }
+
+    #[test]
+    fn consensus_follows_method() {
+        let alignment = dna(&[b"--", b"-A"]);
+        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'-'));
+        assert_eq!(
+            alignment.consensus(ConsensusMethod::MajorityNonGap),
+            Some(b'A')
+        );
+
+        let all_gap = dna(&[b"--", b"--"]);
+        assert_eq!(all_gap.consensus(ConsensusMethod::MajorityNonGap), None);
+    }
+
+    #[test]
+    fn consensus_counts_only_selected_cells() {
+        let alignment = dna(&[b"AAC", b"GGC", b"GGC"]);
+        let selected = alignment.select(&[0], &[0, 1]).unwrap();
+        assert_eq!(selected.consensus(ConsensusMethod::Majority), Some(b'A'));
+    }
+
+    #[test]
+    fn consensus_of_view_without_rows_is_none() {
+        let alignment = dna(&[b"AC", b"AC"]);
+        let empty = alignment
+            .filter()
+            .unwrap()
+            .with_row_regex("no-match")
+            .apply()
+            .unwrap();
+        assert_eq!(empty.row_count(), 0);
+        assert_eq!(empty.consensus(ConsensusMethod::Majority), None);
     }
 }
