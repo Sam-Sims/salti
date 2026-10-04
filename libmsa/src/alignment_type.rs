@@ -5,7 +5,6 @@ use rayon::prelude::*;
 use crate::{error::AlignmentError, model::Sequence, residue};
 
 const SAMPLE_SIZE: usize = 100;
-const CLASSIFICATION_THRESHOLD: f32 = 0.5;
 
 /// The kind of residues in an alignment
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,20 +70,14 @@ pub(crate) fn detect_alignment_type(sequences: &[Sequence]) -> AlignmentType {
             },
         );
 
-    if total_count == 0 {
-        return AlignmentType::Generic;
-    }
-
-    let protein_fraction = protein_count as f32 / total_count as f32;
-    let nucleotide_fraction = nucleotide_count as f32 / total_count as f32;
-    let protein_matches = protein_fraction >= CLASSIFICATION_THRESHOLD;
-    let nucleotide_matches = nucleotide_fraction >= CLASSIFICATION_THRESHOLD;
+    let protein_matches = protein_count * 2 >= total_count;
+    let nucleotide_matches = nucleotide_count * 2 >= total_count;
 
     match (protein_matches, nucleotide_matches) {
         (true, false) => AlignmentType::Protein,
         (false, true) => AlignmentType::Dna,
         (false, false) => AlignmentType::Generic,
-        (true, true) => match protein_fraction.total_cmp(&nucleotide_fraction) {
+        (true, true) => match protein_count.cmp(&nucleotide_count) {
             std::cmp::Ordering::Greater => AlignmentType::Protein,
             std::cmp::Ordering::Less => AlignmentType::Dna,
             std::cmp::Ordering::Equal => AlignmentType::Generic,
