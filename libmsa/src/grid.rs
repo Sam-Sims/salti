@@ -11,7 +11,7 @@ pub struct Grid<'alignment> {
     frame: Option<ReadingFrame>,
 }
 
-impl<'alignment> Grid<'alignment> {
+impl Grid<'_> {
     /// Return the number of columns in the grid
     ///
     /// When translated a truncated partial codon  at the end will
