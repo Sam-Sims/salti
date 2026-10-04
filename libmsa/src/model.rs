@@ -85,6 +85,7 @@ impl Alignment {
     /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
     ///
     /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
+    #[cfg(test)]
     pub(crate) fn new_with_type(
         seqs: impl IntoIterator<Item = RawSequence>,
         kind: AlignmentType,
