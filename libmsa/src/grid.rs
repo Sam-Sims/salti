@@ -36,11 +36,10 @@ impl<'alignment> Grid<'alignment> {
             .expect("row id should be below the row count")
             .sequence;
         match self.frame {
-            None => Either::Left(cols.iter().map(move |&col| {
-                *sequence
-                    .get(col)
-                    .expect("col id should be below the width")
-            })),
+            None => Either::Left(
+                cols.iter()
+                    .map(move |&col| *sequence.get(col).expect("col id should be below the width")),
+            ),
             Some(frame) => Either::Right(
                 cols.iter()
                     .map(move |&protein_col| codon_at(sequence, frame.nt_range(protein_col))),

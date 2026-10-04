@@ -16,9 +16,7 @@ pub use data::RawSequence;
 pub use detection::DetectionOptions;
 pub use error::AlignmentError;
 pub use filter::FilterBuilder;
+pub use grid::Grid;
 pub use metrics::{ColumnSummary, ConsensusMethod};
 pub use model::{Alignment, RowView};
-pub use translation::{
-    ReadingFrame, TranslatedAlignment, TranslatedSequenceView, TranslationTable,
-};
-pub use grid::Grid;
+pub use translation::{ReadingFrame, TranslationTable};

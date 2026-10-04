@@ -2,11 +2,7 @@ use std::ops::Range;
 
 use rayon::prelude::*;
 
-use crate::{
-    data::AlignmentData,
-    projection::Projection,
-    translation::{ReadingFrame, TranslationTable, translate_codons},
-};
+use crate::{data::AlignmentData, projection::Projection};
 
 const PARALLEL_MIN_CELLS: usize = 1 << 16;
 const MIN_ROWS_PER_JOB: usize = 128;
@@ -118,23 +114,6 @@ fn count_contiguous_row(
         let sequence = &data.sequences[abs_row].sequence;
         counts.add_row(sequence[abs_cols.clone()].iter().copied());
     }
-}
-
-pub(crate) fn count_translated_columns(
-    data: &AlignmentData,
-    rows: &Projection,
-    range: Range<usize>,
-    frame: ReadingFrame,
-    table: &TranslationTable,
-) -> Vec<[u32; 128]> {
-    let width = range.len();
-    let nuc_start = frame.offset() + range.start * 3;
-    let nuc_end = (frame.offset() + range.end * 3).min(data.length);
-
-    count_rows(rows, width, |counts, abs_row| {
-        let nucleotides = &data.sequences[abs_row].sequence[nuc_start..nuc_end];
-        counts.add_row(translate_codons(nucleotides, table));
-    })
 }
 
 fn count_rows(

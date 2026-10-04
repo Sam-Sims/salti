@@ -9,7 +9,6 @@ use crate::{
     error::AlignmentError,
     filter::FilterBuilder,
     projection::Projection,
-    translation::{ReadingFrame, TranslatedAlignment, TranslationTable},
 };
 
 const DETECTION_SEED: u64 = u64::from_be_bytes(*b"REDRIGHT");
@@ -125,7 +124,12 @@ impl Alignment {
 
     /// Returns the id for the given `row`
     pub fn id(&self, row: usize) -> &str {
-        &self.data.sequences.get(row).expect("row id should be below the row count").id
+        &self
+            .data
+            .sequences
+            .get(row)
+            .expect("row id should be below the row count")
+            .id
     }
 
     /// Returns the number of visible sequences.
@@ -267,43 +271,6 @@ impl Alignment {
     /// Sets the active type override to `alignment_type`.
     pub fn set_override_type(&mut self, alignment_type: AlignmentType) {
         self.active_type = alignment_type;
-    }
-
-    /// Creates a lazy translated view over this alignment with a specific translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if the active kind does not support translation.
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if this alignment has a filtered column
-    /// projection.
-    ///
-    /// [`AlignmentError::TranslationEmpty`] if the chosen reading frame produces no translated
-    /// residues.
-    pub fn translated_with(
-        &self,
-        frame: ReadingFrame,
-        table: TranslationTable,
-    ) -> Result<TranslatedAlignment<'_>, AlignmentError> {
-        TranslatedAlignment::new(self, frame, table)
-    }
-
-    /// Creates a lazy translated view over this alignment with the standard translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if the active kind does not support translation.
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if this alignment has a filtered column
-    /// projection.
-    ///
-    /// [`AlignmentError::TranslationEmpty`] if the chosen reading frame produces no translated
-    /// residues.
-    pub fn translated(
-        &self,
-        frame: ReadingFrame,
-    ) -> Result<TranslatedAlignment<'_>, AlignmentError> {
-        self.translated_with(frame, TranslationTable::STANDARD)
     }
 
     /// Returns a [`FilterBuilder`] for creating a filtered view of this alignment.
@@ -547,23 +514,6 @@ mod alignment_construction_tests {
 
         alignment.set_override_type(AlignmentType::Protein);
         assert_eq!(alignment.active_type(), AlignmentType::Protein);
-    }
-
-    #[test]
-    fn translated_rejects_non_dna() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("seq-1", b"MFPQ"), raw("seq-2", b"WLYH")],
-            AlignmentType::Protein,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            alignment.translated(ReadingFrame::Frame1),
-            Err(AlignmentError::UnsupportedOperation {
-                operation: "translate",
-                kind: AlignmentType::Protein,
-            })
-        ));
     }
 
     #[test]
