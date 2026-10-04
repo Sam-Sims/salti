@@ -78,3 +78,69 @@ impl Alignment {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::Grid;
+    use crate::{Alignment, AlignmentType, RawSequence, ReadingFrame};
+
+    fn dna(sequences: &[&[u8]]) -> Alignment {
+        Alignment::new_with_type(
+            sequences
+                .iter()
+                .enumerate()
+                .map(|(i, sequence)| RawSequence {
+                    id: format!("s{i}"),
+                    sequence: sequence.to_vec(),
+                }),
+            AlignmentType::Dna,
+        )
+        .unwrap()
+    }
+
+    fn grid(alignment: &Alignment, frame: Option<ReadingFrame>) -> Grid<'_> {
+        frame.map_or(alignment.grid(AlignmentType::Dna), |frame| {
+            alignment.translated_grid(frame)
+        })
+    }
+
+    #[rstest]
+    #[case::raw(None, &[0, 1, 2], b"ATG")]
+    #[case::raw_unsorted_repeated(None, &[3, 0, 3], b"CAC")]
+    #[case::translated(Some(ReadingFrame::Frame1), &[0, 1, 2], b"MP*")]
+    #[case::translated_unsorted_repeated(Some(ReadingFrame::Frame1), &[2, 0, 0], b"*MM")]
+    fn cells_works(
+        #[case] frame: Option<ReadingFrame>,
+        #[case] cols: &[usize],
+        #[case] expected: &[u8],
+    ) {
+        let alignment = dna(&[b"ATGCCCTAA"]);
+        let cells: Vec<u8> = grid(&alignment, frame).cells(0, cols).collect();
+        assert_eq!(cells, expected);
+    }
+
+    #[rstest]
+    fn cells_is_empty(#[values(None, Some(ReadingFrame::Frame1))] frame: Option<ReadingFrame>) {
+        let alignment = dna(&[b"ATGCCCTAA"]);
+        assert_eq!(grid(&alignment, frame).cells(0, &[]).count(), 0);
+    }
+
+    #[test]
+    fn cells_reads_requested_row() {
+        let alignment = dna(&[b"ATGAAA", b"TTTCCC"]);
+        let grid = alignment.translated_grid(ReadingFrame::Frame1);
+
+        assert_eq!(grid.cells(1, &[0, 1]).collect::<Vec<_>>(), b"FP");
+        assert_eq!(grid.cells(0, &[0, 1]).collect::<Vec<_>>(), b"MK");
+    }
+
+    #[rstest]
+    #[case::raw(None, 9)]
+    #[case::translated(Some(ReadingFrame::Frame1), 3)]
+    fn width_works(#[case] frame: Option<ReadingFrame>, #[case] expected: usize) {
+        let alignment = dna(&[b"ATGCCCTAA"]);
+        assert_eq!(grid(&alignment, frame).width(), expected);
+    }
+}

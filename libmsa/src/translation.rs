@@ -39,11 +39,14 @@ impl ReadingFrame {
     }
 
     /// Returns the protein columns where codons overlap the input `nt` range
-    pub fn protein_range(self, nt: Range<usize>, nt_width: usize) -> Range<usize> {
-        debug_assert!(!nt.is_empty(), "dont give an empty nt range");
+    pub fn protein_range(self, nt_range: Range<usize>, nt_width: usize) -> Range<usize> {
+        debug_assert!(!nt_range.is_empty(), "dont give an empty nt range");
         let len = self.translated_length(nt_width);
-        let start = self.protein_col(nt.start).unwrap_or(0).min(len);
-        let end = self.protein_col(nt.end - 1).map_or(0, |p| p + 1).min(len);
+        let start = self.protein_col(nt_range.start).unwrap_or(0).min(len);
+        let end = self
+            .protein_col(nt_range.end - 1)
+            .map_or(0, |p| p + 1)
+            .min(len);
         start..end
     }
 
@@ -153,12 +156,16 @@ pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
 }
 
 #[cfg(test)]
-mod translation_table_tests {
-    use super::TranslationTable;
+mod tests {
+    use std::ops::Range;
+
+    use rstest::rstest;
+
+    use super::{ReadingFrame, TranslationTable, codon_at};
 
     // https://www.hgmd.cf.ac.uk/docs/cd_amino.html
     #[test]
-    fn standard_table_matches_full_reference_table() {
+    fn translate_codon_matches_reference_table() {
         let expected = [
             (*b"TTT", b'F'),
             (*b"TTC", b'F'),
@@ -234,76 +241,145 @@ mod translation_table_tests {
         }
     }
 
-    #[test]
-    fn invalid_codon_translates_to_x() {
-        assert_eq!(TranslationTable::STANDARD.translate_codon(*b"ATN"), b'X');
-        assert_eq!(TranslationTable::STANDARD.translate_codon(*b"A-G"), b'X');
+    #[rstest]
+    #[case::unknown_base(*b"ATN")]
+    #[case::gap(*b"A-G")]
+    fn translate_codon_is_unknown(#[case] codon: [u8; 3]) {
+        assert_eq!(TranslationTable::STANDARD.translate_codon(codon), b'X');
     }
 
     #[test]
     #[should_panic(expected = "translation table outputs must be ASCII")]
-    fn new_rejects_non_ascii_output() {
+    fn new_panics_on_non_ascii_output() {
         let mut codons = [[[b'A'; 4]; 4]; 4];
         codons[3][2][1] = 0x80;
         TranslationTable::new(codons);
     }
 
-    #[test]
-    fn custom_translation_table() {
-        let mut codons = [
-            [
-                [b'K', b'N', b'N', b'K'],
-                [b'I', b'I', b'I', b'M'],
-                [b'T', b'T', b'T', b'T'],
-                [b'R', b'S', b'S', b'R'],
-            ],
-            [
-                [b'*', b'Y', b'Y', b'*'],
-                [b'L', b'F', b'F', b'L'],
-                [b'S', b'S', b'S', b'S'],
-                [b'*', b'C', b'C', b'W'],
-            ],
-            [
-                [b'Q', b'H', b'H', b'Q'],
-                [b'L', b'L', b'L', b'L'],
-                [b'P', b'P', b'P', b'P'],
-                [b'R', b'R', b'R', b'R'],
-            ],
-            [
-                [b'E', b'D', b'D', b'E'],
-                [b'V', b'V', b'V', b'V'],
-                [b'A', b'A', b'A', b'A'],
-                [b'G', b'G', b'G', b'G'],
-            ],
-        ];
-        codons[0][1][3] = b'Z';
-        let custom = TranslationTable::new(codons);
-
-        assert_eq!(custom.translate_codon(*b"ATG"), b'Z');
-        assert_eq!(TranslationTable::STANDARD.translate_codon(*b"ATG"), b'M');
-        assert_eq!(custom.translate_codon(*b"TTT"), b'F');
-        assert_eq!(custom.translate_codon(*b"GGG"), b'G');
+    #[rstest]
+    #[case::frame1_codon_start(ReadingFrame::Frame1, 0, 0)]
+    #[case::frame1_codon_end(ReadingFrame::Frame1, 2, 0)]
+    #[case::frame1_second_codon(ReadingFrame::Frame1, 3, 1)]
+    #[case::frame2_offset(ReadingFrame::Frame2, 1, 0)]
+    #[case::frame2_codon_end(ReadingFrame::Frame2, 3, 0)]
+    #[case::frame2_second_codon(ReadingFrame::Frame2, 4, 1)]
+    #[case::frame3_offset(ReadingFrame::Frame3, 2, 0)]
+    #[case::frame3_codon_end(ReadingFrame::Frame3, 4, 0)]
+    #[case::frame3_second_codon(ReadingFrame::Frame3, 5, 1)]
+    fn protein_col_works(#[case] frame: ReadingFrame, #[case] nt: usize, #[case] expected: usize) {
+        assert_eq!(frame.protein_col(nt), Some(expected));
     }
-}
 
-#[cfg(test)]
-mod reading_frame_tests {
-    use super::ReadingFrame;
+    #[rstest]
+    #[case::frame2_first_nt(ReadingFrame::Frame2, 0)]
+    #[case::frame3_first_nt(ReadingFrame::Frame3, 0)]
+    #[case::frame3_second_nt(ReadingFrame::Frame3, 1)]
+    fn protein_col_is_none(#[case] frame: ReadingFrame, #[case] nt: usize) {
+        assert_eq!(frame.protein_col(nt), None);
+    }
 
-    #[test]
-    fn protein_col_maps_absolute_columns() {
-        assert_eq!(ReadingFrame::Frame1.protein_col(0), Some(0));
-        assert_eq!(ReadingFrame::Frame1.protein_col(2), Some(0));
-        assert_eq!(ReadingFrame::Frame1.protein_col(3), Some(1));
+    #[rstest]
+    #[case::frame1_first(ReadingFrame::Frame1, 0, 0..3)]
+    #[case::frame1_third(ReadingFrame::Frame1, 2, 6..9)]
+    #[case::frame2_first(ReadingFrame::Frame2, 0, 1..4)]
+    #[case::frame2_second(ReadingFrame::Frame2, 1, 4..7)]
+    #[case::frame3_first(ReadingFrame::Frame3, 0, 2..5)]
+    #[case::frame3_second(ReadingFrame::Frame3, 1, 5..8)]
+    fn nt_range_works(
+        #[case] frame: ReadingFrame,
+        #[case] protein_col: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        assert_eq!(frame.nt_range(protein_col), expected);
+    }
 
-        assert_eq!(ReadingFrame::Frame2.protein_col(0), None);
-        assert_eq!(ReadingFrame::Frame2.protein_col(1), Some(0));
-        assert_eq!(ReadingFrame::Frame2.protein_col(3), Some(0));
-        assert_eq!(ReadingFrame::Frame2.protein_col(4), Some(1));
+    #[rstest]
+    fn nt_range_agrees_with_protein_range(
+        #[values(ReadingFrame::Frame1, ReadingFrame::Frame2, ReadingFrame::Frame3)]
+        frame: ReadingFrame,
+    ) {
+        let nt_width = 12 + frame.offset();
+        for protein_col in 0..4 {
+            let codon = frame.nt_range(protein_col);
+            for nt in codon.clone() {
+                assert_eq!(frame.protein_col(nt), Some(protein_col));
+            }
+            assert_eq!(
+                frame.protein_range(codon, nt_width),
+                protein_col..protein_col + 1
+            );
+        }
+    }
 
-        assert_eq!(ReadingFrame::Frame3.protein_col(1), None);
-        assert_eq!(ReadingFrame::Frame3.protein_col(2), Some(0));
-        assert_eq!(ReadingFrame::Frame3.protein_col(4), Some(0));
-        assert_eq!(ReadingFrame::Frame3.protein_col(5), Some(1));
+    #[rstest]
+    fn translated_length_agrees_with_nt_range(
+        #[values(ReadingFrame::Frame1, ReadingFrame::Frame2, ReadingFrame::Frame3)]
+        frame: ReadingFrame,
+    ) {
+        for length in 0..8 {
+            let codons = (0..=length)
+                .take_while(|&protein_col| frame.nt_range(protein_col).start < length)
+                .count();
+            assert_eq!(frame.translated_length(length), codons);
+        }
+    }
+
+    #[rstest]
+    #[case::partial_codon(ReadingFrame::Frame1, 4, 2)]
+    #[case::partial_codon_after_offset(ReadingFrame::Frame2, 2, 1)]
+    #[case::full_codons(ReadingFrame::Frame3, 8, 2)]
+    fn translated_length_works(
+        #[case] frame: ReadingFrame,
+        #[case] nucleotide_length: usize,
+        #[case] expected: usize,
+    ) {
+        assert_eq!(frame.translated_length(nucleotide_length), expected);
+    }
+
+    #[rstest]
+    #[case::empty(ReadingFrame::Frame1, 0)]
+    #[case::within_offset(ReadingFrame::Frame3, 2)]
+    fn translated_length_is_zero(#[case] frame: ReadingFrame, #[case] nucleotide_length: usize) {
+        assert_eq!(frame.translated_length(nucleotide_length), 0);
+    }
+
+    #[rstest]
+    #[case::first_codon(ReadingFrame::Frame3, 1..3, 9, 0..1)]
+    #[case::codon_boundary(ReadingFrame::Frame1, 2..4, 9, 0..2)]
+    #[case::partial_codon(ReadingFrame::Frame1, 9..10, 10, 3..4)]
+    #[case::clipped_to_width(ReadingFrame::Frame1, 6..20, 9, 2..3)]
+    fn protein_range_works(
+        #[case] frame: ReadingFrame,
+        #[case] nt: Range<usize>,
+        #[case] nt_width: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        assert_eq!(frame.protein_range(nt, nt_width), expected);
+    }
+
+    #[rstest]
+    #[case::before_offset(ReadingFrame::Frame3, 0..2, 9)]
+    #[case::single_nt_before_offset(ReadingFrame::Frame2, 0..1, 9)]
+    #[case::past_width(ReadingFrame::Frame1, 12..15, 9)]
+    fn protein_range_is_empty(
+        #[case] frame: ReadingFrame,
+        #[case] nt: Range<usize>,
+        #[case] nt_width: usize,
+    ) {
+        assert!(frame.protein_range(nt, nt_width).is_empty());
+    }
+
+    #[rstest]
+    #[case::first_codon(b"ATGCCC", 0..3, b'M')]
+    #[case::codon_ending_at_sequence_end(b"ATGCCC", 3..6, b'P')]
+    fn codon_at_works(#[case] sequence: &[u8], #[case] codon: Range<usize>, #[case] expected: u8) {
+        assert_eq!(codon_at(sequence, codon), expected);
+    }
+
+    #[rstest]
+    #[case::one_nt_short(b"ATGCC", 3..6)]
+    #[case::two_nt_short(b"ATGC", 3..6)]
+    fn codon_at_is_unknown(#[case] sequence: &[u8], #[case] codon: Range<usize>) {
+        assert_eq!(codon_at(sequence, codon), b'X');
     }
 }
