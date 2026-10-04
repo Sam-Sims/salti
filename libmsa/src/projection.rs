@@ -45,16 +45,6 @@ impl Projection {
         (!range.is_empty()).then_some(range)
     }
 
-    pub(crate) fn all_absolute_range(&self, range: Range<usize>) -> Option<Range<usize>> {
-        let Self::Filtered(ids) = self else {
-            return Some(range);
-        };
-
-        let ids = &ids[range];
-        let (&first, &last) = (ids.first()?, ids.last()?);
-        (last - first + 1 == ids.len()).then_some(first..last + 1)
-    }
-
     pub(crate) fn iter(&self) -> ProjectionIter<'_> {
         match self {
             Self::Full { len } => ProjectionIter::Full(0..*len),
@@ -189,27 +179,6 @@ mod tests {
         assert_eq!(proj.relative_range_intersecting(1..8), Some(0..4));
         assert_eq!(proj.relative_range_intersecting(5..6), None);
         assert_eq!(proj.relative_range_intersecting(3..3), None);
-    }
-
-    #[test]
-    fn full_projection_all_absolute_range() {
-        let proj = Projection::Full { len: 5 };
-        assert_eq!(proj.all_absolute_range(1..4), Some(1..4));
-    }
-
-    #[test]
-    fn filtered_projection_all_absolute_range_without_hidden_ids() {
-        let proj = Projection::Filtered(Arc::from([1, 4, 5, 6, 9].as_slice()));
-        assert_eq!(proj.all_absolute_range(1..4), Some(4..7));
-        assert_eq!(proj.all_absolute_range(0..1), Some(1..2));
-        assert_eq!(proj.all_absolute_range(4..5), Some(9..10));
-    }
-
-    #[test]
-    fn filtered_projection_all_absolute_range_with_hidden_ids() {
-        let proj = Projection::Filtered(Arc::from([1, 4, 5, 6, 9].as_slice()));
-        assert_eq!(proj.all_absolute_range(0..2), None);
-        assert_eq!(proj.all_absolute_range(2..5), None);
     }
 
     #[test]

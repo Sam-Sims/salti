@@ -1,4 +1,4 @@
-use rayon::{prelude::*};
+use rayon::prelude::*;
 
 use crate::Grid;
 
@@ -15,8 +15,10 @@ pub(crate) fn count_blocks<'c>(
         .map(move |block| (block, count_rows(grid, rows, block)))
 }
 
-fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
-    todo!()
+pub(crate) fn add_counts(total: &mut [u32; 128], other: &[u32; 128]) {
+    for (total, other) in total.iter_mut().zip(other) {
+        *total += other;
+    }
 }
 
 struct ColumnCounts {
@@ -63,20 +65,40 @@ impl ColumnCounts {
     }
 }
 
-#[inline]
-fn symbol_index(byte: u8) -> usize {
-    debug_assert!(byte.is_ascii(), "sequence bytes are ASCII");
-    usize::from(byte & 0x7f)
+fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
+    let count_row = |mut counts: ColumnCounts, &row: &usize| {
+        counts.add_row(grid.cells(row, block));
+        counts
+    };
+
+    // only go parallel if we actually need it
+    if rows.len().saturating_mul(block.len()) < PARALLEL_MIN_CELLS {
+        return rows
+            .iter()
+            .fold(ColumnCounts::new(block.len()), count_row)
+            .into_totals();
+    }
+
+    rows.par_iter()
+        .with_min_len(MIN_ROWS_PER_JOB)
+        .fold(|| ColumnCounts::new(block.len()), count_row)
+        .map(ColumnCounts::into_totals)
+        .reduce_with(merge_totals)
+        .expect("rows should not be empty above min cells")
 }
 
 fn merge_totals(mut totals: Vec<[u32; 128]>, other: Vec<[u32; 128]>) -> Vec<[u32; 128]> {
     debug_assert_eq!(totals.len(), other.len());
     for (total, other) in totals.iter_mut().zip(&other) {
-        for (total, other) in total.iter_mut().zip(other) {
-            *total += other;
-        }
+        add_counts(total, other);
     }
     totals
+}
+
+#[inline]
+fn symbol_index(byte: u8) -> usize {
+    debug_assert!(byte.is_ascii(), "sequence bytes are ASCII");
+    usize::from(byte & 0x7f)
 }
 
 #[cfg(test)]

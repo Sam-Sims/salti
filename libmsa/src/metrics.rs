@@ -1,6 +1,43 @@
-use std::{num::NonZeroU8};
+use std::num::NonZeroU8;
 
-use crate::{AlignmentType, Grid, residue};
+use rayon::prelude::*;
+
+use crate::{
+    AlignmentType, Grid,
+    counts::{add_counts, count_blocks},
+    residue,
+};
+
+impl Grid<'_> {
+    /// Returns a summary for each id in `cols`.
+    ///
+    /// Ids may be in any order and may repeat. With no `rows`, every summary
+    /// has no consensus and zero conservation.
+    pub fn summaries(
+        self,
+        rows: &[usize],
+        cols: &[usize],
+        method: ConsensusMethod,
+    ) -> Vec<ColumnSummary> {
+        let alphabet_size = self.alignment_type().conservation_alphabet_size();
+        count_blocks(self, rows, cols)
+            .flat_map_iter(|(_, counts)| summaries_from_counts(&counts, method, alphabet_size))
+            .collect()
+    }
+
+    pub fn consensus(self, rows: &[usize], cols: &[usize], method: ConsensusMethod) -> Option<u8> {
+        let pooled = count_blocks(self, rows, cols)
+            .flat_map_iter(|(_, counts)| counts)
+            .reduce(
+                || [0; 128],
+                |mut pooled, counts| {
+                    add_counts(&mut pooled, &counts);
+                    pooled
+                },
+            );
+        consensus_from_counts(&pooled, method)
+    }
+}
 
 /// Calculated values for a single alignment column.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,41 +103,6 @@ impl std::str::FromStr for ConsensusMethod {
     }
 }
 
-impl Grid<'_> {
-    /// Returns a summary for each id in `cols`.
-    ///
-    /// Ids may be in any order and may repeat. With no `rows`, every summary
-    /// has no consensus and zero conservation.
-    pub fn summaries(
-        self,
-        rows: &[usize],
-        cols: &[usize],
-        method: ConsensusMethod,
-    ) -> Vec<ColumnSummary> {
-        todo!()
-    }
-
-    pub fn consensus(self, rows: &[usize], cols: &[usize], method: ConsensusMethod) -> Option<u8> {
-        todo!()
-    }
-}
-
-pub(crate) fn summaries_from_counts(
-    counts: &[[u32; 128]],
-    method: ConsensusMethod,
-    alphabet_size: Option<NonZeroU8>,
-) -> Vec<ColumnSummary> {
-    let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
-    counts
-        .iter()
-        .map(|counts| ColumnSummary {
-            consensus: consensus_from_counts(counts, method),
-            conservation: max_entropy
-                .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
-        })
-        .collect()
-}
-
 pub(crate) fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
     let total: u32 = counts.iter().sum();
     let gap_count: u32 = symbol_counts(counts)
@@ -132,6 +134,22 @@ pub(crate) fn max_counted_symbol_fraction_from_counts(
     }
 
     (counted_total != 0).then_some(max_count as f32 / counted_total as f32)
+}
+
+fn summaries_from_counts(
+    counts: &[[u32; 128]],
+    method: ConsensusMethod,
+    alphabet_size: Option<NonZeroU8>,
+) -> Vec<ColumnSummary> {
+    let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
+    counts
+        .iter()
+        .map(|counts| ColumnSummary {
+            consensus: consensus_from_counts(counts, method),
+            conservation: max_entropy
+                .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
+        })
+        .collect()
 }
 
 fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option<u8> {
@@ -197,8 +215,12 @@ const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
 }
 
 #[cfg(test)]
-mod consensus_count_tests {
-    use super::{ConsensusMethod, consensus_from_counts};
+mod tests {
+    use super::{
+        ConsensusMethod, consensus_from_counts, conservation_from_counts,
+        max_counted_symbol_fraction_from_counts,
+    };
+    use crate::AlignmentType;
 
     fn counts_for(symbols: &[u8]) -> [u32; 128] {
         let mut counts = [0u32; 128];
@@ -279,19 +301,6 @@ mod consensus_count_tests {
             Some(b'T')
         );
     }
-}
-
-#[cfg(test)]
-mod conservation_count_tests {
-    use super::conservation_from_counts;
-
-    fn counts_for(symbols: &[u8]) -> [u32; 128] {
-        let mut counts = [0u32; 128];
-        for &symbol in symbols {
-            counts[usize::from(symbol)] += 1;
-        }
-        counts
-    }
 
     const DNA_MAX_ENTROPY: f64 = 2.0;
 
@@ -331,20 +340,6 @@ mod conservation_count_tests {
         let mixed = conservation_from_counts(&counts_for(b"AACT"), DNA_MAX_ENTROPY);
         assert!(mixed < conserved);
         assert!(mixed > 0.0);
-    }
-}
-
-#[cfg(test)]
-mod constant_fraction_count_tests {
-    use super::max_counted_symbol_fraction_from_counts;
-    use crate::AlignmentType;
-
-    fn counts_for(symbols: &[u8]) -> [u32; 128] {
-        let mut counts = [0u32; 128];
-        for &symbol in symbols {
-            counts[usize::from(symbol)] += 1;
-        }
-        counts
     }
 
     #[test]

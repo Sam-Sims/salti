@@ -1,4 +1,6 @@
-use crate::Grid;
+use rayon::prelude::*;
+
+use crate::{Grid, counts::count_blocks, metrics};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ColumnFilter {
@@ -18,6 +20,29 @@ impl Grid<'_> {
     ///
     /// No filter = every row is kept
     pub fn kept_columns(self, rows: &[usize], filter: ColumnFilter) -> Vec<usize> {
-        todo!()
+        let cols: Vec<usize> = (0..self.width()).collect();
+        if !filter.is_active() {
+            return cols;
+        }
+
+        let alignment_type = self.alignment_type();
+        count_blocks(self, rows, &cols)
+            .flat_map_iter(|(block, counts)| {
+                block
+                    .iter()
+                    .zip(counts)
+                    .filter(move |(_, counts)| {
+                        let gap_ok = filter.max_gap_fraction.is_none_or(|threshold| {
+                            metrics::gap_fraction_from_counts(counts) <= threshold
+                        });
+                        let const_ok = filter.min_const_fraction.is_none_or(|threshold| {
+                            metrics::max_counted_symbol_fraction_from_counts(counts, alignment_type)
+                                .is_none_or(|fraction| fraction < threshold)
+                        });
+                        gap_ok && const_ok
+                    })
+                    .map(|(&col, _)| col)
+            })
+            .collect()
     }
 }

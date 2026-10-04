@@ -183,24 +183,6 @@ impl Alignment {
         })
     }
 
-    /// Returns a [`RowView`] for the visible sequence at `absolute_row`.
-    ///
-    /// The row index refers to the underlying alignment data rather than this alignment's current row
-    /// projection. The returned [`RowView`] is produced only if that absolute row is still visible
-    /// in this alignment, and it uses this alignment's current column projection and active kind.
-    ///
-    /// Returns `None` if `absolute_row` is out of bounds or refers to a row that is not visible.
-    pub(crate) fn sequence_by_absolute(&self, absolute_row: usize) -> Option<RowView<'_>> {
-        self.rows.relative(absolute_row)?;
-        let seq = self.data.sequences.get(absolute_row)?;
-        Some(RowView {
-            absolute_row_id: absolute_row,
-            id: &seq.id,
-            data: &seq.sequence,
-            columns: &self.columns,
-        })
-    }
-
     /// Returns a [`RowView`] for the absolute row but projected
     /// through this alignment's current column projection.
     ///
@@ -312,20 +294,6 @@ impl Alignment {
     }
 }
 
-fn select_ids(
-    projection: &Projection,
-    ids: &[usize],
-    out_of_bounds: impl Fn(usize) -> AlignmentError,
-) -> Result<Projection, AlignmentError> {
-    let mut absolute = ids
-        .iter()
-        .map(|&id| projection.absolute(id).ok_or_else(|| out_of_bounds(id)))
-        .collect::<Result<Vec<_>, _>>()?;
-    absolute.sort_unstable();
-    absolute.dedup();
-    Ok(Projection::Filtered(absolute.into()))
-}
-
 /// A borrowed view of one sequence row within an [`Alignment`].
 ///
 /// `RowView` does not own sequence data. Instead, it exposes a single row
@@ -426,8 +394,22 @@ fn data_from_raw_sequences(
     AlignmentData::new(sequences)
 }
 
+fn select_ids(
+    projection: &Projection,
+    ids: &[usize],
+    out_of_bounds: impl Fn(usize) -> AlignmentError,
+) -> Result<Projection, AlignmentError> {
+    let mut absolute = ids
+        .iter()
+        .map(|&id| projection.absolute(id).ok_or_else(|| out_of_bounds(id)))
+        .collect::<Result<Vec<_>, _>>()?;
+    absolute.sort_unstable();
+    absolute.dedup();
+    Ok(Projection::Filtered(absolute.into()))
+}
+
 #[cfg(test)]
-mod alignment_construction_tests {
+mod tests {
     use super::*;
     use crate::alignment_type::AlignmentType;
 
@@ -503,18 +485,6 @@ mod alignment_construction_tests {
         let alignment = Alignment::new(vec![raw("s1", b"AC")]).unwrap();
         assert!(!alignment.is_filtered());
     }
-}
-
-#[cfg(test)]
-mod alignment_access_tests {
-    use super::*;
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
 
     #[test]
     fn getters_work() {
@@ -555,14 +525,6 @@ mod alignment_access_tests {
         );
 
         filtered.max_id_len();
-    }
-
-    #[test]
-    fn sequence_by_absolute_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC"), raw("s2", b"TG")]).unwrap();
-        let sv = alignment.sequence_by_absolute(1).unwrap();
-        assert_eq!(sv.id, "s2");
-        assert!(alignment.sequence_by_absolute(2).is_none());
     }
 
     #[test]
