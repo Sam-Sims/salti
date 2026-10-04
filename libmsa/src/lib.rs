@@ -4,6 +4,7 @@ mod data;
 pub mod detection;
 mod error;
 mod filter;
+pub mod grid;
 mod metrics;
 mod model;
 mod projection;

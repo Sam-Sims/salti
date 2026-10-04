@@ -118,6 +118,10 @@ impl Alignment {
         }
     }
 
+    pub fn width() {
+        todo!()
+    }
+
     /// Returns the number of visible sequences.
     ///
     /// This is the length of the alignment's current row projection. For a filtered alignment, it

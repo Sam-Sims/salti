@@ -42,6 +42,14 @@ impl ReadingFrame {
         }
     }
 
+    pub const fn codon() -> Range<usize> {
+        todo!()
+    }
+
+    pub const fn protein_range() -> Range<usize> {
+        todo!()
+    }
+
     /// Returns the protein column for an absolute nucleotide column, or `None`
     /// when the column lies before this frame's offset.
     pub const fn protein_col(self, absolute_nuc_col: usize) -> Option<usize> {
@@ -350,6 +358,10 @@ pub(crate) fn translate_codons<'a>(
         .iter()
         .map(|&codon| table.translate_codon(codon))
         .chain((!incomplete.is_empty()).then_some(UNKNOWN_AMINO_ACID))
+}
+
+pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
+    todo!()
 }
 
 pub(crate) fn translated_byte_at(
