@@ -1,13 +1,6 @@
-use std::ops::Range;
-
-use rayon::prelude::*;
-
-use crate::{data::AlignmentData, projection::Projection};
-
 const PARALLEL_MIN_CELLS: usize = 1 << 16;
 const MIN_ROWS_PER_JOB: usize = 128;
 const MAX_BLOCK_COLUMNS: usize = 128;
-const BLOCKS_PER_THREAD: usize = 4;
 
 #[inline]
 fn symbol_index(byte: u8) -> usize {
@@ -57,100 +50,6 @@ impl ColumnCounts {
         }
         self.pending_rows = 0;
     }
-}
-
-pub(crate) fn count_columns(
-    data: &AlignmentData,
-    rows: &Projection,
-    columns: &Projection,
-    range: Range<usize>,
-) -> Vec<[u32; 128]> {
-    let width = range.len();
-    if let Some(abs_cols) = columns.all_absolute_range(range.clone()) {
-        return count_rows(rows, width, count_contiguous_row(data, abs_cols));
-    }
-
-    let abs_cols: Vec<usize> = range
-        .map(|rel_col| {
-            columns
-                .absolute(rel_col)
-                .expect("range lies within columns")
-        })
-        .collect();
-    count_rows(rows, width, |counts, abs_row| {
-        let sequence = &data.sequences[abs_row].sequence;
-        counts.add_row(abs_cols.iter().map(|&abs_col| sequence[abs_col]));
-    })
-}
-
-pub(crate) fn count_all_columns<'a>(
-    data: &'a AlignmentData,
-    rows: &'a Projection,
-) -> impl IndexedParallelIterator<Item = (Range<usize>, Vec<[u32; 128]>)> + 'a {
-    let block_width = data
-        .length
-        .div_ceil(rayon::current_num_threads() * BLOCKS_PER_THREAD)
-        .clamp(1, MAX_BLOCK_COLUMNS);
-
-    (0..data.length.div_ceil(block_width))
-        .into_par_iter()
-        .map(move |block| {
-            let start = block * block_width;
-            let abs_cols = start..(start + block_width).min(data.length);
-            let counts = count_rows_on_this_thread(
-                rows,
-                abs_cols.len(),
-                count_contiguous_row(data, abs_cols.clone()),
-            );
-            (abs_cols, counts)
-        })
-}
-
-fn count_contiguous_row(
-    data: &AlignmentData,
-    abs_cols: Range<usize>,
-) -> impl Fn(&mut ColumnCounts, usize) + Sync + '_ {
-    move |counts, abs_row| {
-        let sequence = &data.sequences[abs_row].sequence;
-        counts.add_row(sequence[abs_cols.clone()].iter().copied());
-    }
-}
-
-fn count_rows(
-    rows: &Projection,
-    width: usize,
-    count_row: impl Fn(&mut ColumnCounts, usize) + Sync,
-) -> Vec<[u32; 128]> {
-    if rows.len().saturating_mul(width) < PARALLEL_MIN_CELLS {
-        return count_rows_on_this_thread(rows, width, count_row);
-    }
-
-    (0..rows.len())
-        .into_par_iter()
-        .with_min_len(MIN_ROWS_PER_JOB)
-        .fold(
-            || ColumnCounts::new(width),
-            |mut counts, rel_row| {
-                let abs_row = rows.absolute(rel_row).expect("relative row is in bounds");
-                count_row(&mut counts, abs_row);
-                counts
-            },
-        )
-        .map(ColumnCounts::into_totals)
-        .reduce_with(merge_totals)
-        .expect("parallel counting runs at least one job")
-}
-
-fn count_rows_on_this_thread(
-    rows: &Projection,
-    width: usize,
-    count_row: impl Fn(&mut ColumnCounts, usize),
-) -> Vec<[u32; 128]> {
-    let mut counts = ColumnCounts::new(width);
-    for abs_row in rows.iter() {
-        count_row(&mut counts, abs_row);
-    }
-    counts.into_totals()
 }
 
 fn merge_totals(mut totals: Vec<[u32; 128]>, other: Vec<[u32; 128]>) -> Vec<[u32; 128]> {

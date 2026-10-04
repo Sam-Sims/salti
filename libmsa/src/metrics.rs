@@ -1,12 +1,6 @@
 use std::{num::NonZeroU8, ops::Range};
 
-use crate::{
-    AlignmentType,
-    counts::count_columns,
-    error::AlignmentError,
-    model::{Alignment, validate_column_range},
-    residue,
-};
+use crate::{AlignmentType, residue};
 
 /// Calculated values for a single alignment column.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,58 +64,6 @@ impl std::str::FromStr for ConsensusMethod {
             .into_iter()
             .find(|method| method.name() == value)
             .ok_or(())
-    }
-}
-
-impl Alignment {
-    /// Returns a derived summary for each column in `range`.
-    ///
-    /// Each position is resolved against the alignment's current column projection.
-    /// The returned vector keeps the requested relative positions and contains a
-    /// [`ColumnSummary`] with consensus, gap fraction, and conservation when that
-    /// measure is defined for the active alignment kind.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::EmptyRange`] if `range` is empty.
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` is greater than the
-    /// current column projection width.
-    pub fn column_summaries_range(
-        &self,
-        range: Range<usize>,
-        method: ConsensusMethod,
-    ) -> Result<Vec<ColumnSummary>, AlignmentError> {
-        validate_column_range(&range, self.columns.len())?;
-
-        let counts = count_columns(&self.data, &self.rows, &self.columns, range.clone());
-        Ok(summaries_from_counts(
-            range,
-            &counts,
-            method,
-            self.active_type().conservation_alphabet_size(),
-        ))
-    }
-
-    /// Returns the consensus byte over every cell in this view.
-    ///
-    /// All visible rows and columns are counted together, and the byte
-    /// is chosen by `method` with the same tie rule as per-column consensus.
-    ///
-    /// Returns `None` when the view is empty or, under
-    /// [`ConsensusMethod::MajorityNonGap`], contains only gaps.
-    pub fn consensus(&self, method: ConsensusMethod) -> Option<u8> {
-        if self.columns.len() == 0 {
-            return None;
-        }
-
-        let mut pooled = [0u32; 128];
-        for counts in count_columns(&self.data, &self.rows, &self.columns, 0..self.columns.len()) {
-            for (total, count) in pooled.iter_mut().zip(counts) {
-                *total += count;
-            }
-        }
-        consensus_from_counts(&pooled, method)
     }
 }
 
@@ -471,88 +413,5 @@ mod constant_fraction_count_tests {
         let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Dna);
 
         assert_eq!(fraction, None);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{Alignment, AlignmentType, ConsensusMethod, RawSequence};
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    #[test]
-    fn column_summaries_range_returns_requested_positions() {
-        let alignment =
-            Alignment::new_with_type(vec![raw("s1", b"AC"), raw("s2", b"AT")], AlignmentType::Dna)
-                .unwrap();
-
-        assert_eq!(
-            alignment
-                .column_summaries_range(0..2, ConsensusMethod::MajorityNonGap)
-                .unwrap()
-                .into_iter()
-                .map(|summary| summary.position)
-                .collect::<Vec<_>>(),
-            vec![0, 1]
-        );
-    }
-
-    fn dna(sequences: &[&[u8]]) -> Alignment {
-        let sequences = sequences
-            .iter()
-            .enumerate()
-            .map(|(index, sequence)| raw(&format!("s{index}"), sequence))
-            .collect::<Vec<_>>();
-        Alignment::new_with_type(sequences, AlignmentType::Dna).unwrap()
-    }
-
-    #[test]
-    fn consensus_pools_cells_across_columns() {
-        let alignment = dna(&[b"AT", b"AT", b"GT"]);
-        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'T'));
-    }
-
-    #[test]
-    fn consensus_tie_picks_lowest_byte() {
-        let alignment = dna(&[b"CA", b"AC"]);
-        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'A'));
-    }
-
-    #[test]
-    fn consensus_follows_method() {
-        let alignment = dna(&[b"--", b"-A"]);
-        assert_eq!(alignment.consensus(ConsensusMethod::Majority), Some(b'-'));
-        assert_eq!(
-            alignment.consensus(ConsensusMethod::MajorityNonGap),
-            Some(b'A')
-        );
-
-        let all_gap = dna(&[b"--", b"--"]);
-        assert_eq!(all_gap.consensus(ConsensusMethod::MajorityNonGap), None);
-    }
-
-    #[test]
-    fn consensus_counts_only_selected_cells() {
-        let alignment = dna(&[b"AAC", b"GGC", b"GGC"]);
-        let selected = alignment.select(&[0], &[0, 1]).unwrap();
-        assert_eq!(selected.consensus(ConsensusMethod::Majority), Some(b'A'));
-    }
-
-    #[test]
-    fn consensus_of_view_without_rows_is_none() {
-        let alignment = dna(&[b"AC", b"AC"]);
-        let empty = alignment
-            .filter()
-            .unwrap()
-            .with_row_regex("no-match")
-            .apply()
-            .unwrap();
-        assert_eq!(empty.row_count(), 0);
-        assert_eq!(empty.consensus(ConsensusMethod::Majority), None);
     }
 }

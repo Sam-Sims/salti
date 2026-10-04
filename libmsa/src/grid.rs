@@ -27,6 +27,7 @@ impl Grid<'_> {
         self.alignment_type
     }
 
+    /// Returns cells for `row` and `cols`
     pub fn cells(self, row: usize, cols: &[usize]) -> impl Iterator<Item = u8> {
         let sequence = &self
             .alignment
