@@ -9,7 +9,6 @@ mod filter;
 mod grid;
 mod metrics;
 mod model;
-mod projection;
 pub mod residue;
 mod translation;
 
@@ -19,5 +18,5 @@ pub use error::AlignmentError;
 pub use filter::ColumnFilter;
 pub use grid::Grid;
 pub use metrics::{ColumnSummary, ConsensusMethod};
-pub use model::{Alignment, RowView};
+pub use model::Alignment;
 pub use translation::ReadingFrame;
