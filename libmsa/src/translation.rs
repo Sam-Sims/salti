@@ -33,7 +33,7 @@ impl ReadingFrame {
     }
 
     /// Returns the nucleotide columns that span the codon given at `protein_col`
-    pub const fn nt_range(self, protein_col: usize) -> Range<usize> {
+    pub(crate) const fn nt_range(self, protein_col: usize) -> Range<usize> {
         let start = self.offset() + 3 * protein_col;
         start..start + 3
     }
@@ -144,15 +144,11 @@ impl TranslationTable {
 ///
 /// A truncated codon at the end will return as the `UNKNOWN_AMINO_ACID` char
 pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
-    let first = *sequence
-        .get(codon.start)
-        .expect("col should be below width");
-    let (Some(&second), Some(&third)) =
-        (sequence.get(codon.start + 1), sequence.get(codon.start + 2))
-    else {
-        return UNKNOWN_AMINO_ACID;
-    };
-    TranslationTable::STANDARD.translate_codon([first, second, third])
+    assert!(codon.start < sequence.len(), "col should be below width");
+    match sequence.get(codon) {
+        Some(&[a, b, c]) => TranslationTable::STANDARD.translate_codon([a, b, c]),
+        _ => UNKNOWN_AMINO_ACID,
+    }
 }
 
 #[cfg(test)]
