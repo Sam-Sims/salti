@@ -262,7 +262,7 @@ Two methods are available for consensus calculation:
 - `majority-non-gap` - The most common character at each position, excluding gaps
 
 If there is a tie for most common character, the one that sorts first by ASCII value wins.
-For example this means `A` beats `C`, uppercase beats lowercase (`T` beats `a`), and under `majority` a gap (`-` or `.`) beats any letter.
+For example this means `A` beats `C`, uppercase beats lowercase (`T` beats `a`), and under `majority` a gap (`-`) beats any letter.
 
 The defailt is `majority-non-gap`
 

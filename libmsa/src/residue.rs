@@ -1,9 +1,10 @@
+//! Rules for single residue bytes
+
 use crate::alignment_type::AlignmentType;
 
-pub const GAP: u8 = b'-';
+const GAP: u8 = b'-';
 
-/// The amino acid symbol for a residue that is unknown or cannot be translated.
-pub const UNKNOWN_AMINO_ACID: u8 = b'X';
+pub(crate) const UNKNOWN_AMINO_ACID: u8 = b'X';
 
 const INVALID_NUCLEOTIDE: u8 = 4;
 
@@ -26,42 +27,15 @@ const fn build_nucleotide_index_table() -> [u8; 256] {
     table
 }
 
-const NUCLEOTIDE_BIT: u8 = 1 << 0;
-const PROTEIN_BIT: u8 = 1 << 1;
-const RESIDUE_TABLE_ALL: [u8; 256] = build_residue_table();
-
-const fn build_residue_table() -> [u8; 256] {
-    let mut table = [0; 256];
-
-    let nucleotides = b"ACGTURYSWKMBDHVN";
-    let mut i = 0;
-    while i < nucleotides.len() {
-        table[nucleotides[i] as usize] |= NUCLEOTIDE_BIT;
-        table[nucleotides[i].to_ascii_lowercase() as usize] |= NUCLEOTIDE_BIT;
-        i += 1;
-    }
-
-    let proteins = b"DEFHIKLMNPQRSVWYX";
-    let mut i = 0;
-    while i < proteins.len() {
-        table[proteins[i] as usize] |= PROTEIN_BIT;
-        table[proteins[i].to_ascii_lowercase() as usize] |= PROTEIN_BIT;
-        i += 1;
-    }
-
-    table
-}
-
-/// Returns `true` if `byte` is a gap.
+/// Returns true if `byte` is a gap. Only `-` is a gap
 #[inline]
 pub const fn is_gap(byte: u8) -> bool {
     byte == GAP
 }
 
-/// Returns `true` if `byte` is unknown symbol for `kind`.
+/// Returns true if `byte` is the unknown symbol for `kind`
 ///
-/// DNA uses `N`/`n` and protein uses `X`/`x`. Generic alignments have no
-/// unknown symbol.
+/// DNA uses `N` or `n`, protein uses `X` or `x`, and generic has none
 #[inline]
 pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
     match kind {
@@ -71,9 +45,9 @@ pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
     }
 }
 
-/// Returns the codon index of a nucleotide, case-insensitive.
+/// Returns the index of a nucleotide in a codon, case-insensitive
 ///
-/// `A` = 0, `T`/`U` = 1, `C` = 2, `G` = 3. Any other byte returns `None`.
+/// `A` is 0, `T` and `U` are 1, `C` is 2 and `G` is 3. Any other byte is `None`
 #[inline]
 pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     match NUCLEOTIDE_INDEX_TABLE[byte as usize] {
@@ -82,138 +56,147 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     }
 }
 
-/// Returns `true` if `byte` is a nucleotide symbol used for type detection, case-insensitive.
-///
-/// Includes IUPAC ambiguity codes. Gaps are not included.
 #[inline]
 pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
-    RESIDUE_TABLE_ALL[byte as usize] & NUCLEOTIDE_BIT != 0
+    matches!(
+        byte.to_ascii_uppercase(),
+        b'A' | b'C'
+            | b'G'
+            | b'T'
+            | b'U'
+            | b'R'
+            | b'Y'
+            | b'S'
+            | b'W'
+            | b'K'
+            | b'M'
+            | b'B'
+            | b'D'
+            | b'H'
+            | b'V'
+            | b'N'
+    )
 }
 
-/// Returns `true` if `byte` is a protein symbol used for type detection, case-insensitive.
-///
-/// Gaps are not included.
 #[inline]
 pub(crate) const fn is_detection_protein(byte: u8) -> bool {
-    RESIDUE_TABLE_ALL[byte as usize] & PROTEIN_BIT != 0
+    matches!(
+        byte.to_ascii_uppercase(),
+        b'D' | b'E'
+            | b'F'
+            | b'H'
+            | b'I'
+            | b'K'
+            | b'L'
+            | b'M'
+            | b'N'
+            | b'P'
+            | b'Q'
+            | b'R'
+            | b'S'
+            | b'V'
+            | b'W'
+            | b'Y'
+            | b'X'
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::{
-        GAP, UNKNOWN_AMINO_ACID, is_detection_nucleotide, is_detection_protein, is_gap, is_unknown,
+        UNKNOWN_AMINO_ACID, is_detection_nucleotide, is_detection_protein, is_gap, is_unknown,
         nucleotide_index,
     };
     use crate::alignment_type::AlignmentType;
 
-    const fn test_is_gap(byte: u8) -> bool {
-        matches!(byte, b'-')
-    }
-
-    fn test_norm_nuc(byte: u8) -> Option<u8> {
-        let byte = byte.to_ascii_uppercase();
-
-        match byte {
-            b'A' | b'C' | b'G' | b'T' => Some(byte),
-            b'U' => Some(b'T'),
-            _ => None,
-        }
-    }
-
-    fn test_index_nuc(base: u8) -> Option<usize> {
-        match base {
-            b'A' | b'a' => Some(0),
-            b'T' | b't' | b'U' | b'u' => Some(1),
-            b'C' | b'c' => Some(2),
-            b'G' | b'g' => Some(3),
-            _ => None,
-        }
-    }
-
-    const fn test_us_unknown(byte: u8, kind: AlignmentType) -> bool {
-        match kind {
-            AlignmentType::Dna => matches!(byte, b'N' | b'n'),
-            AlignmentType::Protein => matches!(byte, b'X' | b'x'),
-            AlignmentType::Generic => false,
-        }
-    }
-
-    fn test_is_detection_nuc(byte: u8) -> bool {
-        b"ACGTURYSWKMBDHVN".contains(&byte.to_ascii_uppercase())
-    }
-
-    fn test_is_detection_protein(byte: u8) -> bool {
-        b"DEFHIKLMNPQRSVWYX".contains(&byte.to_ascii_uppercase())
-    }
-
     #[test]
-    fn gap_symbol_is_dash() {
-        assert_eq!(GAP, b'-');
-        assert!(!is_gap(b'.'));
+    fn is_gap_works() {
+        assert!(is_gap(b'-'));
     }
 
-    #[test]
-    fn unknown_amino_acid_is_protein_unknown() {
-        assert!(is_unknown(UNKNOWN_AMINO_ACID, AlignmentType::Protein));
+    #[rstest]
+    #[case::dot(b'.')]
+    #[case::space(b' ')]
+    #[case::residue(b'A')]
+    fn is_gap_rejects(#[case] byte: u8) {
+        assert!(!is_gap(byte));
     }
 
-    #[test]
-    fn is_gap_matches_ref() {
-        for byte in 0..=u8::MAX {
-            assert_eq!(is_gap(byte), test_is_gap(byte), "byte {byte}");
-        }
+    #[rstest]
+    #[case::dna_upper(AlignmentType::Dna, b'N')]
+    #[case::dna_lower(AlignmentType::Dna, b'n')]
+    #[case::protein_upper(AlignmentType::Protein, b'X')]
+    #[case::protein_lower(AlignmentType::Protein, b'x')]
+    #[case::translated_unknown(AlignmentType::Protein, UNKNOWN_AMINO_ACID)]
+    fn is_unknown_works(#[case] kind: AlignmentType, #[case] byte: u8) {
+        assert!(is_unknown(byte, kind));
     }
 
-    #[test]
-    fn is_unknown_matches_ref() {
-        for kind in [
-            AlignmentType::Dna,
-            AlignmentType::Protein,
-            AlignmentType::Generic,
-        ] {
-            for byte in 0..=u8::MAX {
-                assert_eq!(
-                    is_unknown(byte, kind),
-                    test_us_unknown(byte, kind),
-                    "byte {byte}, kind {kind:?}"
-                );
-            }
-        }
+    #[rstest]
+    #[case::dna_x(AlignmentType::Dna, b'X')]
+    #[case::protein_n(AlignmentType::Protein, b'N')]
+    #[case::generic_n(AlignmentType::Generic, b'N')]
+    #[case::generic_x(AlignmentType::Generic, b'X')]
+    #[case::gap(AlignmentType::Dna, b'-')]
+    fn is_unknown_rejects(#[case] kind: AlignmentType, #[case] byte: u8) {
+        assert!(!is_unknown(byte, kind));
     }
 
-    #[test]
-    fn nucleotide_index_matches_ref() {
-        for byte in 0..=u8::MAX {
-            let expected = test_norm_nuc(byte).and_then(test_index_nuc);
-            assert_eq!(nucleotide_index(byte), expected, "byte {byte}");
-        }
+    #[rstest]
+    #[case::a(b'A', 0)]
+    #[case::t(b'T', 1)]
+    #[case::c(b'C', 2)]
+    #[case::g(b'G', 3)]
+    #[case::lowercase(b'g', 3)]
+    #[case::u_is_t(b'U', 1)]
+    #[case::lowercase_u_is_t(b'u', 1)]
+    fn nucleotide_index_works(#[case] byte: u8, #[case] expected: usize) {
+        assert_eq!(nucleotide_index(byte), Some(expected));
     }
 
-    #[test]
-    fn is_detection_nucleotide_matches_ref() {
-        for byte in 0..=u8::MAX {
-            assert_eq!(
-                is_detection_nucleotide(byte),
-                test_is_detection_nuc(byte),
-                "byte {byte}"
-            );
-        }
+    #[rstest]
+    #[case::ambiguity(b'N')]
+    #[case::gap(b'-')]
+    #[case::non_ascii(0x80)]
+    fn nucleotide_index_is_none(#[case] byte: u8) {
+        assert_eq!(nucleotide_index(byte), None);
     }
 
-    #[test]
-    fn is_detection_protein_matches_ref() {
-        for byte in 0..=u8::MAX {
-            assert_eq!(
-                is_detection_protein(byte),
-                test_is_detection_protein(byte),
-                "byte {byte}"
-            );
-        }
+    #[rstest]
+    #[case::base(b'A')]
+    #[case::rna(b'U')]
+    #[case::ambiguity(b'R')]
+    #[case::unknown(b'N')]
+    #[case::lowercase(b'y')]
+    fn is_detection_nucleotide_works(#[case] byte: u8) {
+        assert!(is_detection_nucleotide(byte));
     }
 
-    #[test]
-    fn test_u_is_t() {
-        assert_eq!(nucleotide_index(b'U'), nucleotide_index(b'T'));
-        assert_eq!(nucleotide_index(b'u'), nucleotide_index(b'T'));
+    #[rstest]
+    #[case::gap(b'-')]
+    #[case::protein_only(b'E')]
+    #[case::non_ascii(0x80)]
+    fn is_detection_nucleotide_rejects(#[case] byte: u8) {
+        assert!(!is_detection_nucleotide(byte));
+    }
+
+    #[rstest]
+    #[case::protein_only(b'E')]
+    #[case::shared_with_ambiguity(b'R')]
+    #[case::unknown(b'X')]
+    #[case::lowercase(b'l')]
+    fn is_detection_protein_works(#[case] byte: u8) {
+        assert!(is_detection_protein(byte));
+    }
+
+    #[rstest]
+    #[case::gap(b'-')]
+    #[case::nucleotide_a(b'A')]
+    #[case::nucleotide_c(b'C')]
+    #[case::non_ascii(0x80)]
+    fn is_detection_protein_rejects(#[case] byte: u8) {
+        assert!(!is_detection_protein(byte));
     }
 }
