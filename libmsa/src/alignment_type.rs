@@ -1,4 +1,4 @@
-use std::{num::NonZeroU8, str::FromStr};
+use std::str::FromStr;
 
 use crate::error::AlignmentError;
 
@@ -14,10 +14,10 @@ pub enum AlignmentType {
 
 impl AlignmentType {
     /// Returns the alphabet size used for conservation calculations.
-    pub const fn conservation_alphabet_size(self) -> Option<NonZeroU8> {
+    pub(crate) const fn conservation_alphabet_size(self) -> Option<u8> {
         match self {
-            Self::Dna => NonZeroU8::new(4),
-            Self::Protein => NonZeroU8::new(20),
+            Self::Dna => Some(4),
+            Self::Protein => Some(20),
             Self::Generic => None,
         }
     }

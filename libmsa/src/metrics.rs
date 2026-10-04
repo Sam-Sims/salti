@@ -1,5 +1,3 @@
-use std::num::NonZeroU8;
-
 use rayon::prelude::*;
 
 use crate::{
@@ -19,9 +17,17 @@ impl Grid<'_> {
         cols: &[usize],
         method: ConsensusMethod,
     ) -> Vec<ColumnSummary> {
-        let alphabet_size = self.alignment_type().conservation_alphabet_size();
+        let max_entropy = self
+            .alignment_type()
+            .conservation_alphabet_size()
+            .map(|size| f64::from(size).log2());
         count_blocks(self, rows, cols)
-            .flat_map_iter(|(_, counts)| summaries_from_counts(&counts, method, alphabet_size))
+            .flat_map_iter(|(_, counts)| counts)
+            .map(|counts| ColumnSummary {
+                consensus: consensus_from_counts(&counts, method),
+                conservation: max_entropy
+                    .map(|max_entropy| conservation_from_counts(&counts, max_entropy)),
+            })
             .collect()
     }
 
@@ -125,7 +131,7 @@ pub(crate) fn max_counted_symbol_fraction_from_counts(
     let mut max_count = 0u32;
 
     for (symbol, count) in symbol_counts(counts) {
-        if count == 0 || is_ignored_constant_symbol(symbol, kind) {
+        if count == 0 || residue::is_gap(symbol) || residue::is_unknown(symbol, kind) {
             continue;
         }
 
@@ -134,22 +140,6 @@ pub(crate) fn max_counted_symbol_fraction_from_counts(
     }
 
     (counted_total != 0).then_some(max_count as f32 / counted_total as f32)
-}
-
-fn summaries_from_counts(
-    counts: &[[u32; 128]],
-    method: ConsensusMethod,
-    alphabet_size: Option<NonZeroU8>,
-) -> Vec<ColumnSummary> {
-    let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
-    counts
-        .iter()
-        .map(|counts| ColumnSummary {
-            consensus: consensus_from_counts(counts, method),
-            conservation: max_entropy
-                .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
-        })
-        .collect()
 }
 
 fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option<u8> {
@@ -207,11 +197,6 @@ fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f32 {
 
 fn symbol_counts(counts: &[u32; 128]) -> impl Iterator<Item = (u8, u32)> + '_ {
     (0..128).zip(counts.iter().copied())
-}
-
-#[inline]
-const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
-    residue::is_gap(byte) || residue::is_unknown(byte, kind)
 }
 
 #[cfg(test)]

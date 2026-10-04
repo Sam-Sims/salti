@@ -1,16 +1,12 @@
 use std::{ops::Range, sync::Arc};
 
-use rand::{SeedableRng, rngs::StdRng};
-
 use crate::{
     alignment_type::AlignmentType,
     data::{AlignmentData, RawSequence},
-    detection::{DetectionOptions, detect_alignment_type},
+    detection::detect_alignment_type,
     error::AlignmentError,
     projection::Projection,
 };
-
-const DETECTION_SEED: u64 = u64::from_be_bytes(*b"REDRIGHT");
 
 /// A multiple sequence alignment.
 ///
@@ -28,7 +24,7 @@ pub struct Alignment {
 }
 
 impl Alignment {
-    /// Creates an alignment from raw sequences and detects its kind using the default detection options.
+    /// Creates an alignment from raw sequences and detects its kind.
     ///
     /// The returned alignment starts with all rows and columns visible. The detected kind becomes both the
     /// detected kind and the active kind for the new alignment.
@@ -43,30 +39,8 @@ impl Alignment {
     ///
     /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
     pub fn new(seqs: impl IntoIterator<Item = RawSequence>) -> Result<Self, AlignmentError> {
-        Self::new_with_detection_options(seqs, DetectionOptions::default())
-    }
-
-    /// Creates an alignment from raw sequences and detects its kind using the supplied detection options.
-    ///
-    /// The returned alignment starts with all rows and columns visible. The detected kind becomes both the
-    /// detected kind and the active kind for the new alignment.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
-    ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    pub fn new_with_detection_options(
-        seqs: impl IntoIterator<Item = RawSequence>,
-        options: DetectionOptions,
-    ) -> Result<Self, AlignmentError> {
         let data = data_from_raw_sequences(seqs)?;
-        let mut rng = StdRng::seed_from_u64(DETECTION_SEED);
-        let detected = detect_alignment_type(&data, options, &mut rng);
+        let detected = detect_alignment_type(&data);
         Ok(Self::from_data(data, detected))
     }
 

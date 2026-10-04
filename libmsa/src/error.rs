@@ -50,9 +50,6 @@ pub enum AlignmentError {
     /// An alignment kind string was not one of the supported values.
     #[error("invalid alignment type: expected `dna`, `protein`, or `generic`")]
     InvalidAlignmentType,
-    /// Detection options used a threshold outside the supported finite range.
-    #[error("invalid classification threshold: {0} (expected a finite value in 0.0..=1.0)")]
-    InvalidClassificationThreshold(f32),
     /// Parsing alignment data failed with the attached message.
     #[error("failed to parse alignment: {0}")]
     Parse(String),

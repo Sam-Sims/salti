@@ -2,6 +2,15 @@ use std::ops::Range;
 
 use crate::residue::{UNKNOWN_AMINO_ACID, nucleotide_index};
 
+/// Standard translation table, laid out `[first][second][third]` with
+/// nucleotides indexed in `A, T, C, G` order.
+const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
+    [*b"KNNK", *b"IIIM", *b"TTTT", *b"RSSR"],
+    [*b"*YY*", *b"LFFL", *b"SSSS", *b"*CCW"],
+    [*b"QHHQ", *b"LLLL", *b"PPPP", *b"RRRR"],
+    [*b"EDDE", *b"VVVV", *b"AAAA", *b"GGGG"],
+];
+
 /// Reading frames for translating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReadingFrame {
@@ -90,55 +99,6 @@ impl std::str::FromStr for ReadingFrame {
     }
 }
 
-/// Translation table for mapping DNA codons to amino-acid bytes.
-///
-/// The layout is `[first][second][third]`, with nucleotides indexed in `A, T, C, G` order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TranslationTable {
-    codons: [[[u8; 4]; 4]; 4],
-}
-
-impl TranslationTable {
-    /// Standard translation table.
-    pub const STANDARD: Self = Self {
-        codons: [
-            [*b"KNNK", *b"IIIM", *b"TTTT", *b"RSSR"],
-            [*b"*YY*", *b"LFFL", *b"SSSS", *b"*CCW"],
-            [*b"QHHQ", *b"LLLL", *b"PPPP", *b"RRRR"],
-            [*b"EDDE", *b"VVVV", *b"AAAA", *b"GGGG"],
-        ],
-    };
-
-    /// Builds a translation table from a lookup matrix.
-    ///
-    /// The matrix is stored as `[first][second][third]` in `A, T, C, G` order on
-    /// each axis. Each entry is the amino-acid byte returned for the translated
-    /// codon.
-    ///
-    /// # Panics
-    ///
-    /// If any amino-acid byte is outside ASCII. Column counting indexes
-    /// 128-entry tables by byte value.
-    pub const fn new(codons: [[[u8; 4]; 4]; 4]) -> Self {
-        assert!(
-            codons.as_flattened().as_flattened().is_ascii(),
-            "translation table outputs must be ASCII"
-        );
-        Self { codons }
-    }
-
-    pub(crate) fn translate_codon(&self, codon: [u8; 3]) -> u8 {
-        match (
-            nucleotide_index(codon[0]),
-            nucleotide_index(codon[1]),
-            nucleotide_index(codon[2]),
-        ) {
-            (Some(first), Some(second), Some(third)) => self.codons[first][second][third],
-            _ => UNKNOWN_AMINO_ACID,
-        }
-    }
-}
-
 /// Returns the amino acid byte for the input `codon` in input `sequence` translated
 /// with the standard table.
 ///
@@ -146,7 +106,18 @@ impl TranslationTable {
 pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
     assert!(codon.start < sequence.len(), "col should be below width");
     match sequence.get(codon) {
-        Some(&[a, b, c]) => TranslationTable::STANDARD.translate_codon([a, b, c]),
+        Some(&[a, b, c]) => translate_codon([a, b, c]),
+        _ => UNKNOWN_AMINO_ACID,
+    }
+}
+
+fn translate_codon(codon: [u8; 3]) -> u8 {
+    match (
+        nucleotide_index(codon[0]),
+        nucleotide_index(codon[1]),
+        nucleotide_index(codon[2]),
+    ) {
+        (Some(first), Some(second), Some(third)) => STANDARD_CODONS[first][second][third],
         _ => UNKNOWN_AMINO_ACID,
     }
 }
@@ -157,7 +128,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use super::{ReadingFrame, TranslationTable, codon_at};
+    use super::{ReadingFrame, codon_at, translate_codon};
 
     // https://www.hgmd.cf.ac.uk/docs/cd_amino.html
     #[test]
@@ -230,10 +201,7 @@ mod tests {
         ];
 
         for (codon, amino_acid) in expected {
-            assert_eq!(
-                TranslationTable::STANDARD.translate_codon(codon),
-                amino_acid
-            );
+            assert_eq!(translate_codon(codon), amino_acid);
         }
     }
 
@@ -241,15 +209,7 @@ mod tests {
     #[case::unknown_base(*b"ATN")]
     #[case::gap(*b"A-G")]
     fn translate_codon_is_unknown(#[case] codon: [u8; 3]) {
-        assert_eq!(TranslationTable::STANDARD.translate_codon(codon), b'X');
-    }
-
-    #[test]
-    #[should_panic(expected = "translation table outputs must be ASCII")]
-    fn new_panics_on_non_ascii_output() {
-        let mut codons = [[[b'A'; 4]; 4]; 4];
-        codons[3][2][1] = 0x80;
-        TranslationTable::new(codons);
+        assert_eq!(translate_codon(codon), b'X');
     }
 
     #[rstest]
