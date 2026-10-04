@@ -3,7 +3,7 @@ use rayon::iter::Either;
 use crate::{Alignment, AlignmentType, ReadingFrame, translation::codon_at};
 
 /// A grid representing an alignment
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Grid<'alignment> {
     alignment: &'alignment Alignment,
     alignment_type: AlignmentType,
