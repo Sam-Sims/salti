@@ -83,7 +83,7 @@ impl Alignment {
             .iter()
             .map(|seq| seq.id.chars().count())
             .max()
-            .expect("new should reject an empty alignment")
+            .unwrap_or_default()
     }
 
     /// Returns the type detected by [`new`](Self::new)
