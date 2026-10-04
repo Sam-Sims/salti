@@ -2,8 +2,6 @@ use std::ops::Range;
 
 use crate::residue::{UNKNOWN_AMINO_ACID, nucleotide_index};
 
-/// Standard translation table, laid out `[first][second][third]` with
-/// nucleotides indexed in `A, T, C, G` order.
 const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
     [*b"KNNK", *b"IIIM", *b"TTTT", *b"RSSR"],
     [*b"*YY*", *b"LFFL", *b"SSSS", *b"*CCW"],
@@ -11,7 +9,7 @@ const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
     [*b"EDDE", *b"VVVV", *b"AAAA", *b"GGGG"],
 ];
 
-/// Reading frames for translating.
+/// A forward reading frame, which sets the nucleotide column the first codon starts at
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReadingFrame {
     Frame1,
@@ -20,6 +18,7 @@ pub enum ReadingFrame {
 }
 
 impl ReadingFrame {
+    /// Returns the name that [`FromStr`](std::str::FromStr) parses
     pub const fn name(self) -> &'static str {
         match self {
             Self::Frame1 => "1",
@@ -28,11 +27,12 @@ impl ReadingFrame {
         }
     }
 
+    /// Returns every frame
     pub const fn all() -> [Self; 3] {
         [Self::Frame1, Self::Frame2, Self::Frame3]
     }
 
-    /// Returns the nucleotide offset for this reading frame.
+    /// Returns the nucleotide column the first codon starts at
     pub const fn offset(self) -> usize {
         match self {
             Self::Frame1 => 0,
@@ -41,13 +41,16 @@ impl ReadingFrame {
         }
     }
 
-    /// Returns the nucleotide columns that span the codon given at `protein_col`
     pub(crate) const fn nt_range(self, protein_col: usize) -> Range<usize> {
         let start = self.offset() + 3 * protein_col;
         start..start + 3
     }
 
-    /// Returns the protein columns where codons overlap the input `nt` range
+    /// Returns the protein columns whose codons overlap `nt_range`, clipped to the translated
+    /// length of `nt_width`
+    ///
+    /// `nt_range` must not be empty. Nucleotides before the offset belong to no codon, so a range
+    /// that ends before it gives `0..0` and a start before it maps to 0
     pub fn protein_range(self, nt_range: Range<usize>, nt_width: usize) -> Range<usize> {
         debug_assert!(!nt_range.is_empty(), "dont give an empty nt range");
         let len = self.translated_length(nt_width);
@@ -59,8 +62,7 @@ impl ReadingFrame {
         start..end
     }
 
-    /// Returns the protein column for an absolute nucleotide column, or `None`
-    /// when the column lies before this frame's offset.
+    /// Returns the protein column that `absolute_nuc_col` falls in, or `None` before the offset
     pub const fn protein_col(self, absolute_nuc_col: usize) -> Option<usize> {
         let offset = self.offset();
         if absolute_nuc_col < offset {
@@ -70,8 +72,9 @@ impl ReadingFrame {
         Some((absolute_nuc_col - offset) / 3)
     }
 
-    /// Returns the translated protein length for a nucleotide sequence length,
-    /// counting incomplete terminal codons that translate to `X`.
+    /// Returns the number of protein columns for `nucleotide_length` nucleotide columns
+    ///
+    /// A trailing partial codon counts as one column, which reads as `X`
     pub const fn translated_length(self, nucleotide_length: usize) -> usize {
         let offset = self.offset();
         if nucleotide_length <= offset {
@@ -99,10 +102,6 @@ impl std::str::FromStr for ReadingFrame {
     }
 }
 
-/// Returns the amino acid byte for the input `codon` in input `sequence` translated
-/// with the standard table.
-///
-/// A truncated codon at the end will return as the `UNKNOWN_AMINO_ACID` char
 pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
     assert!(codon.start < sequence.len(), "col should be below width");
     match sequence.get(codon) {

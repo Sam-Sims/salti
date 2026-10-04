@@ -1,8 +1,9 @@
+//! Rules for single residue bytes
+
 use crate::alignment_type::AlignmentType;
 
 const GAP: u8 = b'-';
 
-/// The amino acid symbol for a residue that is unknown or cannot be translated.
 pub(crate) const UNKNOWN_AMINO_ACID: u8 = b'X';
 
 const INVALID_NUCLEOTIDE: u8 = 4;
@@ -26,16 +27,15 @@ const fn build_nucleotide_index_table() -> [u8; 256] {
     table
 }
 
-/// Returns `true` if `byte` is a gap.
+/// Returns true if `byte` is a gap. Only `-` is a gap
 #[inline]
 pub const fn is_gap(byte: u8) -> bool {
     byte == GAP
 }
 
-/// Returns `true` if `byte` is unknown symbol for `kind`.
+/// Returns true if `byte` is the unknown symbol for `kind`
 ///
-/// DNA uses `N`/`n` and protein uses `X`/`x`. Generic alignments have no
-/// unknown symbol.
+/// DNA uses `N` or `n`, protein uses `X` or `x`, and generic has none
 #[inline]
 pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
     match kind {
@@ -45,9 +45,9 @@ pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
     }
 }
 
-/// Returns the codon index of a nucleotide, case-insensitive.
+/// Returns the index of a nucleotide in a codon, case-insensitive
 ///
-/// `A` = 0, `T`/`U` = 1, `C` = 2, `G` = 3. Any other byte returns `None`.
+/// `A` is 0, `T` and `U` are 1, `C` is 2 and `G` is 3. Any other byte is `None`
 #[inline]
 pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     match NUCLEOTIDE_INDEX_TABLE[byte as usize] {
@@ -56,9 +56,6 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     }
 }
 
-/// Returns `true` if `byte` is a nucleotide symbol used for type detection, case-insensitive.
-///
-/// Includes IUPAC ambiguity codes. Gaps are not included.
 #[inline]
 pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
     matches!(
@@ -81,9 +78,6 @@ pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
     )
 }
 
-/// Returns `true` if `byte` is a protein symbol used for type detection, case-insensitive.
-///
-/// Gaps are not included.
 #[inline]
 pub(crate) const fn is_detection_protein(byte: u8) -> bool {
     matches!(

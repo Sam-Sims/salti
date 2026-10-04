@@ -7,10 +7,14 @@ use crate::{
 };
 
 impl Grid<'_> {
-    /// Returns a summary for each id in `cols`.
+    /// Returns a summary of each id in `cols` over `rows`, in `cols` order
     ///
-    /// Ids may be in any order and may repeat. With no `rows`, every summary
-    /// has no consensus and zero conservation.
+    /// Ids may be in any order and may repeat, and each occurrence is counted. With no `rows`,
+    /// every summary has no consensus and a conservation of zero
+    ///
+    /// # Panics
+    ///
+    /// If an id in `rows` or `cols` is out of range, as for [`cells`](Self::cells)
     pub fn summaries(
         self,
         rows: &[usize],
@@ -31,6 +35,14 @@ impl Grid<'_> {
             .collect()
     }
 
+    /// Returns the consensus of every cell in `rows` and `cols` counted together
+    ///
+    /// Ids may repeat, and each occurrence is counted. `None` when nothing is counted, which
+    /// includes empty `rows` or `cols`
+    ///
+    /// # Panics
+    ///
+    /// If an id in `rows` or `cols` is out of range, as for [`cells`](Self::cells)
     pub fn consensus(self, rows: &[usize], cols: &[usize], method: ConsensusMethod) -> Option<u8> {
         let pooled = count_blocks(self, rows, cols)
             .flat_map_iter(|(_, counts)| counts)
@@ -43,43 +55,76 @@ impl Grid<'_> {
             );
         consensus_from_counts(&pooled, method)
     }
+
+    /// Returns the ids of the columns that pass `filter` over `rows`, in ascending order
+    ///
+    /// An inactive filter keeps every column without counting. With no `rows`, every column passes
+    ///
+    /// # Panics
+    ///
+    /// If an id in `rows` is not below the row count
+    pub fn kept_columns(self, rows: &[usize], filter: ColumnFilter) -> Vec<usize> {
+        let cols: Vec<usize> = (0..self.width()).collect();
+        if !filter.is_active() {
+            return cols;
+        }
+
+        let alignment_type = self.alignment_type();
+        count_blocks(self, rows, &cols)
+            .flat_map_iter(|(block, counts)| {
+                block
+                    .iter()
+                    .zip(counts)
+                    .filter(move |(_, counts)| {
+                        let gap_ok = filter
+                            .max_gap_fraction
+                            .is_none_or(|threshold| gap_fraction_from_counts(counts) <= threshold);
+                        let const_ok = filter.min_const_fraction.is_none_or(|threshold| {
+                            max_counted_symbol_fraction_from_counts(counts, alignment_type)
+                                .is_none_or(|fraction| fraction < threshold)
+                        });
+                        gap_ok && const_ok
+                    })
+                    .map(|(&col, _)| col)
+            })
+            .collect()
+    }
 }
 
-/// Calculated values for a single alignment column.
+/// The consensus and conservation of one column
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnSummary {
-    /// The most frequent byte in the column under the chosen [`ConsensusMethod`].
+    /// The most common byte under the chosen [`ConsensusMethod`]
     ///
-    /// Ties go to the lowest byte; see [`ConsensusMethod`]. `None` when no byte
-    /// was counted, such as an all-gap column under [`ConsensusMethod::MajorityNonGap`].
+    /// `None` when nothing is counted, such as an all-gap column under
+    /// [`ConsensusMethod::MajorityNonGap`]
     pub consensus: Option<u8>,
+    /// How conserved the column is, from 0 to 1
+    ///
+    /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
+    /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
+    /// grids, which have no alphabet
     pub conservation: Option<f32>,
 }
 
-/// Selects how consensus bytes are chosen for alignment columns.
-///
-/// Different methods vary in whether gap characters are considered when
-/// determining the representative byte for a column.
+/// How the consensus byte of a column is chosen
 ///
 /// # Ties
 ///
-/// When several bytes share the highest count, the one with the lowest ASCII
-/// value wins, so the result is deterministic. Bytes are compared as-is, which
-/// means:
-///
-/// - `A` beats `C`, and `C` beats `T`.
-/// - Uppercase beats lowercase, so `T` beats `a`.
-/// - Under [`ConsensusMethod::Majority`], gaps (`-`, `.`) and `*` beat every letter.
+/// When several bytes share the highest count, the lowest byte wins. Bytes are compared as
+/// they are, so `A` beats `C`, uppercase beats lowercase, and under
+/// [`ConsensusMethod::Majority`] a gap (`-`) or `*` beats every letter
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConsensusMethod {
-    /// Chooses the most frequent byte, including gap characters.
+    /// The most common byte, gaps included
     Majority,
-    /// Chooses the most frequent non-gap byte.
+    /// The most common byte that isn't a gap
     #[default]
     MajorityNonGap,
 }
 
 impl ConsensusMethod {
+    /// Returns name
     pub const fn name(self) -> &'static str {
         match self {
             Self::Majority => "majority",
@@ -87,6 +132,7 @@ impl ConsensusMethod {
         }
     }
 
+    /// Returns every method
     pub const fn all() -> [Self; 2] {
         [Self::Majority, Self::MajorityNonGap]
     }
@@ -109,7 +155,24 @@ impl std::str::FromStr for ConsensusMethod {
     }
 }
 
-pub(crate) fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
+/// Rules for hiding columns. `None` turns a rule off, and both fractions are in `0.0..=1.0`
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ColumnFilter {
+    /// Hides columns whose fraction of gaps is above this
+    pub max_gap_fraction: Option<f32>,
+    /// Hides columns whose most common residue makes up at least this fraction of the
+    /// residues that aren't gaps or unknown
+    pub min_const_fraction: Option<f32>,
+}
+
+impl ColumnFilter {
+    /// Returns true if either rule is on
+    pub fn is_active(self) -> bool {
+        self.max_gap_fraction.is_some() || self.min_const_fraction.is_some()
+    }
+}
+
+fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
     let total: u32 = counts.iter().sum();
     let gap_count: u32 = symbol_counts(counts)
         .filter(|&(symbol, _)| residue::is_gap(symbol))
@@ -123,7 +186,7 @@ pub(crate) fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
     }
 }
 
-pub(crate) fn max_counted_symbol_fraction_from_counts(
+fn max_counted_symbol_fraction_from_counts(
     counts: &[u32; 128],
     kind: AlignmentType,
 ) -> Option<f32> {
@@ -205,10 +268,10 @@ mod tests {
     use rstest::rstest;
 
     use super::{
-        ConsensusMethod, consensus_from_counts, conservation_from_counts, gap_fraction_from_counts,
-        max_counted_symbol_fraction_from_counts,
+        ColumnFilter, ConsensusMethod, consensus_from_counts, conservation_from_counts,
+        gap_fraction_from_counts, max_counted_symbol_fraction_from_counts,
     };
-    use crate::{Alignment, AlignmentType, RawSequence, ReadingFrame};
+    use crate::{Alignment, AlignmentType, ReadingFrame, Sequence};
 
     const DNA_MAX_ENTROPY: f64 = 2.0;
 
@@ -221,15 +284,15 @@ mod tests {
     }
 
     fn dna(sequences: &[&[u8]]) -> Alignment {
-        Alignment::new_with_type(
+        Alignment::new(
             sequences
                 .iter()
                 .enumerate()
-                .map(|(i, sequence)| RawSequence {
+                .map(|(i, sequence)| Sequence {
                     id: format!("s{i}"),
-                    sequence: sequence.to_vec(),
-                }),
-            AlignmentType::Dna,
+                    residues: sequence.to_vec(),
+                })
+                .collect(),
         )
         .unwrap()
     }
@@ -468,6 +531,81 @@ mod tests {
         assert_eq!(
             max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
             None
+        );
+    }
+
+    fn filter_sample() -> Alignment {
+        dna(&[b"AAAANN", b"AACANN", b"A-GC-N", b"A-T-A-"])
+    }
+
+    fn filter(max_gap_fraction: Option<f32>, min_const_fraction: Option<f32>) -> ColumnFilter {
+        ColumnFilter {
+            max_gap_fraction,
+            min_const_fraction,
+        }
+    }
+
+    #[rstest]
+    #[case::inactive(&[0, 1, 2, 3], filter(None, None), &[0, 1, 2, 3, 4, 5])]
+    #[case::gap_zero(&[0, 1, 2, 3], filter(Some(0.0), None), &[0, 2])]
+    #[case::gap_at_threshold_kept(&[0, 1, 2, 3], filter(Some(0.25), None), &[0, 2, 3, 4, 5])]
+    #[case::const_below_threshold_kept(&[0, 1, 2, 3], filter(None, Some(1.0)), &[2, 3, 5])]
+    #[case::const_at_threshold_dropped(&[0, 1, 2, 3], filter(None, Some(2.0 / 3.0)), &[2, 5])]
+    #[case::gap_and_const(&[0, 1, 2, 3], filter(Some(0.0), Some(1.0)), &[2])]
+    #[case::subset_rows(&[0, 1], filter(None, Some(1.0)), &[2, 4, 5])]
+    #[case::no_rows(&[], filter(Some(0.0), Some(0.5)), &[0, 1, 2, 3, 4, 5])]
+    fn kept_columns_works(
+        #[case] rows: &[usize],
+        #[case] filter: ColumnFilter,
+        #[case] expected: &[usize],
+    ) {
+        let alignment = filter_sample();
+        assert_eq!(
+            alignment
+                .grid(AlignmentType::Dna)
+                .kept_columns(rows, filter),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::dna(AlignmentType::Dna, &[2, 3, 5])]
+    #[case::generic(AlignmentType::Generic, &[2, 3, 4])]
+    fn kept_columns_uses_grid_alignment_type(
+        #[case] alignment_type: AlignmentType,
+        #[case] expected: &[usize],
+    ) {
+        let alignment = filter_sample();
+        assert_eq!(
+            alignment
+                .grid(alignment_type)
+                .kept_columns(&[0, 1, 2, 3], filter(None, Some(1.0))),
+            expected
+        );
+    }
+
+    #[test]
+    fn kept_columns_keeps_ids_across_blocks() {
+        let row: Vec<u8> = b"-AC".iter().copied().cycle().take(300).collect();
+        let alignment = dna(&[&row]);
+        let expected: Vec<usize> = (0..300).filter(|col| col % 3 != 0).collect();
+
+        assert_eq!(
+            alignment
+                .grid(AlignmentType::Dna)
+                .kept_columns(&[0], filter(Some(0.0), None)),
+            expected
+        );
+    }
+
+    #[test]
+    fn kept_columns_reads_translated_grid() {
+        let alignment = dna(&[b"ATGCCC", b"ATGAAA"]);
+        assert_eq!(
+            alignment
+                .translated_grid(ReadingFrame::Frame1)
+                .kept_columns(&[0, 1], filter(None, Some(1.0))),
+            [1]
         );
     }
 }

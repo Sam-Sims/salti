@@ -59,20 +59,21 @@ mod tests {
     use rstest::rstest;
 
     use super::{add_counts, count_blocks, symbol_index};
-    use crate::{Alignment, AlignmentType, Grid, RawSequence};
+    use crate::{Alignment, AlignmentType, Grid, Sequence};
 
     const ROWS: usize = 600;
     const COLS: usize = 300;
 
     fn alignment() -> Alignment {
-        Alignment::new_with_type(
-            (0..ROWS).map(|row| RawSequence {
-                id: format!("s{row}"),
-                sequence: (0..COLS)
-                    .map(|col| b"ACGT-"[(row * 7 + col * 13) % 5])
-                    .collect(),
-            }),
-            AlignmentType::Dna,
+        Alignment::new(
+            (0..ROWS)
+                .map(|row| Sequence {
+                    id: format!("s{row}"),
+                    residues: (0..COLS)
+                        .map(|col| b"ACGT-"[(row * 7 + col * 13) % 5])
+                        .collect(),
+                })
+                .collect(),
         )
         .unwrap()
     }

@@ -1,174 +1,163 @@
-use std::sync::Arc;
-
 use crate::{
-    alignment_type::AlignmentType,
-    data::{AlignmentData, RawSequence},
-    detection::detect_alignment_type,
+    alignment_type::{AlignmentType, detect_alignment_type},
     error::AlignmentError,
 };
 
-/// A multiple sequence alignment.
-///
-/// `Alignment` stores a set of equal-length sequences together with
-/// the current view over that data. The view can expose all rows and columns or
-/// a filtered projection, while still preserving absolute row and column
-/// coordinates into the underlying alignment.
-#[derive(Debug, Clone)]
+/// One row of an [`Alignment`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sequence {
+    pub id: String,
+    pub residues: Vec<u8>,
+}
+
+/// A multiple sequence alignment
+#[derive(Debug)]
 pub struct Alignment {
-    pub(crate) data: Arc<AlignmentData>,
+    sequences: Vec<Sequence>,
+    width: usize,
     detected_type: AlignmentType,
 }
 
 impl Alignment {
-    /// Creates an alignment from raw sequences and detects its kind.
-    ///
-    /// The returned alignment starts with all rows and columns visible. The detected kind becomes both the
-    /// detected kind and the active kind for the new alignment.
+    /// Creates an alignment from `sequences` and detects its type
     ///
     /// # Errors
     ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
+    /// Checks row by row and returns the first error found:
     ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    pub fn new(seqs: impl IntoIterator<Item = RawSequence>) -> Result<Self, AlignmentError> {
-        let data = data_from_raw_sequences(seqs)?;
-        let detected = detect_alignment_type(&data);
-        Ok(Self::from_data(data, detected))
-    }
-
-    /// Creates an alignment from raw sequences with an explicit type.
-    ///
-    /// This constructor skips type detection. The returned alignment starts with all rows and columns
-    /// visible, and the supplied `kind` is recorded as both the detected kind and the active kind.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
-    ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    #[cfg(test)]
-    pub(crate) fn new_with_type(
-        seqs: impl IntoIterator<Item = RawSequence>,
-        kind: AlignmentType,
-    ) -> Result<Self, AlignmentError> {
-        let data = data_from_raw_sequences(seqs)?;
-        Ok(Self::from_data(data, kind))
-    }
-
-    pub(crate) fn from_data(data: AlignmentData, alignment_type: AlignmentType) -> Self {
-        Self {
-            data: Arc::new(data),
-            detected_type: alignment_type,
+    /// - [`AlignmentError::Empty`] if there are no sequences
+    /// - [`AlignmentError::EmptySequence`] if the first sequence has no residues
+    /// - [`AlignmentError::NonAsciiSequence`] if a sequence has a byte outside ASCII
+    /// - [`AlignmentError::LengthMismatch`] if a sequence's length differs from the first
+    ///   sequence's, which includes a later empty sequence
+    pub fn new(sequences: Vec<Sequence>) -> Result<Self, AlignmentError> {
+        let first = sequences.first().ok_or(AlignmentError::Empty)?;
+        let width = first.residues.len();
+        if width == 0 {
+            return Err(AlignmentError::EmptySequence {
+                id: first.id.clone(),
+            });
         }
+        for seq in &sequences {
+            if !seq.residues.is_ascii() {
+                return Err(AlignmentError::NonAsciiSequence { id: seq.id.clone() });
+            }
+            if seq.residues.len() != width {
+                return Err(AlignmentError::LengthMismatch {
+                    expected: width,
+                    actual: seq.residues.len(),
+                    id: seq.id.clone(),
+                });
+            }
+        }
+        let detected_type = detect_alignment_type(&sequences);
+        Ok(Self {
+            sequences,
+            width,
+            detected_type,
+        })
     }
 
-    /// Returns number of columns
+    /// Returns the number of columns
     pub fn width(&self) -> usize {
-        self.data.length
+        self.width
     }
 
-    /// Returns the id for the given `row`
+    /// Returns the identifier of `row`
+    ///
+    /// # Panics
+    ///
+    /// If `row` is not below [`row_count`](Self::row_count)
     pub fn id(&self, row: usize) -> &str {
-        &self
-            .data
-            .sequences
+        &self.row(row).id
+    }
+
+    /// Returns the number of rows
+    pub fn row_count(&self) -> usize {
+        self.sequences.len()
+    }
+
+    /// Returns the length in characters of the longest identifier
+    pub fn max_id_len(&self) -> usize {
+        self.sequences
+            .iter()
+            .map(|seq| seq.id.chars().count())
+            .max()
+            .expect("new should reject an empty alignment")
+    }
+
+    /// Returns the type detected by [`new`](Self::new)
+    pub fn detected_type(&self) -> AlignmentType {
+        self.detected_type
+    }
+
+    pub(crate) fn row(&self, row: usize) -> &Sequence {
+        self.sequences
             .get(row)
             .expect("row id should be below the row count")
-            .id
     }
-
-    /// Returns the number of visible sequences.
-    ///
-    /// This is the length of the alignment's current row projection. For a filtered alignment, it
-    /// returns the number of rows that remain visible after filtering.
-    pub fn row_count(&self) -> usize {
-        todo!()
-    }
-
-    /// Returns the length in characters of the longest visible sequence identifier, or `0` if no sequences are visible.
-    pub fn max_id_len(&self) -> usize {
-        todo!()
-    }
-}
-
-fn data_from_raw_sequences(
-    sequences: impl IntoIterator<Item = RawSequence>,
-) -> Result<AlignmentData, AlignmentError> {
-    let sequences = sequences
-        .into_iter()
-        .map(TryInto::try_into)
-        .collect::<Result<Vec<_>, _>>()?;
-    AlignmentData::new(sequences)
 }
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
-    use crate::alignment_type::AlignmentType;
 
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
+    fn seq(id: &str, residues: &[u8]) -> Sequence {
+        Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: residues.to_vec(),
         }
     }
 
-    #[test]
-    fn constructs_valid_alignment() {
-        let alignment = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")]).unwrap();
-        assert_eq!(alignment.width(), 4);
-        assert_eq!(alignment.row_count(), 2);
-        assert_eq!(alignment.detected_type(), AlignmentType::Dna);
+    #[rstest]
+    #[case::dna(vec![seq("s0", b"ACGT"), seq("s1", b"TGCA")], 4, AlignmentType::Dna)]
+    #[case::every_ascii_byte(
+        vec![seq("s0", &(0..=0x7f).collect::<Vec<u8>>())],
+        128,
+        AlignmentType::Generic
+    )]
+    fn new_works(
+        #[case] sequences: Vec<Sequence>,
+        #[case] width: usize,
+        #[case] detected_type: AlignmentType,
+    ) {
+        let row_count = sequences.len();
+        let alignment = Alignment::new(sequences).unwrap();
+        assert_eq!(alignment.width(), width);
+        assert_eq!(alignment.row_count(), row_count);
+        assert_eq!(alignment.detected_type(), detected_type);
     }
 
-    #[test]
-    fn new_with_kind_skips_detection() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")],
-            AlignmentType::Protein,
-        )
-        .unwrap();
-        assert_eq!(alignment.detected_type(), AlignmentType::Protein);
+    #[rstest]
+    #[case::empty(vec![], AlignmentError::Empty)]
+    #[case::empty_sequence(
+        vec![seq("s0", b"")],
+        AlignmentError::EmptySequence { id: "s0".to_string() }
+    )]
+    #[case::non_ascii(
+        vec![seq("s0", b"ACGT"), seq("s1", &[b'A', b'C', b'G', 0x80])],
+        AlignmentError::NonAsciiSequence { id: "s1".to_string() }
+    )]
+    #[case::length_mismatch(
+        vec![seq("s0", b"ACGT"), seq("s1", b"ACG")],
+        AlignmentError::LengthMismatch { expected: 4, actual: 3, id: "s1".to_string() }
+    )]
+    #[case::first_bad_row_wins(
+        vec![seq("s0", b"ACGT"), seq("s1", &[b'A', b'C', b'G', 0xff]), seq("s2", b"AC")],
+        AlignmentError::NonAsciiSequence { id: "s1".to_string() }
+    )]
+    fn new_rejects(#[case] sequences: Vec<Sequence>, #[case] expected: AlignmentError) {
+        assert_eq!(Alignment::new(sequences).unwrap_err(), expected);
     }
 
-    #[test]
-    fn rejects_empty_alignment() {
-        let result = Alignment::new(vec![]);
-        assert!(matches!(result, Err(AlignmentError::Empty)));
-    }
-
-    #[test]
-    fn rejects_mismatched_lengths() {
-        let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"ACG")]);
-        assert!(matches!(result, Err(AlignmentError::LengthMismatch { .. })));
-    }
-
-    #[test]
-    fn rejects_non_ascii_bytes_with_sequence_id() {
-        for byte in [0x80, 0xc3, 0xff] {
-            let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", &[b'A', byte])]);
-            assert_eq!(
-                result.unwrap_err(),
-                AlignmentError::NonAsciiSequence {
-                    id: "seq-2".to_string()
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_every_ascii_byte() {
-        let every_ascii: Vec<u8> = (0..=0x7f).collect();
-        let alignment =
-            Alignment::new(vec![raw("seq-1", &every_ascii), raw("seq-2", &every_ascii)]).unwrap();
-        assert_eq!(alignment.width(), 128);
+    #[rstest]
+    #[case::single(&["seq-1"], 5)]
+    #[case::longest_not_first(&["a", "longest", "mid"], 7)]
+    #[case::counts_chars_not_bytes(&["αβγ", "ab"], 3)]
+    fn max_id_len_works(#[case] ids: &[&str], #[case] expected: usize) {
+        let alignment = Alignment::new(ids.iter().map(|id| seq(id, b"A")).collect()).unwrap();
+        assert_eq!(alignment.max_id_len(), expected);
     }
 }

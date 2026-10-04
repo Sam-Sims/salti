@@ -2,7 +2,9 @@ use rayon::iter::Either;
 
 use crate::{Alignment, AlignmentType, ReadingFrame, translation::codon_at};
 
-/// A grid representing an alignment
+/// Reads the cells of an [`Alignment`], either as stored or translated in a reading frame
+///
+/// Row ids are rows of the alignment. Column ids are columns of the grid
 #[derive(Debug, Clone, Copy)]
 pub struct Grid<'alignment> {
     alignment: &'alignment Alignment,
@@ -12,56 +14,55 @@ pub struct Grid<'alignment> {
 }
 
 impl Grid<'_> {
-    /// Return the number of columns in the grid
+    /// Returns the number of columns
     ///
-    /// When translated a truncated partial codon  at the end will
-    /// still count as X
+    /// When translated, a trailing partial codon counts as one column and reads as `X`
     pub fn width(self) -> usize {
         let width = self.alignment.width();
         self.frame
             .map_or(width, |frame| frame.translated_length(width))
     }
 
-    /// Returns current alignment type for grid
+    /// Returns the type of the cells, which is protein when translated
     pub fn alignment_type(self) -> AlignmentType {
         self.alignment_type
     }
 
-    /// Returns cells for `row` and `cols`
+    /// Returns the cells of `row` at each id in `cols`, in `cols` order
+    ///
+    /// Ids may be in any order and may repeat
+    ///
+    /// # Panics
+    ///
+    /// If `row` is not below the row count, or an id in `cols` is not below [`width`](Self::width)
     pub fn cells(self, row: usize, cols: &[usize]) -> impl Iterator<Item = u8> {
-        let sequence = &self
-            .alignment
-            .data
-            .sequences
-            .get(row)
-            .expect("row id should be below the row count")
-            .sequence;
+        let residues = &self.alignment.row(row).residues;
         match self.frame {
             None => Either::Left(
                 cols.iter()
-                    .map(move |&col| *sequence.get(col).expect("col id should be below the width")),
+                    .map(move |&col| *residues.get(col).expect("col id should be below the width")),
             ),
             Some(frame) => Either::Right(
                 cols.iter()
-                    .map(move |&protein_col| codon_at(sequence, frame.nt_range(protein_col))),
+                    .map(move |&protein_col| codon_at(residues, frame.nt_range(protein_col))),
             ),
         }
     }
 
     /// Returns the cell at `row` and `col`
     ///
-    /// A cell is the single byte at a given position
+    /// # Panics
+    ///
+    /// If `row` is not below the row count, or `col` is not below [`width`](Self::width)
     pub fn cell(self, row: usize, col: usize) -> u8 {
-        // shouldnt cant panic as next only gets one and salti will garunatee that
-        // we dont access anything out of bounds
         self.cells(row, &[col])
             .next()
-            .expect("cells should yeild only 1 byte")
+            .expect("cells should yield one byte per id")
     }
 }
 
 impl Alignment {
-    /// Returns a grid
+    /// Returns a grid that reads cells as stored, as `alignment_type`
     pub fn grid(&self, alignment_type: AlignmentType) -> Grid<'_> {
         Grid {
             alignment: self,
@@ -70,7 +71,10 @@ impl Alignment {
         }
     }
 
-    /// Returns a transalted grid, transalted in `frame`
+    /// Returns a grid that translates each codon in `frame` into one protein cell
+    ///
+    /// Doesn't check the alignment type. Callers need to check
+    /// [`AlignmentType::supports_translation`] first
     pub fn translated_grid(&self, frame: ReadingFrame) -> Grid<'_> {
         Grid {
             alignment: self,
@@ -85,18 +89,18 @@ mod tests {
     use rstest::rstest;
 
     use super::Grid;
-    use crate::{Alignment, AlignmentType, RawSequence, ReadingFrame};
+    use crate::{Alignment, AlignmentType, ReadingFrame, Sequence};
 
     fn dna(sequences: &[&[u8]]) -> Alignment {
-        Alignment::new_with_type(
+        Alignment::new(
             sequences
                 .iter()
                 .enumerate()
-                .map(|(i, sequence)| RawSequence {
+                .map(|(i, sequence)| Sequence {
                     id: format!("s{i}"),
-                    sequence: sequence.to_vec(),
-                }),
-            AlignmentType::Dna,
+                    residues: sequence.to_vec(),
+                })
+                .collect(),
         )
         .unwrap()
     }
