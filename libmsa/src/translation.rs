@@ -1,5 +1,4 @@
 use std::ops::Range;
-
 use rayon::prelude::*;
 
 use crate::{
@@ -42,12 +41,19 @@ impl ReadingFrame {
         }
     }
 
-    pub const fn codon() -> Range<usize> {
-        todo!()
+    /// Returns the nucleotide columns that span the codon given at `protein_col`
+    pub const fn nt_range(self, protein_col: usize) -> Range<usize> {
+        let start = self.offset() + 3 * protein_col;
+        start..start + 3
     }
 
-    pub const fn protein_range() -> Range<usize> {
-        todo!()
+    /// Returns the protein columns where codons overlap the input `nt` range
+    pub fn protein_range(self, nt: Range<usize>, nt_width: usize) -> Range<usize> {
+        debug_assert!(!nt.is_empty(), "dont give an empty nt range");
+        let len = self.translated_length(nt_width);
+        let start = self.protein_col(nt.start).unwrap_or(0).min(len);
+        let end = self.protein_col(nt.end - 1).map_or(0, |p| p + 1).min(len);
+        start..end
     }
 
     /// Returns the protein column for an absolute nucleotide column, or `None`
@@ -360,8 +366,18 @@ pub(crate) fn translate_codons<'a>(
         .chain((!incomplete.is_empty()).then_some(UNKNOWN_AMINO_ACID))
 }
 
+/// Returns the amino acid byte for the input `codon` in input `sequence` translated
+/// with the standard table.
+///
+/// A truncated codon at the end will return as the `UNKNOWN_AMINO_ACID` char
 pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>) -> u8 {
-    todo!()
+    let first = *sequence.get(codon.start).expect("col should be below width");
+    let (Some(&second), Some(&third)) =
+        (sequence.get(codon.start + 1), sequence.get(codon.start + 2))
+    else {
+        return UNKNOWN_AMINO_ACID;
+    };
+    TranslationTable::STANDARD.translate_codon([first, second, third])
 }
 
 pub(crate) fn translated_byte_at(

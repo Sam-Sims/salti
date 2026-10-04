@@ -33,17 +33,17 @@ impl<'alignment> Grid<'alignment> {
             .data
             .sequences
             .get(row)
-            .expect("row id should be below the row count, salti only holds rows that exist")
+            .expect("row id should be below the row count")
             .sequence;
         match self.frame {
             None => Either::Left(cols.iter().map(move |&col| {
                 *sequence
                     .get(col)
-                    .expect("col id should be below the width, salti only holds cols that exist")
+                    .expect("col id should be below the width")
             })),
             Some(frame) => Either::Right(
                 cols.iter()
-                    .map(move |&protein_col| codon_at(sequence, frame.codon(protein_col))),
+                    .map(move |&protein_col| codon_at(sequence, frame.nt_range(protein_col))),
             ),
         }
     }

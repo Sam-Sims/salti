@@ -118,8 +118,14 @@ impl Alignment {
         }
     }
 
-    pub fn width() {
-        todo!()
+    /// Returns number of columns
+    pub fn width(&self) -> usize {
+        self.data.length
+    }
+
+    /// Returns the id for the given `row`
+    pub fn id(&self, row: usize) -> &str {
+        &self.data.sequences.get(row).expect("row id should be below the row count").id
     }
 
     /// Returns the number of visible sequences.

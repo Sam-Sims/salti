@@ -4,7 +4,7 @@ mod data;
 pub mod detection;
 mod error;
 mod filter;
-pub mod grid;
+mod grid;
 mod metrics;
 mod model;
 mod projection;
@@ -21,3 +21,4 @@ pub use model::{Alignment, RowView};
 pub use translation::{
     ReadingFrame, TranslatedAlignment, TranslatedSequenceView, TranslationTable,
 };
+pub use grid::Grid;
