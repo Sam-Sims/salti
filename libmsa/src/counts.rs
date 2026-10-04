@@ -21,78 +21,30 @@ pub(crate) fn add_counts(total: &mut [u32; 128], other: &[u32; 128]) {
     }
 }
 
-struct ColumnCounts {
-    pending: Vec<[u16; 128]>,
-    totals: Vec<[u32; 128]>,
-    pending_rows: u16,
-}
-
-impl ColumnCounts {
-    fn new(width: usize) -> Self {
-        Self {
-            pending: vec![[0; 128]; width],
-            totals: vec![[0; 128]; width],
-            pending_rows: 0,
-        }
-    }
-
-    #[inline]
-    fn add_row(&mut self, bytes: impl IntoIterator<Item = u8>) {
-        let mut counted = 0;
-        for (table, byte) in self.pending.iter_mut().zip(bytes) {
-            table[symbol_index(byte)] += 1;
-            counted += 1;
-        }
-        debug_assert_eq!(counted, self.pending.len(), "one byte per column");
-        self.pending_rows += 1;
-        if self.pending_rows == u16::MAX {
-            self.flush();
-        }
-    }
-
-    fn into_totals(mut self) -> Vec<[u32; 128]> {
-        self.flush();
-        self.totals
-    }
-
-    fn flush(&mut self) {
-        for (total, pending) in self.totals.iter_mut().zip(&mut self.pending) {
-            for (total, pending) in total.iter_mut().zip(pending.iter_mut()) {
-                *total += u32::from(std::mem::take(pending));
-            }
-        }
-        self.pending_rows = 0;
-    }
-}
-
 fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
-    let count_row = |mut counts: ColumnCounts, &row: &usize| {
-        counts.add_row(grid.cells(row, block));
+    let count_row = |mut counts: Vec<[u32; 128]>, &row: &usize| {
+        for (table, byte) in counts.iter_mut().zip(grid.cells(row, block)) {
+            table[symbol_index(byte)] += 1;
+        }
         counts
     };
 
     // only go parallel if we actually need it
     if rows.len().saturating_mul(block.len()) < PARALLEL_MIN_CELLS {
-        return rows
-            .iter()
-            .fold(ColumnCounts::new(block.len()), count_row)
-            .into_totals();
+        return rows.iter().fold(vec![[0; 128]; block.len()], count_row);
     }
 
     rows.par_iter()
         .with_min_len(MIN_ROWS_PER_JOB)
-        .fold(|| ColumnCounts::new(block.len()), count_row)
-        .map(ColumnCounts::into_totals)
-        .reduce_with(merge_totals)
+        .fold(|| vec![[0; 128]; block.len()], count_row)
+        .reduce_with(|mut totals, other| {
+            debug_assert_eq!(totals.len(), other.len());
+            for (total, other) in totals.iter_mut().zip(&other) {
+                add_counts(total, other);
+            }
+            totals
+        })
         .expect("rows should not be empty above min cells")
-}
-
-fn merge_totals(mut totals: Vec<[u32; 128]>, other: Vec<[u32; 128]>) -> Vec<[u32; 128]> {
-    debug_assert_eq!(totals.len(), other.len());
-    for (total, other) in totals.iter_mut().zip(&other) {
-        add_counts(total, other);
-    }
-    totals
 }
 
 #[inline]
@@ -106,7 +58,7 @@ mod tests {
     use rayon::prelude::*;
     use rstest::rstest;
 
-    use super::{ColumnCounts, add_counts, count_blocks, symbol_index};
+    use super::{add_counts, count_blocks, symbol_index};
     use crate::{Alignment, AlignmentType, Grid, RawSequence};
 
     const ROWS: usize = 600;
@@ -157,34 +109,6 @@ mod tests {
                 .all(|block| block.len() <= super::MAX_BLOCK_COLUMNS)
         );
         assert_eq!(counts.concat(), expected_counts(grid, &rows, &cols));
-    }
-
-    #[test]
-    fn add_row_counts_each_column() {
-        let mut counts = ColumnCounts::new(3);
-        counts.add_row(b"AC-".iter().copied());
-        counts.add_row(b"AG-".iter().copied());
-
-        let totals = counts.into_totals();
-        assert_eq!(totals[0][symbol_index(b'A')], 2);
-        assert_eq!(totals[1][symbol_index(b'C')], 1);
-        assert_eq!(totals[1][symbol_index(b'G')], 1);
-        assert_eq!(totals[2][symbol_index(b'-')], 2);
-        assert_eq!(totals.iter().flatten().sum::<u32>(), 6);
-    }
-
-    #[test]
-    fn add_row_flushes_before_u16_overflow() {
-        let rows = 2 * u32::from(u16::MAX) + 10;
-        let mut counts = ColumnCounts::new(1);
-        for row in 0..rows {
-            let byte = if row % 3 == 0 { b'-' } else { b'A' };
-            counts.add_row([byte]);
-        }
-
-        let totals = counts.into_totals();
-        assert_eq!(totals[0][symbol_index(b'-')], rows.div_ceil(3));
-        assert_eq!(totals[0][symbol_index(b'A')], rows - rows.div_ceil(3));
     }
 
     #[test]
