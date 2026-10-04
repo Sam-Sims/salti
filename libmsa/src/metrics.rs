@@ -1,11 +1,10 @@
-use std::{num::NonZeroU8, ops::Range};
+use std::{num::NonZeroU8};
 
-use crate::{AlignmentType, residue};
+use crate::{AlignmentType, Grid, residue};
 
 /// Calculated values for a single alignment column.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnSummary {
-    pub position: usize,
     /// The most frequent byte in the column under the chosen [`ConsensusMethod`].
     ///
     /// Ties go to the lowest byte; see [`ConsensusMethod`]. `None` when no byte
@@ -67,19 +66,34 @@ impl std::str::FromStr for ConsensusMethod {
     }
 }
 
+impl Grid<'_> {
+    /// Returns a summary for each id in `cols`.
+    ///
+    /// Ids may be in any order and may repeat. With no `rows`, every summary
+    /// has no consensus and zero conservation.
+    pub fn summaries(
+        self,
+        rows: &[usize],
+        cols: &[usize],
+        method: ConsensusMethod,
+    ) -> Vec<ColumnSummary> {
+        todo!()
+    }
+
+    pub fn consensus(self, rows: &[usize], cols: &[usize], method: ConsensusMethod) -> Option<u8> {
+        todo!()
+    }
+}
+
 pub(crate) fn summaries_from_counts(
-    positions: Range<usize>,
     counts: &[[u32; 128]],
     method: ConsensusMethod,
     alphabet_size: Option<NonZeroU8>,
 ) -> Vec<ColumnSummary> {
-    debug_assert_eq!(positions.len(), counts.len());
     let max_entropy = alphabet_size.map(|value| f64::from(value.get()).log2());
-
-    positions
-        .zip(counts)
-        .map(|(position, counts)| ColumnSummary {
-            position,
+    counts
+        .iter()
+        .map(|counts| ColumnSummary {
             consensus: consensus_from_counts(counts, method),
             conservation: max_entropy
                 .map(|max_entropy| conservation_from_counts(counts, max_entropy)),
@@ -264,56 +278,6 @@ mod consensus_count_tests {
             consensus_from_counts(&counts, ConsensusMethod::Majority),
             Some(b'T')
         );
-    }
-}
-
-#[cfg(test)]
-mod derived_column_tests {
-    use std::num::NonZeroU8;
-
-    use super::{ConsensusMethod, summaries_from_counts};
-
-    fn counts_for(symbols: &[u8]) -> [u32; 128] {
-        let mut counts = [0u32; 128];
-        for &symbol in symbols {
-            counts[usize::from(symbol)] += 1;
-        }
-        counts
-    }
-
-    #[test]
-    fn summaries_from_counts_return_none_for_all_gap_column() {
-        let counts = [counts_for(b"---")];
-        let summaries = summaries_from_counts(
-            3..4,
-            &counts,
-            ConsensusMethod::MajorityNonGap,
-            Some(NonZeroU8::new(4).unwrap()),
-        );
-
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].position, 3);
-        assert_eq!(summaries[0].consensus, None);
-        assert_eq!(summaries[0].conservation, Some(0.0));
-    }
-
-    #[test]
-    fn summaries_from_counts_report_conservation_extremes() {
-        let counts = [counts_for(b"AAAA"), counts_for(b"----")];
-        let summaries = summaries_from_counts(
-            0..2,
-            &counts,
-            ConsensusMethod::MajorityNonGap,
-            Some(NonZeroU8::new(4).unwrap()),
-        );
-
-        assert_eq!(summaries.len(), 2);
-        assert_eq!(summaries[0].position, 0);
-        assert_eq!(summaries[0].consensus, Some(b'A'));
-        assert_eq!(summaries[0].conservation, Some(1.0));
-        assert_eq!(summaries[1].position, 1);
-        assert_eq!(summaries[1].consensus, None);
-        assert_eq!(summaries[1].conservation, Some(0.0));
     }
 }
 

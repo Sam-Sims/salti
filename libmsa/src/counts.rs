@@ -1,11 +1,22 @@
+use rayon::{prelude::*};
+
+use crate::Grid;
+
 const PARALLEL_MIN_CELLS: usize = 1 << 16;
 const MIN_ROWS_PER_JOB: usize = 128;
 const MAX_BLOCK_COLUMNS: usize = 128;
 
-#[inline]
-fn symbol_index(byte: u8) -> usize {
-    debug_assert!(byte.is_ascii(), "sequence bytes are ASCII");
-    usize::from(byte & 0x7f)
+pub(crate) fn count_blocks<'c>(
+    grid: Grid<'_>,
+    rows: &[usize],
+    cols: &'c [usize],
+) -> impl IndexedParallelIterator<Item = (&'c [usize], Vec<[u32; 128]>)> {
+    cols.par_chunks(MAX_BLOCK_COLUMNS)
+        .map(move |block| (block, count_rows(grid, rows, block)))
+}
+
+fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
+    todo!()
 }
 
 struct ColumnCounts {
@@ -50,6 +61,12 @@ impl ColumnCounts {
         }
         self.pending_rows = 0;
     }
+}
+
+#[inline]
+fn symbol_index(byte: u8) -> usize {
+    debug_assert!(byte.is_ascii(), "sequence bytes are ASCII");
+    usize::from(byte & 0x7f)
 }
 
 fn merge_totals(mut totals: Vec<[u32; 128]>, other: Vec<[u32; 128]>) -> Vec<[u32; 128]> {
