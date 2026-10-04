@@ -103,10 +103,64 @@ fn symbol_index(byte: u8) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnCounts, merge_totals, symbol_index};
+    use rayon::prelude::*;
+    use rstest::rstest;
+
+    use super::{ColumnCounts, add_counts, count_blocks, symbol_index};
+    use crate::{Alignment, AlignmentType, Grid, RawSequence};
+
+    const ROWS: usize = 600;
+    const COLS: usize = 300;
+
+    fn alignment() -> Alignment {
+        Alignment::new_with_type(
+            (0..ROWS).map(|row| RawSequence {
+                id: format!("s{row}"),
+                sequence: (0..COLS)
+                    .map(|col| b"ACGT-"[(row * 7 + col * 13) % 5])
+                    .collect(),
+            }),
+            AlignmentType::Dna,
+        )
+        .unwrap()
+    }
+
+    fn expected_counts(grid: Grid<'_>, rows: &[usize], cols: &[usize]) -> Vec<[u32; 128]> {
+        cols.iter()
+            .map(|&col| {
+                let mut counts = [0; 128];
+                for &row in rows {
+                    counts[symbol_index(grid.cell(row, col))] += 1;
+                }
+                counts
+            })
+            .collect()
+    }
+
+    #[rstest]
+    #[case::single_block((0..3).collect(), vec![2, 0, 2])]
+    #[case::across_blocks((0..3).collect(), (0..COLS).rev().collect())]
+    #[case::parallel_rows((0..ROWS).collect(), (0..200).collect())]
+    #[case::repeated_rows((0..ROWS).chain([5, 5]).collect(), (0..200).collect())]
+    #[case::no_rows(vec![], (0..200).collect())]
+    #[case::no_cols((0..3).collect(), vec![])]
+    fn count_blocks_works(#[case] rows: Vec<usize>, #[case] cols: Vec<usize>) {
+        let alignment = alignment();
+        let grid = alignment.grid(AlignmentType::Dna);
+
+        let (blocks, counts): (Vec<_>, Vec<_>) = count_blocks(grid, &rows, &cols).unzip();
+
+        assert_eq!(blocks.concat(), cols);
+        assert!(
+            blocks
+                .iter()
+                .all(|block| block.len() <= super::MAX_BLOCK_COLUMNS)
+        );
+        assert_eq!(counts.concat(), expected_counts(grid, &rows, &cols));
+    }
 
     #[test]
-    fn counts_each_column_separately() {
+    fn add_row_counts_each_column() {
         let mut counts = ColumnCounts::new(3);
         counts.add_row(b"AC-".iter().copied());
         counts.add_row(b"AG-".iter().copied());
@@ -120,8 +174,8 @@ mod tests {
     }
 
     #[test]
-    fn flushes_before_u16_overflow() {
-        let rows = 2 * usize::from(u16::MAX) + 10;
+    fn add_row_flushes_before_u16_overflow() {
+        let rows = 2 * u32::from(u16::MAX) + 10;
         let mut counts = ColumnCounts::new(1);
         for row in 0..rows {
             let byte = if row % 3 == 0 { b'-' } else { b'A' };
@@ -129,23 +183,22 @@ mod tests {
         }
 
         let totals = counts.into_totals();
-        assert_eq!(totals[0][symbol_index(b'-')], rows.div_ceil(3) as u32);
-        assert_eq!(
-            totals[0][symbol_index(b'A')],
-            (rows - rows.div_ceil(3)) as u32
-        );
+        assert_eq!(totals[0][symbol_index(b'-')], rows.div_ceil(3));
+        assert_eq!(totals[0][symbol_index(b'A')], rows - rows.div_ceil(3));
     }
 
     #[test]
-    fn merge_adds_totals() {
-        let mut left = ColumnCounts::new(2);
-        left.add_row(b"AC".iter().copied());
-        let mut right = ColumnCounts::new(2);
-        right.add_row(b"AT".iter().copied());
+    fn add_counts_works() {
+        let mut total = [0; 128];
+        total[symbol_index(b'A')] = 2;
+        let mut other = [0; 128];
+        other[symbol_index(b'A')] = 1;
+        other[symbol_index(b'C')] = 3;
 
-        let totals = merge_totals(left.into_totals(), right.into_totals());
-        assert_eq!(totals[0][symbol_index(b'A')], 2);
-        assert_eq!(totals[1][symbol_index(b'C')], 1);
-        assert_eq!(totals[1][symbol_index(b'T')], 1);
+        add_counts(&mut total, &other);
+
+        assert_eq!(total[symbol_index(b'A')], 3);
+        assert_eq!(total[symbol_index(b'C')], 3);
+        assert_eq!(total.iter().sum::<u32>(), 6);
     }
 }

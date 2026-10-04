@@ -215,12 +215,17 @@ const fn is_ignored_constant_symbol(byte: u8, kind: AlignmentType) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
+    use rstest::rstest;
+
     use super::{
-        ConsensusMethod, consensus_from_counts, conservation_from_counts,
+        ConsensusMethod, consensus_from_counts, conservation_from_counts, gap_fraction_from_counts,
         max_counted_symbol_fraction_from_counts,
     };
-    use crate::AlignmentType;
+    use crate::{Alignment, AlignmentType, RawSequence, ReadingFrame};
+
+    const DNA_MAX_ENTROPY: f64 = 2.0;
 
     fn counts_for(symbols: &[u8]) -> [u32; 128] {
         let mut counts = [0u32; 128];
@@ -230,147 +235,254 @@ mod tests {
         counts
     }
 
+    fn dna(sequences: &[&[u8]]) -> Alignment {
+        Alignment::new_with_type(
+            sequences
+                .iter()
+                .enumerate()
+                .map(|(i, sequence)| RawSequence {
+                    id: format!("s{i}"),
+                    sequence: sequence.to_vec(),
+                }),
+            AlignmentType::Dna,
+        )
+        .unwrap()
+    }
+
+    fn sample() -> Alignment {
+        dna(&[b"ACGT", b"ACGA", b"TTTA", b"--T-"])
+    }
+
+    #[rstest]
+    #[case::all(&[0, 1, 2], &[0, 1, 2, 3], b"ACGA")]
+    #[case::subset_rows(&[2], &[0, 1, 2, 3], b"TTTA")]
+    #[case::cols_unsorted_repeated(&[0, 1, 2], &[3, 0, 3], b"AAA")]
+    #[case::rows_repeated(&[2, 2, 0], &[0], b"T")]
+    fn summaries_works(#[case] rows: &[usize], #[case] cols: &[usize], #[case] expected: &[u8]) {
+        let alignment = sample();
+        let consensus: Vec<_> = alignment
+            .grid(AlignmentType::Dna)
+            .summaries(rows, cols, ConsensusMethod::MajorityNonGap)
+            .into_iter()
+            .map(|summary| summary.consensus)
+            .collect();
+        let expected: Vec<_> = expected.iter().copied().map(Some).collect();
+        assert_eq!(consensus, expected);
+    }
+
     #[test]
-    fn consensus_same() {
-        let counts = counts_for(b"AAAA");
+    fn summaries_is_empty() {
+        let alignment = sample();
+        let summaries =
+            alignment
+                .grid(AlignmentType::Dna)
+                .summaries(&[0, 1], &[], ConsensusMethod::Majority);
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn summaries_without_rows_has_no_consensus() {
+        let alignment = sample();
+        let summaries =
+            alignment
+                .grid(AlignmentType::Dna)
+                .summaries(&[], &[0, 1], ConsensusMethod::Majority);
+        for summary in summaries {
+            assert_eq!(summary.consensus, None);
+            assert_eq!(summary.conservation, Some(0.0));
+        }
+    }
+
+    #[rstest]
+    #[case::dna(AlignmentType::Dna, Some(1.0))]
+    #[case::generic(AlignmentType::Generic, None)]
+    fn summaries_uses_grid_alignment_type(
+        #[case] alignment_type: AlignmentType,
+        #[case] expected: Option<f32>,
+    ) {
+        let alignment = dna(&[b"A", b"A"]);
+        let summaries =
+            alignment
+                .grid(alignment_type)
+                .summaries(&[0, 1], &[0], ConsensusMethod::Majority);
+        assert_eq!(summaries[0].conservation, expected);
+    }
+
+    #[test]
+    fn summaries_keeps_cols_order_across_blocks() {
+        let row: Vec<u8> = b"ACGT".iter().copied().cycle().take(300).collect();
+        let alignment = dna(&[&row]);
+        let cols: Vec<usize> = (0..300).rev().collect();
+
+        let consensus: Vec<_> = alignment
+            .grid(AlignmentType::Dna)
+            .summaries(&[0], &cols, ConsensusMethod::Majority)
+            .into_iter()
+            .map(|summary| summary.consensus)
+            .collect();
+        let expected: Vec<_> = cols.iter().map(|&col| Some(row[col])).collect();
+        assert_eq!(consensus, expected);
+    }
+
+    #[test]
+    fn summaries_reads_translated_grid() {
+        let alignment = dna(&[b"ATGCCC"]);
+        let summaries = alignment.translated_grid(ReadingFrame::Frame1).summaries(
+            &[0],
+            &[1, 0],
+            ConsensusMethod::Majority,
+        );
+        let consensus: Vec<_> = summaries.iter().map(|summary| summary.consensus).collect();
+        assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
+    }
+
+    #[rstest]
+    #[case::subset(&[2], &[0, 1, 2], ConsensusMethod::Majority, b'T')]
+    #[case::pools_rows_and_cols(&[0, 1], &[0, 1, 2, 3], ConsensusMethod::Majority, b'A')]
+    #[case::cols_repeated(&[0], &[1, 1, 0], ConsensusMethod::Majority, b'C')]
+    #[case::majority(&[3], &[0, 1, 2, 3], ConsensusMethod::Majority, b'-')]
+    #[case::majority_non_gap(&[3], &[0, 1, 2, 3], ConsensusMethod::MajorityNonGap, b'T')]
+    fn consensus_works(
+        #[case] rows: &[usize],
+        #[case] cols: &[usize],
+        #[case] method: ConsensusMethod,
+        #[case] expected: u8,
+    ) {
+        let alignment = sample();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
-            Some(b'A')
+            alignment
+                .grid(AlignmentType::Dna)
+                .consensus(rows, cols, method),
+            Some(expected)
         );
     }
 
     #[test]
-    fn consensus_majority_gap() {
-        let counts = counts_for(b"---AT");
+    fn consensus_pools_across_blocks() {
+        let row = [vec![b'A'; 128], vec![b'C'; 129]].concat();
+        let alignment = dna(&[&row]);
+        let cols: Vec<usize> = (0..row.len()).collect();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
-            Some(b'-')
+            alignment
+                .grid(AlignmentType::Dna)
+                .consensus(&[0], &cols, ConsensusMethod::Majority),
+            Some(b'C')
         );
     }
 
-    #[test]
-    fn consensus_majority_nongap_excludes_gaps() {
-        let counts = counts_for(b"---AAT");
+    #[rstest]
+    #[case::no_rows(&[], &[0, 1])]
+    #[case::no_cols(&[0, 1], &[])]
+    fn consensus_is_none(#[case] rows: &[usize], #[case] cols: &[usize]) {
+        let alignment = sample();
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::MajorityNonGap),
-            Some(b'A')
-        );
-    }
-
-    #[test]
-    fn consensus_no_candidates_returns_none() {
-        let counts = [0u32; 128];
-        assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
+            alignment
+                .grid(AlignmentType::Dna)
+                .consensus(rows, cols, ConsensusMethod::Majority),
             None
         );
     }
 
+    #[rstest]
+    fn consensus_method_from_str_agrees_with_name(
+        #[values(ConsensusMethod::Majority, ConsensusMethod::MajorityNonGap)]
+        method: ConsensusMethod,
+    ) {
+        assert_eq!(method.name().parse(), Ok(method));
+    }
+
     #[test]
-    fn consensus_tie_picks_lowest_byte() {
-        let counts = counts_for(b"TTCCAA");
+    fn consensus_method_from_str_rejects_unknown() {
+        assert_eq!("majority-gap".parse::<ConsensusMethod>(), Err(()));
+    }
+
+    #[rstest]
+    #[case::single(ConsensusMethod::Majority, b"AAAA", b'A')]
+    #[case::majority_counts_gaps(ConsensusMethod::Majority, b"---AT", b'-')]
+    #[case::non_gap_skips_gaps(ConsensusMethod::MajorityNonGap, b"---AAT", b'A')]
+    #[case::higher_count_beats_lower_byte(ConsensusMethod::Majority, b"ACCTTT", b'T')]
+    #[case::tie_picks_lowest_byte(ConsensusMethod::Majority, b"TTCCAA", b'A')]
+    #[case::tie_uppercase_beats_lowercase(ConsensusMethod::Majority, b"aaTT", b'T')]
+    #[case::majority_tie_prefers_gap(ConsensusMethod::Majority, b"--AA", b'-')]
+    #[case::non_gap_tie_ignores_gap(ConsensusMethod::MajorityNonGap, b"---GGTT", b'G')]
+    fn consensus_from_counts_works(
+        #[case] method: ConsensusMethod,
+        #[case] symbols: &[u8],
+        #[case] expected: u8,
+    ) {
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
-            Some(b'A')
+            consensus_from_counts(&counts_for(symbols), method),
+            Some(expected)
         );
     }
 
-    #[test]
-    fn consensus_majority_tie_prefers_gap() {
-        let counts = counts_for(b"--AA");
+    #[rstest]
+    #[case::empty_majority(ConsensusMethod::Majority, b"")]
+    #[case::empty_non_gap(ConsensusMethod::MajorityNonGap, b"")]
+    #[case::all_gaps_non_gap(ConsensusMethod::MajorityNonGap, b"---")]
+    fn consensus_from_counts_is_none(#[case] method: ConsensusMethod, #[case] symbols: &[u8]) {
+        assert_eq!(consensus_from_counts(&counts_for(symbols), method), None);
+    }
+
+    #[rstest]
+    #[case::fully_conserved(b"AAAA", 1.0)]
+    #[case::case_insensitive(b"AaAa", 1.0)]
+    #[case::gap_penalty(b"AA--", 0.5)]
+    #[case::mixed(b"AACT", 0.25)]
+    fn conservation_from_counts_works(#[case] symbols: &[u8], #[case] expected: f32) {
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
-            Some(b'-')
+            conservation_from_counts(&counts_for(symbols), DNA_MAX_ENTROPY),
+            expected
         );
     }
 
-    #[test]
-    fn consensus_majority_nongap_tie_ignores_gap() {
-        let counts = counts_for(b"---GGTT");
+    #[rstest]
+    #[case::empty(b"")]
+    #[case::all_gaps(b"----")]
+    #[case::max_entropy(b"ACGT")]
+    #[case::clamped_above_max_entropy(b"ACGTN")]
+    fn conservation_from_counts_is_zero(#[case] symbols: &[u8]) {
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::MajorityNonGap),
-            Some(b'G')
+            conservation_from_counts(&counts_for(symbols), DNA_MAX_ENTROPY),
+            0.0
         );
     }
 
-    #[test]
-    fn consensus_higher_count_beats_lower_byte() {
-        let counts = counts_for(b"ACCTTT");
+    #[rstest]
+    #[case::no_gaps(b"AAAA", 0.0)]
+    #[case::half_gaps(b"AA--", 0.5)]
+    #[case::all_gaps(b"----", 1.0)]
+    #[case::empty(b"", 0.0)]
+    fn gap_fraction_from_counts_works(#[case] symbols: &[u8], #[case] expected: f32) {
+        assert_eq!(gap_fraction_from_counts(&counts_for(symbols)), expected);
+    }
+
+    #[rstest]
+    #[case::dna_ignores_gaps_and_n(AlignmentType::Dna, b"AANn--T", 2.0 / 3.0)]
+    #[case::protein_ignores_gaps_and_x(AlignmentType::Protein, b"MMXx--K", 2.0 / 3.0)]
+    #[case::generic_counts_n(AlignmentType::Generic, b"NN-A", 2.0 / 3.0)]
+    #[case::constant(AlignmentType::Dna, b"AAAA", 1.0)]
+    fn max_counted_symbol_fraction_from_counts_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] expected: f32,
+    ) {
         assert_eq!(
-            consensus_from_counts(&counts, ConsensusMethod::Majority),
-            Some(b'T')
+            max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
+            Some(expected)
         );
     }
 
-    const DNA_MAX_ENTROPY: f64 = 2.0;
-
-    #[test]
-    fn fully_conserved() {
-        let counts = counts_for(b"AAAA");
-        assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 1.0);
-    }
-
-    #[test]
-    fn all_gaps() {
-        let counts = counts_for(b"----");
-        assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 0.0);
-    }
-
-    #[test]
-    fn gap_penalty() {
-        let counts = counts_for(b"AA--");
-        assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 0.5);
-    }
-
-    #[test]
-    fn case_insensitive() {
-        let counts = counts_for(b"AaAa");
-        assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 1.0);
-    }
-
-    #[test]
-    fn empty_column() {
-        let counts = [0u32; 128];
-        assert_eq!(conservation_from_counts(&counts, DNA_MAX_ENTROPY), 0.0);
-    }
-
-    #[test]
-    fn mixed_symbols_reduces_conservation() {
-        let conserved = conservation_from_counts(&counts_for(b"AAAA"), DNA_MAX_ENTROPY);
-        let mixed = conservation_from_counts(&counts_for(b"AACT"), DNA_MAX_ENTROPY);
-        assert!(mixed < conserved);
-        assert!(mixed > 0.0);
-    }
-
-    #[test]
-    fn dna_constant_fraction_ignores_gaps_and_ns() {
-        let counts = counts_for(b"AANn--T");
-        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Dna);
-
-        assert_eq!(fraction, Some(2.0 / 3.0));
-    }
-
-    #[test]
-    fn protein_constant_fraction_ignores_gaps_and_xs() {
-        let counts = counts_for(b"MMXx--K");
-        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Protein);
-
-        assert_eq!(fraction, Some(2.0 / 3.0));
-    }
-
-    #[test]
-    fn generic_constant_fraction_counts_n() {
-        let counts = counts_for(b"NN-A");
-        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Generic);
-
-        assert_eq!(fraction, Some(2.0 / 3.0));
-    }
-
-    #[test]
-    fn constant_fraction_returns_none_when_all_symbols_are_ignored() {
-        let counts = counts_for(b"-Nn");
-        let fraction = max_counted_symbol_fraction_from_counts(&counts, AlignmentType::Dna);
-
-        assert_eq!(fraction, None);
+    #[rstest]
+    #[case::empty(AlignmentType::Dna, b"")]
+    #[case::only_ignored(AlignmentType::Dna, b"-Nn")]
+    fn max_counted_symbol_fraction_from_counts_is_none(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+    ) {
+        assert_eq!(
+            max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
+            None
+        );
     }
 }
