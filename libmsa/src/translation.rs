@@ -103,30 +103,10 @@ impl TranslationTable {
     /// Standard translation table.
     pub const STANDARD: Self = Self {
         codons: [
-            [
-                *b"KNNK",
-                *b"IIIM",
-                *b"TTTT",
-                *b"RSSR",
-            ],
-            [
-                *b"*YY*",
-                *b"LFFL",
-                *b"SSSS",
-                *b"*CCW",
-            ],
-            [
-                *b"QHHQ",
-                *b"LLLL",
-                *b"PPPP",
-                *b"RRRR",
-            ],
-            [
-                *b"EDDE",
-                *b"VVVV",
-                *b"AAAA",
-                *b"GGGG",
-            ],
+            [*b"KNNK", *b"IIIM", *b"TTTT", *b"RSSR"],
+            [*b"*YY*", *b"LFFL", *b"SSSS", *b"*CCW"],
+            [*b"QHHQ", *b"LLLL", *b"PPPP", *b"RRRR"],
+            [*b"EDDE", *b"VVVV", *b"AAAA", *b"GGGG"],
         ],
     };
 
