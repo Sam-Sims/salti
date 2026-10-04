@@ -104,7 +104,7 @@ pub struct ColumnSummary {
     /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
     /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
     /// grids, which have no alphabet
-    pub conservation: Option<f32>,
+    pub conservation: Option<f64>,
 }
 
 /// How the consensus byte of a column is chosen
@@ -159,10 +159,10 @@ impl std::str::FromStr for ConsensusMethod {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ColumnFilter {
     /// Hides columns whose fraction of gaps is above this
-    pub max_gap_fraction: Option<f32>,
+    pub max_gap_fraction: Option<f64>,
     /// Hides columns whose most common residue makes up at least this fraction of the
     /// residues that aren't gaps or unknown
-    pub min_const_fraction: Option<f32>,
+    pub min_const_fraction: Option<f64>,
 }
 
 impl ColumnFilter {
@@ -172,7 +172,7 @@ impl ColumnFilter {
     }
 }
 
-fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
+fn gap_fraction_from_counts(counts: &[u32; 128]) -> f64 {
     let total: u32 = counts.iter().sum();
     let gap_count: u32 = symbol_counts(counts)
         .filter(|&(symbol, _)| residue::is_gap(symbol))
@@ -182,14 +182,14 @@ fn gap_fraction_from_counts(counts: &[u32; 128]) -> f32 {
     if total == 0 {
         0.0
     } else {
-        gap_count as f32 / total as f32
+        f64::from(gap_count) / f64::from(total)
     }
 }
 
 fn max_counted_symbol_fraction_from_counts(
     counts: &[u32; 128],
     kind: AlignmentType,
-) -> Option<f32> {
+) -> Option<f64> {
     let mut counted_total = 0u32;
     let mut max_count = 0u32;
 
@@ -202,7 +202,7 @@ fn max_counted_symbol_fraction_from_counts(
         max_count = max_count.max(count);
     }
 
-    (counted_total != 0).then_some(max_count as f32 / counted_total as f32)
+    (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
 }
 
 fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option<u8> {
@@ -220,7 +220,7 @@ fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option
     consensus
 }
 
-fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f32 {
+fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f64 {
     let mut total = 0u32;
     let mut gap_count = 0u32;
     let mut merged_non_gap_counts = [0u32; 128];
@@ -255,7 +255,7 @@ fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f32 {
 
     let gap_fraction = f64::from(gap_count) / f64::from(total);
     let conservation = (1.0 - entropy / max_entropy).max(0.0);
-    (conservation * (1.0 - gap_fraction)) as f32
+    conservation * (1.0 - gap_fraction)
 }
 
 fn symbol_counts(counts: &[u32; 128]) -> impl Iterator<Item = (u8, u32)> + '_ {
@@ -346,7 +346,7 @@ mod tests {
     #[case::generic(AlignmentType::Generic, None)]
     fn summaries_uses_grid_alignment_type(
         #[case] alignment_type: AlignmentType,
-        #[case] expected: Option<f32>,
+        #[case] expected: Option<f64>,
     ) {
         let alignment = dna(&[b"A", b"A"]);
         let summaries =
@@ -477,7 +477,7 @@ mod tests {
     #[case::case_insensitive(b"AaAa", 1.0)]
     #[case::gap_penalty(b"AA--", 0.5)]
     #[case::mixed(b"AACT", 0.25)]
-    fn conservation_from_counts_works(#[case] symbols: &[u8], #[case] expected: f32) {
+    fn conservation_from_counts_works(#[case] symbols: &[u8], #[case] expected: f64) {
         assert_eq!(
             conservation_from_counts(&counts_for(symbols), DNA_MAX_ENTROPY),
             expected
@@ -501,7 +501,7 @@ mod tests {
     #[case::half_gaps(b"AA--", 0.5)]
     #[case::all_gaps(b"----", 1.0)]
     #[case::empty(b"", 0.0)]
-    fn gap_fraction_from_counts_works(#[case] symbols: &[u8], #[case] expected: f32) {
+    fn gap_fraction_from_counts_works(#[case] symbols: &[u8], #[case] expected: f64) {
         assert_eq!(gap_fraction_from_counts(&counts_for(symbols)), expected);
     }
 
@@ -513,7 +513,7 @@ mod tests {
     fn max_counted_symbol_fraction_from_counts_works(
         #[case] alignment_type: AlignmentType,
         #[case] symbols: &[u8],
-        #[case] expected: f32,
+        #[case] expected: f64,
     ) {
         assert_eq!(
             max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
@@ -538,7 +538,7 @@ mod tests {
         dna(&[b"AAAANN", b"AACANN", b"A-GC-N", b"A-T-A-"])
     }
 
-    fn filter(max_gap_fraction: Option<f32>, min_const_fraction: Option<f32>) -> ColumnFilter {
+    fn filter(max_gap_fraction: Option<f64>, min_const_fraction: Option<f64>) -> ColumnFilter {
         ColumnFilter {
             max_gap_fraction,
             min_const_fraction,
