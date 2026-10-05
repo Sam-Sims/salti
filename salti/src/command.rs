@@ -1,5 +1,5 @@
 use crate::{
-    config::theme::ThemeId, core::model::DiffMode, ui::layers::notification::Notification,
+    config::theme::ThemeId, core::session::DiffMode, ui::layers::notification::Notification,
 };
 
 #[derive(Debug, Clone, PartialEq)]

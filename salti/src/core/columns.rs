@@ -1,12 +1,12 @@
 #[derive(Debug)]
-pub struct Columns<'a> {
+pub struct WindowColumns<'a> {
     pub grid: libmsa::Grid<'a>,
-    pub cols: Vec<usize>,
+    pub columns: Vec<usize>,
     pub cells: Vec<Option<Cell>>,
     pub summaries: Vec<libmsa::ColumnSummary>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Cell {
     pub index: usize,
     pub centre: bool,
