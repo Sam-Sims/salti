@@ -364,10 +364,10 @@ mod tests {
         ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget},
     };
 
-    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: "seq".to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 

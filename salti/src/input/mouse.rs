@@ -270,10 +270,10 @@ mod tests {
         },
     };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
@@ -284,7 +284,7 @@ mod tests {
         })
     }
 
-    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
         let alignment = libmsa::Alignment::new(sequences).expect("alignment should be valid");
         AlignmentModel::new(alignment).expect("alignment model should be valid")
     }

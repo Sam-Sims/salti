@@ -136,10 +136,10 @@ mod tests {
         }
     }
 
-    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: "seq".to_owned(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
@@ -149,9 +149,9 @@ mod tests {
     }
 
     fn model_with_len(len: usize) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![libmsa::RawSequence {
+        let alignment = libmsa::Alignment::new(vec![libmsa::Sequence {
             id: "seq".to_owned(),
-            sequence: vec![b'A'; len],
+            residues: vec![b'A'; len],
         }])
         .unwrap();
         AlignmentModel::new(alignment).unwrap()

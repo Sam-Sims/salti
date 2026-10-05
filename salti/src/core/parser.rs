@@ -1,18 +1,17 @@
 use std::path::Path;
 
 use anyhow::{Result, format_err};
-use libmsa::RawSequence;
+use libmsa::Sequence;
 use paraseq::fasta;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
-pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<RawSequence>> {
+pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<Sequence>> {
     info!(input = %input, "Starting fasta parse");
     let mut reader =
         open_fasta_reader(input).map_err(|error| format_err!("Failed to open input: {error}"))?;
     let mut record_set = reader.new_record_set();
     let mut sequences = Vec::new();
-    let mut expected_length: Option<usize> = None;
 
     while record_set
         .fill(&mut reader)
@@ -27,25 +26,10 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<R
             let id = std::str::from_utf8(record.id())
                 .map_err(|error| format_err!("Invalid sequence ID: {error}"))?
                 .to_string();
-            let sequence = record.seq().to_vec();
-            let sequence_length = sequence.len();
-
-            if let Some(length) = expected_length {
-                if sequence_length != length {
-                    return Err(format_err!(
-                        "Sequence length mismatch: expected {}, found {} for id {}",
-                        length,
-                        sequence_length,
-                        id
-                    ));
-                }
-            } else if sequence_length == 0 {
-                return Err(format_err!("Sequence has zero length for id {}", id));
-            } else {
-                expected_length = Some(sequence_length);
-            }
-
-            sequences.push(RawSequence { id, sequence });
+            sequences.push(Sequence {
+                id,
+                residues: record.seq().to_vec(),
+            });
         }
     }
 
@@ -56,7 +40,6 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<R
     debug!(
         input = %input,
         sequence_count = sequences.len(),
-        expected_length = expected_length.unwrap_or(0),
         "Completed fasta parse"
     );
 
@@ -93,7 +76,7 @@ mod tests {
         temp_file
     }
 
-    fn parse_temp_fasta(content: &str, cancel: &CancellationToken) -> Result<Vec<RawSequence>> {
+    fn parse_temp_fasta(content: &str, cancel: &CancellationToken) -> Result<Vec<Sequence>> {
         let temp_file = create_temp_fasta(content);
         let input = temp_file.path().to_str().unwrap();
         parse_fasta_file(input, cancel)
@@ -107,13 +90,13 @@ mod tests {
         assert_eq!(
             sequences,
             vec![
-                RawSequence {
+                Sequence {
                     id: "seq1".to_string(),
-                    sequence: b"A-CG".to_vec(),
+                    residues: b"A-CG".to_vec(),
                 },
-                RawSequence {
+                Sequence {
                     id: "seq2".to_string(),
-                    sequence: b"TGCA".to_vec(),
+                    residues: b"TGCA".to_vec(),
                 },
             ]
         );
@@ -131,24 +114,6 @@ mod tests {
         let error = parse_temp_fasta("", &CancellationToken::new()).unwrap_err();
 
         assert!(error.to_string().starts_with("Failed to open input:"));
-    }
-
-    #[test]
-    fn parse_fasta_file_errors_zero_length_sequences() {
-        let error = parse_temp_fasta(">seq1\n>seq2\n", &CancellationToken::new()).unwrap_err();
-
-        assert_eq!(error.to_string(), "Sequence has zero length for id seq1");
-    }
-
-    #[test]
-    fn parse_fasta_file_errors_length_mismatch() {
-        let error = parse_temp_fasta(">seq1\nATCG\n>seq2\nTGCAAA\n", &CancellationToken::new())
-            .unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Sequence length mismatch: expected 4, found 6 for id seq2"
-        );
     }
 
     #[test]

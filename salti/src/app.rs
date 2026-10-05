@@ -60,7 +60,7 @@ pub(crate) struct App {
     gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
-    load_job: Option<AsyncJob<Result<Vec<libmsa::RawSequence>, String>>>,
+    load_job: Option<AsyncJob<Result<Vec<libmsa::Sequence>, String>>>,
     event_tx: Option<UnboundedSender<AppEvent>>,
     should_quit: bool,
     layout_area: Rect,
@@ -746,14 +746,14 @@ mod tests {
     use super::*;
     use crate::ui::ui_state::MouseSelection;
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
-    fn app_with_alignment(sequences: Vec<libmsa::RawSequence>) -> App {
+    fn app_with_alignment(sequences: Vec<libmsa::Sequence>) -> App {
         let startup = StartupState {
             file_path: None,
             initial_position: 0,

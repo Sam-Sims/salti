@@ -273,14 +273,14 @@ mod tests {
         ui::layout::{AlignmentHeaderLayout, AppLayout},
     };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
-    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
         let alignment = libmsa::Alignment::new(sequences).unwrap();
         AlignmentModel::new(alignment).unwrap()
     }

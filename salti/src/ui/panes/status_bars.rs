@@ -230,10 +230,10 @@ mod tests {
     use super::*;
     use crate::{cli::StartupState, ui::ui_state::MouseSelection};
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
@@ -241,7 +241,7 @@ mod tests {
         spans.iter().map(|span| span.content.as_ref()).collect()
     }
 
-    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
+    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
         let alignment = libmsa::Alignment::new(sequences).unwrap();
         AlignmentModel::new(alignment).unwrap()
     }

@@ -183,10 +183,10 @@ mod tests {
     use super::*;
     use crate::core::codon::TranslatedDiffRange;
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
