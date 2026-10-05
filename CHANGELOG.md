@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each status bar has separation of concerns for a more consistent UI. The top bar is for "global" concerns, i.e number
   of alignments, visible region etc
     - The bottom bar is for "local" concerns, i.e the current selected position and sequence
-- Under the hood changes to how the caching worked - now cache mantains blocks of 5000nts instead of moving window +
+- Under the hood changes to how the caching worked - now cache maintains blocks of 5000nts instead of moving window +
   region. This simplifies the handling and makes it easier to cache new metrics in the future.
 - Renamed `set-filter` to `filter-rows` to be explicit what it does
 - Renamed `full` alignment type to `generic`
@@ -175,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Middle-mouse drag panning in the alignment pane.
-- Conservation bar chart rendering in the consensus pane. The calculation algorithim is the same as Jbrowse MSA - that
+- Conservation bar chart rendering in the consensus pane. The calculation algorithm is the same as Jbrowse MSA - that
   is to say that it is calculated as shannon entropy of the column, normalised to [0,1] by max entropy for the column's
   symbol count (e.g. 4 for DNA, 20 for AA).
 

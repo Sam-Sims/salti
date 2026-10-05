@@ -22,4 +22,3 @@ There are some current limits (some obvious, maybe some not so much):
 - Translation only makes sense for DNA alignments.
 - Conservation is only defined for DNA and protein alignments.
 - Consensus ties go to the lowest ASCII byte.
-

@@ -238,7 +238,7 @@ impl App {
     fn rebuild_layout(&mut self, area: Rect) {
         self.layout_area = area;
         self.frame_layout = FrameLayout::new(area);
-        // TODO: revist this as feels clunky
+        // TODO: revisit this as feels clunky
         // hides the gff pane if we dont have one loaded
         // if loaded the height is dynamic to the number of rows the features spill on to
         let gff_height = self.gff.as_ref().map_or(0, |gff| {

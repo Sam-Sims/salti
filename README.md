@@ -201,7 +201,7 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Left` / `Right` - Scroll horizontally 1 column.
 - `Shift` + `Left`/`Right`/`Up`/`Down` scrolls 10 columns/rows in that direction.
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
-- `Left cick` - Select a sequence or position. Click again to clear selection.
+- `Left click` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
 - `Middle click + drag` - Pan.
 - `m` - Open the minimap
@@ -264,21 +264,21 @@ Two methods are available for consensus calculation:
 If there is a tie for most common character, the one that sorts first by ASCII value wins.
 For example this means `A` beats `C`, uppercase beats lowercase (`T` beats `a`), and under `majority` a gap (`-`) beats any letter.
 
-The defailt is `majority-non-gap`
+The default is `majority-non-gap`
 
 ### Quick translate vs full translate
 
 `salti` offers two methods of translating. The first is "quick translate" toggled by pressing `t` or the `toggle-translate` command, named as such because
 it only translates the visible view and so is technically faster than the full translate
 
-Quick translate maps the currently visible nucleotides into their respetive codons according to the current frame and then renders them 
+Quick translate maps the currently visible nucleotides into their respetive codons according to the current frame and then renders them
 as an amino acid overlay. This does not change the coordinate space - and the ruler will stay in nucleotides. Clicking on an amino acid however
 will display the coordinate in protein space in the bottom status bar.
 
 Importantly quick translate can not be used if any of the columns have been filtered - as this would cause frameshifts and would not make sense to
 represent.
 
-In contrast full translate (`Shift+T` or the `reload-as-protein` command) takes the full alignment and reloads it into a protein alignment, as if you 
+In contrast full translate (`Shift+T` or the `reload-as-protein` command) takes the full alignment and reloads it into a protein alignment, as if you
 had loaded a fasta with the translated amino acids instead of nucleotides. This means the coordinate space becomes amino acids - and each amino acid
 is represented by one column. This means full translate is compatible with column filtering, unlike quick translate.
 
@@ -297,7 +297,7 @@ hidden columns have been skipped. A single jump is shown with an arrow pointing 
 Dense regions of skipped columns are shown as a run of `~` characters rather than individual arrows.
 
 Gap filtering and quick translation cannot be used at the same time. If quick translation is active, `filter-gaps` will be
-rejected. Likewise if a gap filter is active, quick translation cannot be enabled until the filter is cleared. The full translation 
+rejected. Likewise if a gap filter is active, quick translation cannot be enabled until the filter is cleared. The full translation
 (e.g using `reload-as-protein`) supports column filtering however.
 
 All column filters are applied after row filters.
@@ -331,7 +331,7 @@ You can also drag in the global feature pane to pan around the alignment.
 Currently annotations are treated as "global" - and per sequence annotations are not supported. This also means there is no fancy business that
 tries to match GFF coordinates to gaps etc. This is mainly useful in specific use cases e.g:
 
-When you have multiple alignments to a reference sequence where that reference does not have gaps inserted (i.e insertions are ignored). 
+When you have multiple alignments to a reference sequence where that reference does not have gaps inserted (i.e insertions are ignored).
 For example running mafft with something like `mafft --add --keeplength` or using alignments from something like [nextclade](https://github.com/nextstrain/nextclade)
 or [fastalign](https://github.com/Sam-Sims/fastalign).
 

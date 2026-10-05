@@ -28,4 +28,3 @@ Tab
 Sleep 0.15
 Tab
 Sleep 2
-
