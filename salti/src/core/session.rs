@@ -1,4 +1,4 @@
-use crate::core::model::DiffMode;
+use crate::core::{layout::Layout, model::DiffMode};
 
 #[derive(Debug)]
 pub enum ViewMode {
@@ -33,6 +33,7 @@ impl ViewState {
 struct Session {
     base_alignment: libmsa::Alignment,
     state: ViewState,
+    layout: Layout,
     pub diff_mode: DiffMode,
     pub consensus_method: libmsa::ConsensusMethod,
 }
@@ -44,6 +45,10 @@ impl Session {
 
     pub fn state(&self) -> &ViewState {
         &self.state
+    }
+
+    pub fn layout(&self) -> &Layout {
+        &self.layout
     }
 
     pub fn base_alignment(&self) -> &libmsa::Alignment {
