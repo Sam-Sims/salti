@@ -41,7 +41,8 @@ impl ReadingFrame {
         }
     }
 
-    pub(crate) const fn nt_range(self, protein_col: usize) -> Range<usize> {
+    /// Returns the nucleotides columns of the codon at `protein_col`
+    pub const fn nt_range(self, protein_col: usize) -> Range<usize> {
         let start = self.offset() + 3 * protein_col;
         start..start + 3
     }
