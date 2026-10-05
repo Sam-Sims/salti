@@ -1,14 +1,21 @@
+use ratatui::buffer::CellWidth;
+
 pub fn truncate_label(value: &str, width: usize) -> String {
-    let char_count = value.chars().count();
-    if char_count <= width {
+    if usize::from(value.cell_width()) <= width {
         return value.to_string();
     }
 
-    if width <= 3 {
-        return value.chars().take(width).collect();
+    let budget = if width <= 3 { width } else { width - 3 };
+    let mut used = 0;
+    let mut text: String = value
+        .chars()
+        .take_while(|ch| {
+            used += usize::from(ch.encode_utf8(&mut [0; 4]).cell_width());
+            used <= budget
+        })
+        .collect();
+    if width > 3 {
+        text.push_str("...");
     }
-
-    let mut text: String = value.chars().take(width - 3).collect();
-    text.push_str("...");
     text
 }
