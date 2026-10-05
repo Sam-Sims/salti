@@ -1,4 +1,6 @@
-use crate::core::{layout::Layout, model::DiffMode};
+use std::ops::Range;
+
+use crate::core::{columns::Columns, layout::Layout, model::DiffMode};
 
 #[derive(Debug)]
 pub enum ViewMode {
@@ -57,5 +59,9 @@ impl Session {
 
     pub fn grid(&self) -> libmsa::Grid<'_> {
         self.state.grid(&self.base_alignment)
+    }
+
+    pub fn columns(&self, window: Range<usize>) -> Columns<'_> {
+        todo!()
     }
 }

@@ -1,4 +1,5 @@
 pub(crate) mod codon;
+pub mod columns;
 pub(crate) mod gff;
 pub mod layout;
 pub mod model;
