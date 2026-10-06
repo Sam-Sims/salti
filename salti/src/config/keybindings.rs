@@ -122,7 +122,7 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Home,
         modifiers: KeyModifiers::NONE,
-        action: Command::JumpToStart,
+        action: Command::JumpToIndex(0),
         help: "Jump to start of alignment",
     },
     Binding {

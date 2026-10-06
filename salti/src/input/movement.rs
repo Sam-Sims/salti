@@ -54,6 +54,6 @@ impl HorizontalDrag {
         };
 
         let visible_target = column.saturating_sub(anchor);
-        Some(Command::JumpToPosition(visible_target))
+        Some(Command::JumpToIndex(visible_target))
     }
 }

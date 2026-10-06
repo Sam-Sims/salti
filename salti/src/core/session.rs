@@ -43,7 +43,7 @@ impl FromStr for DiffMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ViewMode {
     Default,
     QuickTranslate,
@@ -97,8 +97,8 @@ impl Session {
         &mut self,
         position: Position,
         change: impl FnOnce(&mut ViewState),
-    ) -> Result<(Position)> {
-        let columns = self.layout().columns();
+    ) -> Result<Position> {
+        let columns = self.layout.columns();
         let nt = self.nt_start(columns[position.column.min(columns.len() - 1)]);
         let top = self.layout.main().get(position.row).copied();
 

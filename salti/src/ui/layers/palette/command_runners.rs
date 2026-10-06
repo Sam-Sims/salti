@@ -238,7 +238,7 @@ pub(super) fn run_filter_rows(_: &CommandPaletteState, arguments: &str) -> anyho
         if arguments.is_empty() {
             Ok(Command::ClearFilter)
         } else {
-            Ok(Command::SetFilter(arguments.to_string()))
+            Ok(Command::SetRowFilter(arguments.to_string()))
         }
     })
 }
