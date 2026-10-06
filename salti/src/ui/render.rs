@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    core::{gff::Gff, model::AlignmentModel, stats::Stats},
+    core::{gff::Gff, session::Session},
     ui::{
         layers::render::render_overlays,
         layout::{AppLayout, FrameLayout},
@@ -79,10 +79,9 @@ fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
 
 pub fn render(
     f: &mut Frame,
-    alignment: Option<&AlignmentModel>,
+    session: Option<&Session>,
     gff: Option<&Gff>,
     ui: &UiState,
-    stats: Option<&Stats>,
     frame_layout: &FrameLayout,
     layout: &AppLayout,
 ) {
@@ -93,10 +92,10 @@ pub fn render(
         f,
         frame_layout.top_status_area,
         frame_layout.bottom_status_area,
-        alignment,
+        session,
         ui,
     );
-    let Some(alignment) = alignment else {
+    let Some(session) = session else {
         render_empty_state_with_ui(f, frame_layout.content_area, ui);
         render_overlays(
             f,
@@ -107,8 +106,7 @@ pub fn render(
         );
         return;
     };
-
-    let window = ui.viewport.window();
+    let columns = session.window_columns(ui.window.columns.clone());
 
     if let Some(gff) = gff {
         f.render_widget(
@@ -121,8 +119,8 @@ pub fn render(
         f.render_widget(
             GffPane {
                 gff,
-                alignment,
-                viewport_col_range: &window.col_range,
+                session,
+                window: &ui.window,
                 theme: &ui.theme,
             },
             layout.gff_pane,
@@ -131,49 +129,46 @@ pub fn render(
 
     f.render_widget(
         SequenceIdPane {
-            alignment,
-            window: &window,
+            session,
+            window: &ui.window,
             header: layout.alignment_header,
             theme: &ui.theme,
         },
         layout.sequence_id_pane,
     );
-
     f.render_widget(
         AlignmentPane {
-            alignment,
-            viewport: &ui.viewport,
-            stats,
+            session,
+            window: &ui.window,
+            columns: &columns,
             gff,
             header: layout.alignment_header,
             theme: &ui.theme,
         },
         layout.alignment_pane,
     );
-
     f.render_widget(
         ConsensusSequenceIdPane {
-            alignment,
+            session,
             theme: &ui.theme,
         },
         layout.consensus_sequence_id_pane,
     );
     f.render_widget(
         ConsensusAlignmentPane {
-            alignment,
-            window: &window,
-            stats,
+            session,
+            columns: &columns,
             theme: &ui.theme,
         },
         layout.consensus_alignment_pane,
     );
-    render_mouse_selection(f, layout, alignment, ui, &ui.viewport);
+    render_mouse_selection(f, layout, session, ui);
 
     render_overlays(
         f,
         frame_layout.overlay_area,
         frame_layout.input_area,
-        Some(alignment),
+        Some(session),
         ui,
     );
 }

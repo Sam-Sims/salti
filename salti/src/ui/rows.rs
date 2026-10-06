@@ -1,10 +1,8 @@
-use std::ops::Range;
-
 use ratatui::text::Span;
 
 use crate::{
-    config::theme::{ByteStyles, SequenceStyles},
-    core::codon::{TranslatedByteRange, TranslatedDiffRange, TranslationOverlay},
+    config::theme::SequenceStyles,
+    core::columns::{Cell, WindowColumns},
 };
 
 /// Lookup table that maps each byte value (`0-255`) to a str for display.
@@ -30,264 +28,31 @@ const BYTE_TO_CHAR: [&str; 256] = [
     "?", "?", "?", "?", "?", "?", "?", "?", "?",
 ];
 
-#[derive(Debug, Clone, Copy)]
-pub struct RowRenderMode<'a> {
-    pub alignment_type: libmsa::AlignmentType,
-    pub diff_against: Option<&'a [u8]>,
-}
-
-#[inline]
-fn span_for_sequence_byte(sequence_byte: u8, byte_styles: &ByteStyles) -> Span<'static> {
-    let index = usize::from(sequence_byte);
-    Span::styled(BYTE_TO_CHAR[index], byte_styles[index])
-}
-
-#[inline]
-fn format_byte_iter_spans(
-    bytes: impl Iterator<Item = u8>,
-    sequence_styles: &SequenceStyles,
-    mode: RowRenderMode<'_>,
+pub fn stretch(
+    columns: &WindowColumns<'_>,
+    bytes: &[u8],
+    diff: Option<&[u8]>,
+    styles: &SequenceStyles,
 ) -> Vec<Span<'static>> {
-    let byte_styles = sequence_styles.for_type(mode.alignment_type);
-
-    match mode.diff_against {
-        Some(diff_against) => bytes
-            .zip(diff_against.iter().copied())
-            .map(|(byte, diff_byte)| {
-                if byte == diff_byte {
-                    Span::styled(".", sequence_styles.diff_match)
-                } else {
-                    span_for_sequence_byte(byte, byte_styles)
-                }
-            })
-            .collect(),
-        None => bytes
-            .map(|byte| span_for_sequence_byte(byte, byte_styles))
-            .collect(),
-    }
-}
-
-pub fn format_row_spans(
-    visible_bytes: &[u8],
-    sequence_styles: &SequenceStyles,
-    mode: RowRenderMode<'_>,
-) -> Vec<Span<'static>> {
-    format_byte_iter_spans(visible_bytes.iter().copied(), sequence_styles, mode)
-}
-
-pub fn format_row_view_spans(
-    sequence: libmsa::RowView<'_>,
-    col_range: &Range<usize>,
-    sequence_styles: &SequenceStyles,
-    mode: RowRenderMode<'_>,
-) -> Vec<Span<'static>> {
-    let bytes = sequence
-        .indexed_bytes_range(col_range.clone())
-        .expect("viewport range must be within the current view")
-        .map(|(_, byte)| byte);
-
-    format_byte_iter_spans(bytes, sequence_styles, mode)
-}
-
-pub fn format_translated_row_spans(
-    sequence: libmsa::TranslatedSequenceView<'_>,
-    visible_nucleotide_range: &Range<usize>,
-    overlay: &TranslationOverlay,
-    sequence_styles: &SequenceStyles,
-    diff_against: Option<TranslatedDiffRange<'_>>,
-) -> Vec<Span<'static>> {
-    format_translated_spans(
-        visible_nucleotide_range,
-        overlay,
-        sequence_styles,
-        diff_against,
-        |protein_col| sequence.byte_at(protein_col),
-    )
-}
-
-pub fn format_translated_byte_range_spans(
-    bytes: TranslatedByteRange<'_>,
-    visible_nucleotide_range: &Range<usize>,
-    overlay: &TranslationOverlay,
-    sequence_styles: &SequenceStyles,
-    diff_against: Option<TranslatedDiffRange<'_>>,
-) -> Vec<Span<'static>> {
-    format_translated_spans(
-        visible_nucleotide_range,
-        overlay,
-        sequence_styles,
-        diff_against,
-        |protein_col| bytes.byte_at(protein_col),
-    )
-}
-
-fn format_translated_spans(
-    visible_nucleotide_range: &Range<usize>,
-    overlay: &TranslationOverlay,
-    sequence_styles: &SequenceStyles,
-    diff_against: Option<TranslatedDiffRange<'_>>,
-    mut byte_at: impl FnMut(usize) -> Option<u8>,
-) -> Vec<Span<'static>> {
-    let protein_styles = sequence_styles.for_type(libmsa::AlignmentType::Protein);
-    let width = visible_nucleotide_range.len();
-    let mut spans = vec![Span::raw(" "); width];
-
-    for codon in overlay.visible_codons(visible_nucleotide_range) {
-        let Some(residue) = byte_at(codon.protein_col) else {
-            continue;
-        };
-        let translated_style = protein_styles[usize::from(residue)];
-        let diff_matches =
-            diff_against.and_then(|diff| diff.byte_at(codon.protein_col)) == Some(residue);
-
-        for absolute_col in codon.nuc_start..=codon.nuc_start + 2 {
-            let Some(window_offset) = absolute_col.checked_sub(visible_nucleotide_range.start)
-            else {
-                continue;
+    let letters = styles.for_type(columns.grid.alignment_type());
+    columns
+        .cells
+        .iter()
+        .map(|cell| {
+            let Some(Cell { index, centre }) = *cell else {
+                return Span::raw(" ");
             };
-            if window_offset >= width {
-                continue;
+            let byte = bytes[index];
+            let matches = diff.is_some_and(|diff| diff[index] == byte);
+            let style = letters[usize::from(byte)];
+            match (matches, centre) {
+                // diff mode rendering
+                (true, true) => Span::styled(".", styles.diff_match),
+                (true, false) => Span::raw(" "),
+                // quick translate mode rendering
+                (false, true) => Span::styled(BYTE_TO_CHAR[usize::from(byte)], style),
+                (false, false) => Span::styled(" ", style),
             }
-
-            spans[window_offset] = if diff_matches {
-                if absolute_col == codon.centre {
-                    Span::styled(".", sequence_styles.diff_match)
-                } else {
-                    Span::raw(" ")
-                }
-            } else if absolute_col == codon.centre {
-                Span::styled(BYTE_TO_CHAR[usize::from(residue)], translated_style)
-            } else {
-                Span::styled(" ", translated_style)
-            };
-        }
-    }
-
-    spans
-}
-
-pub fn visible_bytes(sequence: libmsa::RowView<'_>, col_range: &Range<usize>) -> Vec<u8> {
-    if col_range.is_empty() {
-        return Vec::new();
-    }
-
-    sequence
-        .indexed_bytes_range(col_range.clone())
-        .expect("viewport range must be within the current view")
-        .map(|(_, byte)| byte)
+        })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::codon::TranslatedDiffRange;
-
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
-        }
-    }
-
-    fn spans_text(spans: &[Span<'_>]) -> String {
-        spans.iter().map(|span| span.content.as_ref()).collect()
-    }
-
-    fn overlay(frame: libmsa::ReadingFrame, nucleotide_len: usize) -> TranslationOverlay {
-        TranslationOverlay {
-            frame,
-            nucleotide_len,
-        }
-    }
-
-    #[test]
-    fn translated_row_spans_render_codons_across_nucleotide_width() {
-        let alignment = libmsa::Alignment::new(vec![raw("seq1", b"ATGAAATTT")])
-            .expect("test alignment should be valid");
-        let sequence = alignment
-            .translated(libmsa::ReadingFrame::Frame1)
-            .expect("DNA alignment should translate")
-            .project_absolute_row(0)
-            .expect("row should resolve");
-
-        let spans = format_translated_row_spans(
-            sequence,
-            &(0..9),
-            &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
-            None,
-        );
-
-        assert_eq!(spans.len(), 9);
-        assert_eq!(spans_text(&spans), " M  K  F ");
-    }
-
-    #[test]
-    fn translated_row_spans_render_diff_matches_in_centre_cells_only() {
-        let alignment = libmsa::Alignment::new(vec![raw("seq1", b"ATGCCCTTT")])
-            .expect("test alignment should be valid");
-        let sequence = alignment
-            .translated(libmsa::ReadingFrame::Frame1)
-            .expect("DNA alignment should translate")
-            .project_absolute_row(0)
-            .expect("row should resolve");
-        let diff_against = TranslatedDiffRange::new(0, b"MKF");
-
-        let spans = format_translated_row_spans(
-            sequence,
-            &(0..9),
-            &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
-            Some(diff_against),
-        );
-
-        assert_eq!(spans_text(&spans), " .  P  . ");
-    }
-
-    #[test]
-    fn translated_row_spans_leave_diff_match_flanks_unstyled() {
-        let alignment = libmsa::Alignment::new(vec![raw("seq1", b"ATGAAATTT")])
-            .expect("test alignment should be valid");
-        let sequence = alignment
-            .translated(libmsa::ReadingFrame::Frame1)
-            .expect("DNA alignment should translate")
-            .project_absolute_row(0)
-            .expect("row should resolve");
-        let diff_against = TranslatedDiffRange::new(0, b"MKF");
-
-        let spans = format_translated_row_spans(
-            sequence,
-            &(0..9),
-            &overlay(libmsa::ReadingFrame::Frame1, 9),
-            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
-            Some(diff_against),
-        );
-
-        assert_eq!(spans[0].style, ratatui::style::Style::default());
-        assert_eq!(spans[2].style, ratatui::style::Style::default());
-        assert_eq!(spans[3].style, ratatui::style::Style::default());
-        assert_eq!(spans[5].style, ratatui::style::Style::default());
-    }
-
-    #[test]
-    fn translated_row_spans_leave_incomplete_frame_edges_blank() {
-        let alignment = libmsa::Alignment::new(vec![raw("seq1", b"AATGAAATT")])
-            .expect("test alignment should be valid");
-        let sequence = alignment
-            .translated(libmsa::ReadingFrame::Frame2)
-            .expect("DNA alignment should translate")
-            .project_absolute_row(0)
-            .expect("row should resolve");
-
-        let spans = format_translated_row_spans(
-            sequence,
-            &(0..9),
-            &overlay(libmsa::ReadingFrame::Frame2, 9),
-            &SequenceStyles::new(&crate::config::theme::EVERFOREST_DARK.sequence),
-            None,
-        );
-
-        assert_eq!(spans_text(&spans), "  M  K   ");
-    }
 }

@@ -16,8 +16,8 @@ use crate::{
 };
 
 pub(crate) struct SequenceIdPane<'a> {
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) window: &'a ViewportWindow,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
     pub(crate) header: AlignmentHeaderLayout,
     pub(crate) theme: &'a ThemeState,
 }

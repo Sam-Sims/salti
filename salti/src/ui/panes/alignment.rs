@@ -28,9 +28,9 @@ const SCROLLBAR_THUMB_WIDTH: usize = 3;
 const SCROLLBAR_THUMB_MIN_WIDTH: usize = 1;
 
 pub(crate) struct AlignmentPane<'a> {
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) viewport: &'a Viewport,
-    pub(crate) stats: Option<&'a Stats>,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
+    pub(crate) columns: &'a WindowColumns<'a>,
     pub(crate) gff: Option<&'a Gff>,
     pub(crate) header: AlignmentHeaderLayout,
     pub(crate) theme: &'a ThemeState,

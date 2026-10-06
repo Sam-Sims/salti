@@ -26,9 +26,8 @@ use crate::{
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
 pub(crate) struct ConsensusAlignmentPane<'a> {
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) window: &'a ViewportWindow,
-    pub(crate) stats: Option<&'a Stats>,
+    pub(crate) session: &'a Session,
+    pub(crate) columns: &'a WindowColumns<'a>,
     pub(crate) theme: &'a ThemeState,
 }
 
@@ -49,7 +48,7 @@ impl Widget for ConsensusAlignmentPane<'_> {
 }
 
 pub(crate) struct ConsensusSequenceIdPane<'a> {
-    pub(crate) alignment: &'a AlignmentModel,
+    pub(crate) session: &'a Session,
     pub(crate) theme: &'a ThemeState,
 }
 

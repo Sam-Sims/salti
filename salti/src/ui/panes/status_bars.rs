@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    core::model::AlignmentModel,
+    core::session::Session,
     ui::{
         selection::selection_row_bounds,
         ui_state::{LoadingState, UiState},
@@ -201,12 +201,12 @@ pub fn render_frame(
     f: &mut Frame,
     top_status_area: Rect,
     bottom_status_area: Rect,
-    alignment: Option<&AlignmentModel>,
+    session: Option<&Session>,
     ui: &UiState,
 ) {
     let theme = &ui.theme.styles;
-    let top_status_bar = build_top_status_bar(alignment, ui);
-    let bottom_status_bar = build_bottom_status_bar(alignment, ui);
+    let top_status_bar = build_top_status_bar(session, ui);
+    let bottom_status_bar = build_bottom_status_bar(session, ui);
 
     if top_status_area.height > 0 {
         let top_line = Line::from(top_status_bar).right_aligned();

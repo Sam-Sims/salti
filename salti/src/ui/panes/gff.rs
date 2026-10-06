@@ -26,8 +26,8 @@ use crate::{
 const MIN_LABEL_WIDTH: usize = 2;
 pub(crate) struct GffPane<'a> {
     pub(crate) gff: &'a Gff,
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) viewport_col_range: &'a Range<usize>,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
     pub(crate) theme: &'a ThemeState,
 }
 

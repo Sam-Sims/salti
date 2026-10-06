@@ -25,10 +25,7 @@ use crate::{
             notification::{Notification, NotificationLevel},
             palette::CommandPaletteState,
         },
-        layout::{
-            AlignmentHeaderLayout, AppLayout, FrameLayout, Window, fit, gff_pane_height,
-            pinned_section_layout,
-        },
+        layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, Window, fit, gff_pane_height},
         panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
         render::render,
         ui_state::{LoadingState, UiState},
@@ -134,15 +131,11 @@ impl App {
                             if area != self.layout_area {
                                 self.rebuild_layout(area);
                             }
-                            let columns = self.session.as_ref().map(|session| {
-                                session.window_columns(self.ui.window.columns.clone())
-                            });
                             render(
                                 frame,
                                 self.session.as_ref(),
                                 self.gff.as_ref(),
                                 &self.ui,
-                                columns.as_ref(),
                                 &self.frame_layout,
                                 &self.app_layout,
                             )
@@ -274,8 +267,9 @@ impl App {
         let available_sequence_rows =
             usize::from(self.app_layout.alignment_pane_sequence_rows.height);
         let pinned = session.map_or(0, |session| session.layout().pinned());
-        let scrollable_height =
-            pinned_section_layout(pinned, available_sequence_rows).scrollable_height;
+        let shown_pinned = pinned.min(available_sequence_rows.saturating_sub(1));
+        let divider = usize::from(shown_pinned > 0);
+        let scrollable_height = available_sequence_rows - shown_pinned - divider;
         let main_rows = session.map_or(0, |session| session.layout().main().len());
         let rows = fit(&mut self.ui.position.row, scrollable_height, main_rows);
 
@@ -298,6 +292,7 @@ impl App {
         );
 
         self.ui.window = Window {
+            pinned: 0..shown_pinned,
             rows,
             columns,
             names,

@@ -12,8 +12,8 @@ use crate::{
 };
 
 pub(crate) struct Ruler<'a> {
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) window: &'a ViewportWindow,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
     pub(crate) theme: &'a ThemeState,
 }
 

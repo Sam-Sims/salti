@@ -24,8 +24,8 @@ const MIN_LABEL_WIDTH: usize = 1;
 
 pub(crate) struct LocalFeatureTrack<'a> {
     pub(crate) gff: &'a Gff,
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) window: &'a ViewportWindow,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
     pub(crate) theme: &'a ThemeState,
 }
 

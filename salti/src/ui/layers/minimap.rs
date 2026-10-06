@@ -12,7 +12,7 @@ use tracing::warn;
 use crate::{
     command::Command,
     config::theme::Theme,
-    core::model::AlignmentModel,
+    core::session::Session,
     input::movement::HorizontalDrag,
     ui::ui_state::{ThemeState, UiState},
 };
@@ -32,15 +32,15 @@ struct MinimapLayout {
 
 pub struct Minimap<'a> {
     input_area: Rect,
-    alignment: &'a AlignmentModel,
+    session: &'a Session,
     ui: &'a UiState,
 }
 
 impl<'a> Minimap<'a> {
-    pub fn new(input_area: Rect, alignment: &'a AlignmentModel, ui: &'a UiState) -> Self {
+    pub fn new(input_area: Rect, session: &'a Session, ui: &'a UiState) -> Self {
         Self {
             input_area,
-            alignment,
+            session,
             ui,
         }
     }
@@ -51,7 +51,7 @@ impl Widget for Minimap<'_> {
         let minimap_layout = layout(area);
         let theme = &self.ui.theme.theme;
         let styles = &self.ui.theme.styles;
-        let total_columns = self.alignment.view().column_count();
+        let total_columns = self.session.view().column_count();
 
         Clear.render(minimap_layout.area, buffer);
         Block::bordered()
@@ -61,7 +61,7 @@ impl Widget for Minimap<'_> {
         render_minimap_track(
             buffer,
             minimap_layout.track_area,
-            self.alignment,
+            self.session,
             &self.ui.theme,
         );
 

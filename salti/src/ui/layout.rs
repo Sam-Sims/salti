@@ -5,6 +5,8 @@ use ratatui::{
     macros::{horizontal, vertical},
 };
 
+use crate::core::layout::Layout;
+
 /// fixed height (rows) for the bottom consensus pane.
 /// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
@@ -40,35 +42,19 @@ impl AlignmentHeaderLayout {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PinnedSectionLayout {
-    pub pinned_rendered: usize,
-    pub divider_height: usize,
-    pub scrollable_height: usize,
-}
-
-pub fn pinned_section_layout(pinned_count: usize, available_height: usize) -> PinnedSectionLayout {
-    if available_height == 0 {
-        return PinnedSectionLayout {
-            pinned_rendered: 0,
-            divider_height: 0,
-            scrollable_height: 0,
-        };
-    }
-
-    let pinned_rendered = pinned_count.min(available_height.saturating_sub(1));
-    let divider_height = usize::from(pinned_rendered > 0);
-    let scrollable_height = available_height.saturating_sub(pinned_rendered + divider_height);
-
-    PinnedSectionLayout {
-        pinned_rendered,
-        divider_height,
-        scrollable_height,
-    }
+pub fn screen_rows(
+    layout: &Layout,
+    window: &Window,
+) -> impl Iterator<Item = Option<usize>> + use<> {
+    let offset = layout.pinned();
+    let divider = (!window.pinned.is_empty()).then_some(None);
+    let main = window.rows.clone().map(move |i| Some(offset + i));
+    window.pinned.clone().map(Some).chain(divider).chain(main)
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Window {
+    pub pinned: Range<usize>,
     pub rows: Range<usize>,
     pub columns: Range<usize>,
     pub names: Range<usize>,
