@@ -30,11 +30,13 @@ impl Layout {
         &self.columns
     }
 
-    pub fn column_rank(&self, column: usize) -> usize {
+    /// Position in columns of `column` or the next visible column if its hidden.
+    pub fn column_position(&self, column: usize) -> usize {
         self.columns.partition_point(|&c| c < column)
     }
 
-    pub fn row_rank(&self, row: usize) -> usize {
+    /// Position in rows of `row` or the next visible row if its hidden.
+    pub fn row_position(&self, row: usize) -> usize {
         self.main().partition_point(|&r| r < row)
     }
 }

@@ -72,6 +72,13 @@ impl ViewState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Position {
+    pub row: usize,
+    pub column: usize,
+    pub name: usize,
+}
+
 #[derive(Debug)]
 pub struct Session {
     base_alignment: libmsa::Alignment,
@@ -86,12 +93,27 @@ impl Session {
         todo!()
     }
 
-    pub fn update(&mut self, change: impl FnOnce(&mut ViewState)) -> Result<()> {
+    pub fn update(
+        &mut self,
+        position: Position,
+        change: impl FnOnce(&mut ViewState),
+    ) -> Result<(Position)> {
+        let columns = self.layout().columns();
+        let nt = self.nt_start(columns[position.column.min(columns.len() - 1)]);
+        let top = self.layout.main().get(position.row).copied();
+
         let mut next = self.state.clone();
         change(&mut next);
         self.layout = Layout::build(&self.base_alignment, &next)?;
         self.state = next;
-        Ok(())
+
+        Ok(Position {
+            column: self
+                .layout
+                .column_position(self.column_range_at(nt..nt + 1).start),
+            row: top.map_or(0, |row| self.layout.row_position(row)),
+            ..position
+        })
     }
 
     pub fn state(&self) -> &ViewState {
