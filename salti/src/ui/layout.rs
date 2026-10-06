@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use ratatui::{
     layout::{Rect, Spacing},
     macros::{horizontal, vertical},
@@ -64,6 +66,19 @@ pub fn pinned_section_layout(pinned_count: usize, available_height: usize) -> Pi
         scrollable_height,
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct Window {
+    pub rows: Range<usize>,
+    pub columns: Range<usize>,
+    pub names: Range<usize>,
+}
+
+pub fn fit(offset: &mut usize, visible: usize, total: usize) -> Range<usize> {
+    *offset = (*offset).min(total.saturating_sub(visible));
+    *offset..(*offset + visible).min(total)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct FrameLayout {
     pub top_status_area: Rect,

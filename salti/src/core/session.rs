@@ -72,7 +72,7 @@ impl ViewState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
     pub row: usize,
     pub column: usize,

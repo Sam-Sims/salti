@@ -1,9 +1,10 @@
 use crate::{
     cli::StartupState,
     config::theme::{SequenceStyles, Theme, ThemeId, ThemeStyles},
-    core::Viewport,
+    core::session::Position,
     ui::{
         layers::{notification::Notification, state::LayerState},
+        layout::Window,
         panes::gff::GffPaneState,
     },
 };
@@ -86,7 +87,8 @@ pub struct UiState {
     pub notification: Option<Notification>,
     pub selection: Option<MouseSelection>,
     pub theme: ThemeState,
-    pub viewport: Viewport,
+    pub position: Position,
+    pub window: Window,
     pub meta: MetaState,
     pub gff_tooltip: Option<String>,
 }
@@ -99,7 +101,8 @@ impl UiState {
             notification: None,
             selection: None,
             theme: ThemeState::default(),
-            viewport: Viewport::default(),
+            position: Position::default(),
+            window: Window::default(),
             meta: MetaState::from(startup),
             gff_tooltip: None,
         }
