@@ -7,8 +7,8 @@ use ratatui::{
 };
 
 use crate::{
-    core::{model::AlignmentModel, viewport::ViewportWindow},
-    ui::ui_state::ThemeState,
+    core::session::Session,
+    ui::{layout::Window, ui_state::ThemeState},
 };
 
 pub(crate) struct Ruler<'a> {
@@ -19,34 +19,21 @@ pub(crate) struct Ruler<'a> {
 
 impl Widget for Ruler<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let absolute_columns: Vec<usize> = self
-            .window
-            .col_range
-            .clone()
-            .filter_map(|relative_col| self.alignment.view().absolute_column_id(relative_col))
-            .collect();
-        let filtered_leading = self.window.col_range.start == 0
-            && self
-                .alignment
-                .view()
-                .absolute_column_id(0)
-                .is_some_and(|first| first > 0);
-        let filtered_trailing = self.window.col_range.end >= self.alignment.view().column_count()
-            && self.alignment.base().column_count() > 0
-            && self
-                .alignment
-                .view()
-                .absolute_column_id(self.alignment.view().column_count().saturating_sub(1))
-                .is_some_and(|last| last < self.alignment.base().column_count() - 1);
+        let cols = self.session.layout().columns();
+        let shown = self.window.columns.clone();
+        let filtered_leading = shown.start == 0 && cols[0] > 0;
+        let filtered_trailing =
+            shown.end == cols.len() && cols[cols.len() - 1] < self.session.grid().width() - 1;
+
         let (number_line, marker_line) = build_ruler(
-            &absolute_columns,
+            &cols[shown],
             filtered_leading,
             filtered_trailing,
             self.theme,
         );
         Paragraph::new(vec![number_line, marker_line])
             .style(self.theme.styles.base_block)
-            .render(area, buf);
+            .render(area, buf)
     }
 }
 
