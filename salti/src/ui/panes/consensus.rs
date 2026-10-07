@@ -2,25 +2,13 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Styled, Stylize},
-    symbols::merge::MergeStrategy,
     text::Line,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{
-    core::{
-        codon::{TranslatedByteRange, TranslationOverlay, nuc_start},
-        model::AlignmentModel,
-        stats::Stats,
-        viewport::ViewportWindow,
-    },
-    ui::{
-        rows::{
-            RowRenderMode, format_row_spans, format_row_view_spans,
-            format_translated_byte_range_spans, format_translated_row_spans,
-        },
-        ui_state::ThemeState,
-    },
+    core::{columns::WindowColumns, session::Session},
+    ui::{panes::pane_block, rows::stretch, ui_state::ThemeState},
 };
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -33,17 +21,42 @@ pub(crate) struct ConsensusAlignmentPane<'a> {
 
 impl Widget for ConsensusAlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
+        let block = pane_block(self.theme);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let lines = consensus_alignment_lines(self.alignment, self.window, self.stats, self.theme);
+        let (columns, theme) = (self.columns, self.theme);
+        let reference = self.session.state().reference.map_or_else(
+            || Line::from("No reference selected.".fg(theme.theme.text_dim).italic()),
+            |row| {
+                let bytes: Vec<u8> = columns.grid.cells(row, &columns.columns).collect();
+                Line::from(stretch(columns, &bytes, None, &theme.sequence))
+            },
+        );
+
+        let consensus: Vec<u8> = columns
+            .summaries
+            .iter()
+            .map(|s| s.consensus.unwrap_or(b' '))
+            .collect();
+
+        let mut lines = vec![
+            reference,
+            Line::from(stretch(columns, &consensus, None, &theme.sequence)),
+        ];
+
+        if shows_conservation_line(self.session) {
+            let sparks: String = columns
+                .cells
+                .iter()
+                .map(|cell| cell.map_or(" ", |cell| spark(&columns.summaries[cell.index])))
+                .collect();
+            lines.push(Line::from(sparks).set_style(theme.styles.accent_alt));
+        }
+
         Paragraph::new(lines)
-            .style(self.theme.styles.base_block)
-            .render(inner_area, buf);
+            .style(theme.styles.base_block)
+            .render(inner_area, buf)
     }
 }
 
@@ -54,25 +67,25 @@ pub(crate) struct ConsensusSequenceIdPane<'a> {
 
 impl Widget for ConsensusSequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
+        let block = pane_block(self.theme);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let lines = if shows_conservation_line(self.alignment) {
-            vec![
-                Line::from("Reference Sequence:".set_style(self.theme.styles.accent)),
-                Line::from("Consensus Sequence:".set_style(self.theme.styles.accent)),
-                Line::from("Conservation:".set_style(self.theme.styles.accent)),
-            ]
+        // keep Conservation at end of array
+        let labels = [
+            "Reference Sequence:",
+            "Consensus Sequence:",
+            "Conservation:",
+        ];
+        let shown = if shows_conservation_line(self.session) {
+            3
         } else {
-            vec![
-                Line::from("Reference Sequence:".set_style(self.theme.styles.accent)),
-                Line::from("Consensus Sequence:".set_style(self.theme.styles.accent)),
-            ]
+            2
         };
+        let lines: Vec<Line> = labels[..shown]
+            .iter()
+            .map(|&label| Line::from(label.set_style(self.theme.styles.accent)))
+            .collect();
 
         Paragraph::new(lines)
             .style(self.theme.styles.base_block)
@@ -80,186 +93,16 @@ impl Widget for ConsensusSequenceIdPane<'_> {
     }
 }
 
-fn conservation_to_spark(value: f32) -> &'static str {
-    let value = value.clamp(0.0, 1.0);
-    let max_idx = CONSERVATION_SPARK_STRS.len() - 1;
-    let idx = (value * max_idx as f32).round() as usize;
-    CONSERVATION_SPARK_STRS[idx]
+fn shows_conservation_line(session: &Session) -> bool {
+    session.grid().alignment_type() != libmsa::AlignmentType::Generic
 }
 
-fn shows_conservation_line(alignment: &AlignmentModel) -> bool {
-    alignment.base().active_type() != libmsa::AlignmentType::Generic
-}
-
-fn consensus_at(stats: Option<&Stats>, col: usize) -> u8 {
-    stats
-        .and_then(|stats| stats.summary_at(col))
-        .and_then(|summary| summary.consensus)
-        .unwrap_or(b' ')
-}
-
-fn spark_at(stats: Option<&Stats>, col: usize) -> &'static str {
-    stats
-        .and_then(|stats| stats.summary_at(col))
-        .and_then(|summary| summary.conservation)
-        .filter(|value| value.is_finite())
-        .map_or(" ", conservation_to_spark)
-}
-
-fn blank_line(width: usize) -> Line<'static> {
-    Line::raw(" ".repeat(width))
-}
-
-fn translated_reference_line(
-    alignment: &AlignmentModel,
-    overlay: &TranslationOverlay,
-    window: &ViewportWindow,
-    theme: &ThemeState,
-) -> Line<'static> {
-    let Some(translated) = alignment.translated_view() else {
-        return Line::from("No reference selected".fg(theme.theme.text_dim).italic());
-    };
-
-    alignment.rows().reference().map_or_else(
-        || Line::from("No reference selected".fg(theme.theme.text_dim).italic()),
-        |absolute_row| {
-            let Some(sequence) = translated.project_absolute_row(absolute_row) else {
-                return Line::from("No reference selected".fg(theme.theme.text_dim).italic());
-            };
-            let spans = format_translated_row_spans(
-                sequence,
-                &window.col_range,
-                overlay,
-                &theme.sequence,
-                None,
-            );
-            Line::from(spans)
-        },
-    )
-}
-
-fn translated_consensus_line(
-    overlay: &TranslationOverlay,
-    window: &ViewportWindow,
-    stats: Option<&Stats>,
-    theme: &ThemeState,
-) -> Line<'static> {
-    let Some(protein_range) = overlay.visible_protein_range(&window.col_range) else {
-        return blank_line(window.col_range.len());
-    };
-
-    let consensus_bytes: Vec<u8> = protein_range
-        .clone()
-        .map(|protein_col| consensus_at(stats, protein_col))
-        .collect();
-    let spans = format_translated_byte_range_spans(
-        TranslatedByteRange::new(protein_range.start, &consensus_bytes),
-        &window.col_range,
-        overlay,
-        &theme.sequence,
-        None,
-    );
-    Line::from(spans)
-}
-
-fn translated_conservation_line(
-    overlay: &TranslationOverlay,
-    window: &ViewportWindow,
-    stats: Option<&Stats>,
-    theme: &ThemeState,
-) -> Line<'static> {
-    let width = window.col_range.len();
-    let mut spans = vec![ratatui::text::Span::styled(" ", theme.styles.accent_alt); width];
-
-    let Some(protein_range) = overlay.visible_protein_range(&window.col_range) else {
-        return Line::from(spans);
-    };
-
-    for protein_col in protein_range {
-        let spark = spark_at(stats, protein_col);
-        let codon_nuc_start = nuc_start(protein_col, overlay.frame);
-
-        for absolute_col in codon_nuc_start..=codon_nuc_start + 2 {
-            let Some(window_offset) = absolute_col.checked_sub(window.col_range.start) else {
-                continue;
-            };
-            if window_offset >= width {
-                continue;
-            }
-
-            spans[window_offset] = ratatui::text::Span::styled(spark, theme.styles.accent_alt);
-        }
-    }
-
-    Line::from(spans)
-}
-
-fn consensus_alignment_lines(
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    stats: Option<&Stats>,
-    theme: &ThemeState,
-) -> Vec<Line<'static>> {
-    if let Some(overlay) = alignment.translation_overlay() {
-        return vec![
-            translated_reference_line(alignment, &overlay, window, theme),
-            translated_consensus_line(&overlay, window, stats, theme),
-            translated_conservation_line(&overlay, window, stats, theme),
-        ];
-    }
-
-    let no_diff_mode = RowRenderMode {
-        alignment_type: alignment.base().active_type(),
-        diff_against: None,
-    };
-
-    let reference_line = alignment.rows().reference().map_or_else(
-        || Line::from("No reference selected".fg(theme.theme.text_dim).italic()),
-        |absolute_row| {
-            let Some(projected_row) = alignment.view().project_absolute_row(absolute_row) else {
-                return Line::from("No reference selected".fg(theme.theme.text_dim).italic());
-            };
-            let spans = format_row_view_spans(
-                projected_row,
-                &window.col_range,
-                &theme.sequence,
-                no_diff_mode,
-            );
-            Line::from(spans)
-        },
-    );
-
-    let consensus_bytes: Vec<u8> = window
-        .col_range
-        .clone()
-        .map(|col| consensus_at(stats, col))
-        .collect();
-    let consensus_line = Line::from(format_row_spans(
-        &consensus_bytes,
-        &theme.sequence,
-        no_diff_mode,
-    ));
-
-    if shows_conservation_line(alignment) {
-        let conservation_line = build_conservation_line(stats, window, theme);
-        vec![reference_line, consensus_line, conservation_line]
-    } else {
-        vec![reference_line, consensus_line]
-    }
-}
-
-fn build_conservation_line(
-    stats: Option<&Stats>,
-    window: &ViewportWindow,
-    theme: &ThemeState,
-) -> Line<'static> {
-    let mut sparkline = String::with_capacity(window.col_range.len());
-
-    for col in window.col_range.clone() {
-        sparkline.push_str(spark_at(stats, col));
-    }
-
-    Line::from(sparkline).set_style(theme.styles.accent_alt)
+fn spark(summary: &libmsa::ColumnSummary) -> &'static str {
+    summary.conservation.map_or(" ", |value| {
+        debug_assert!((0.0..=1.0).contains(&value));
+        let max_index = CONSERVATION_SPARK_STRS.len() - 1;
+        CONSERVATION_SPARK_STRS[(value * max_index as f64).round() as usize]
+    })
 }
 
 #[cfg(test)]
