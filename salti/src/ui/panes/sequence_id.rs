@@ -1,16 +1,16 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style, Styled},
-    symbols::merge::MergeStrategy,
+    style::Styled,
     text::Line,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{
-    core::{model::AlignmentModel, viewport::ViewportWindow},
+    core::session::Session,
     ui::{
-        layout::{AlignmentHeaderLayout, pinned_section_layout},
+        layout::{AlignmentHeaderLayout, Window, screen_rows},
+        panes::pane_block,
         ui_state::ThemeState,
     },
 };
@@ -24,126 +24,53 @@ pub(crate) struct SequenceIdPane<'a> {
 
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
+        let block = pane_block(self.theme);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        render_sequence_id_rows(
-            self.alignment,
-            self.window,
-            self.header,
-            self.theme,
-            inner_area,
-            buf,
-        );
-    }
-}
-
-fn build_sequence_id_line(
-    theme: &ThemeState,
-    absolute_row: usize,
-    alignment_id: &str,
-    name_offset: usize,
-    name_width: usize,
-    id_style: Style,
-) -> Line<'static> {
-    let number_prefix = format!("{} ", absolute_row + 1).set_style(theme.styles.success);
-    // sequence IDs can be longer than the visible sequence ID pane width.
-    let id_slice: String = alignment_id
-        .chars()
-        .skip(name_offset)
-        .take(name_width)
-        .collect();
-
-    Line::from(vec![number_prefix, id_slice.set_style(id_style)])
-}
-
-fn build_pinned_divider_line(width: usize, style: Style) -> Line<'static> {
-    Line::from("─".repeat(width).set_style(style))
-}
-
-fn render_sequence_id_rows(
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    header: AlignmentHeaderLayout,
-    theme: &ThemeState,
-    area: Rect,
-    buf: &mut Buffer,
-) {
-    let local_feature_height = usize::from(header.local_feature_rows);
-    let ruler_height = usize::from(header.ruler_rows);
-    let available_content_height = area.height.saturating_sub(header.height()) as usize;
-    let band_layout =
-        pinned_section_layout(alignment.rows().pinned().len(), available_content_height);
-    let mut lines = Vec::with_capacity(ruler_height + area.height as usize);
-
-    let has_pins = !alignment.rows().pinned().is_empty();
-    for _ in 0..local_feature_height {
-        lines.push(Line::from(" "));
-    }
-
-    for ruler_row in 0..ruler_height {
-        if ruler_row == 1 && has_pins {
-            lines.push(Line::from(
-                "Pinned sequences:".set_style(theme.styles.text_muted),
-            ));
-        } else {
-            lines.push(Line::from(" "));
+        let (layout, theme) = (self.session.layout(), self.theme);
+        let mut lines = vec![Line::from(" "); usize::from(self.header.height())];
+        if self.header.ruler_rows > 1 && !self.window.pinned.is_empty() {
+            lines[usize::from(self.header.local_feature_rows) + 1] =
+                Line::from("Pinned sequences:".set_style(theme.styles.text_muted));
         }
+
+        let names = &self.window.names;
+        lines.extend(screen_rows(layout, self.window).map(|pos| {
+            match pos {
+                Some(pos) => {
+                    let row = layout.rows()[pos];
+                    let style = if pos < layout.pinned() {
+                        theme.styles.accent
+                    } else {
+                        theme.styles.text
+                    };
+
+                    let id: String = self
+                        .session
+                        .base_alignment()
+                        .id(row)
+                        .chars()
+                        .skip(names.start)
+                        .take(names.len())
+                        .collect();
+                    Line::from(vec![
+                        format!("{} ", row + 1).set_style(theme.styles.success),
+                        id.set_style(style),
+                    ])
+                }
+                None => Line::from(
+                    "─"
+                        .repeat(usize::from(inner_area.width))
+                        .set_style(theme.styles.border),
+                ),
+            }
+        }));
+
+        Paragraph::new(lines)
+            .style(theme.styles.base_block)
+            .render(inner_area, buf);
     }
-
-    let name_width = window
-        .name_range
-        .end
-        .saturating_sub(window.name_range.start);
-
-    for &absolute_row in alignment
-        .rows()
-        .pinned()
-        .iter()
-        .take(band_layout.pinned_rendered)
-    {
-        let Some(sequence) = alignment.base().project_absolute_row(absolute_row) else {
-            continue;
-        };
-        lines.push(build_sequence_id_line(
-            theme,
-            absolute_row,
-            sequence.id(),
-            window.name_range.start,
-            name_width,
-            theme.styles.accent,
-        ));
-    }
-
-    if band_layout.divider_height == 1 {
-        lines.push(build_pinned_divider_line(
-            area.width as usize,
-            theme.styles.border,
-        ));
-    }
-
-    for relative_row in window.row_range.clone() {
-        let Some(sequence) = alignment.view().sequence(relative_row) else {
-            continue;
-        };
-        lines.push(build_sequence_id_line(
-            theme,
-            sequence.absolute_row_id(),
-            sequence.id(),
-            window.name_range.start,
-            name_width,
-            theme.styles.text,
-        ));
-    }
-
-    Paragraph::new(lines)
-        .alignment(ratatui::layout::HorizontalAlignment::Left)
-        .style(theme.styles.base_block)
-        .render(area, buf);
 }
 
 #[cfg(test)]
