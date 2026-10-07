@@ -242,7 +242,7 @@ fn shader(
     tint: ratatui::style::Color,
     alpha: f32,
 ) {
-    if alpha <= 0.0 || clip_area.width == 0 || clip_area.height == 0 {
+    if alpha <= 0.0 || clip_area.is_empty() {
         return;
     }
 

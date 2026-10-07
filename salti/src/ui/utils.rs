@@ -1,12 +1,34 @@
-use ratatui::{buffer::CellWidth, symbols::merge::MergeStrategy, widgets::Block};
+use ratatui::{
+    buffer::{Buffer, CellWidth},
+    layout::Rect,
+    style::Styled,
+    symbols::merge::MergeStrategy,
+    text::Line,
+    widgets::{Block, Widget},
+};
 
 use crate::config::theme::ThemeStyles;
 
-pub fn pane_block(styles: &ThemeStyles) -> Block<'static> {
-    Block::bordered()
+pub fn render_pane(
+    styles: &ThemeStyles,
+    title: Option<Line<'_>>,
+    area: Rect,
+    buf: &mut Buffer,
+) -> Rect {
+    let mut block = Block::bordered()
         .border_style(styles.border)
         .style(styles.base_block)
-        .merge_borders(MergeStrategy::Exact)
+        .merge_borders(MergeStrategy::Exact);
+    if let Some(title) = title {
+        block = block.title(title);
+    }
+    let inner_area = block.inner(area);
+    block.render(area, buf);
+    inner_area
+}
+
+pub fn separator_line(width: u16, styles: &ThemeStyles) -> Line<'static> {
+    Line::from("─".repeat(usize::from(width)).set_style(styles.border))
 }
 
 pub fn truncate_label(value: &str, width: usize) -> String {

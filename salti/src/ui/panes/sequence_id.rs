@@ -11,7 +11,7 @@ use crate::{
     ui::{
         layout::{AlignmentHeaderLayout, Window, screen_rows},
         ui_state::ThemeState,
-        utils::pane_block,
+        utils::{render_pane, separator_line},
     },
 };
 
@@ -24,9 +24,7 @@ pub(crate) struct SequenceIdPane<'a> {
 
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(&self.theme.styles);
-        let inner_area = block.inner(area);
-        block.render(area, buf);
+        let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let (layout, theme) = (self.session.layout(), self.theme);
         let mut lines = vec![Line::from(" "); usize::from(self.header.height())];
@@ -36,35 +34,29 @@ impl Widget for SequenceIdPane<'_> {
         }
 
         let names = &self.window.names;
-        lines.extend(screen_rows(layout, self.window).map(|pos| {
-            match pos {
-                Some(pos) => {
-                    let row = layout.rows()[pos];
-                    let style = if pos < layout.pinned() {
-                        theme.styles.accent
-                    } else {
-                        theme.styles.text
-                    };
+        lines.extend(screen_rows(layout, self.window).map(|pos| match pos {
+            Some(pos) => {
+                let row = layout.rows()[pos];
+                let style = if pos < layout.pinned() {
+                    theme.styles.accent
+                } else {
+                    theme.styles.text
+                };
 
-                    let id: String = self
-                        .session
-                        .base_alignment()
-                        .id(row)
-                        .chars()
-                        .skip(names.start)
-                        .take(names.len())
-                        .collect();
-                    Line::from(vec![
-                        format!("{} ", row + 1).set_style(theme.styles.success),
-                        id.set_style(style),
-                    ])
-                }
-                None => Line::from(
-                    "─"
-                        .repeat(usize::from(inner_area.width))
-                        .set_style(theme.styles.border),
-                ),
+                let id: String = self
+                    .session
+                    .base_alignment()
+                    .id(row)
+                    .chars()
+                    .skip(names.start)
+                    .take(names.len())
+                    .collect();
+                Line::from(vec![
+                    format!("{} ", row + 1).set_style(theme.styles.success),
+                    id.set_style(style),
+                ])
             }
+            None => separator_line(inner_area.width, &theme.styles),
         }));
 
         Paragraph::new(lines)

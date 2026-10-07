@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
     macros::vertical,
-    style::{Style, Styled},
+    style::Style,
     text::Line,
     widgets::{Paragraph, Widget},
 };
@@ -18,7 +18,7 @@ use crate::{
         panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
         rows::{render_column_scrollbar, stretch},
         ui_state::ThemeState,
-        utils::pane_block,
+        utils::{render_pane, separator_line},
     },
 };
 
@@ -33,9 +33,7 @@ pub(crate) struct AlignmentPane<'a> {
 
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(&self.theme.styles);
-        let inner_area = block.inner(area);
-        block.render(area, buf);
+        let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let [local_feature_area, ruler_area, sequence_rows_area] = inner_area.layout(&vertical![
             ==self.header.local_feature_rows,
@@ -86,11 +84,7 @@ impl Widget for AlignmentPane<'_> {
                     diff.as_deref(),
                     &theme.sequence,
                 )),
-                None => Line::from(
-                    "─"
-                        .repeat(usize::from(sequence_rows_area.width))
-                        .set_style(theme.styles.border),
-                ),
+                None => separator_line(sequence_rows_area.width, &theme.styles),
             })
             .collect();
         Paragraph::new(lines)

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     core::{columns::WindowColumns, session::Session},
-    ui::{panes::pane_block, rows::stretch, ui_state::ThemeState},
+    ui::{rows::stretch, ui_state::ThemeState, utils::render_pane},
 };
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -21,9 +21,7 @@ pub(crate) struct ConsensusAlignmentPane<'a> {
 
 impl Widget for ConsensusAlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(self.theme);
-        let inner_area = block.inner(area);
-        block.render(area, buf);
+        let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let (columns, theme) = (self.columns, self.theme);
         let reference = self.session.state().reference.map_or_else(
@@ -67,9 +65,7 @@ pub(crate) struct ConsensusSequenceIdPane<'a> {
 
 impl Widget for ConsensusSequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(self.theme);
-        let inner_area = block.inner(area);
-        block.render(area, buf);
+        let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         // keep Conservation at end of array
         let labels = [
