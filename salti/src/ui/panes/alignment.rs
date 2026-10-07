@@ -1,31 +1,27 @@
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Margin, Rect},
     macros::vertical,
-    style::Styled,
-    symbols::merge::MergeStrategy,
+    style::{Style, Styled},
     text::Line,
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, StatefulWidget, Widget},
 };
 
 use crate::{
     core::{
-        codon::TranslatedDiffRange,
+        columns::WindowColumns,
         gff::Gff,
-        model::{AlignmentModel, DiffMode},
-        stats::Stats,
-        viewport::{Viewport, ViewportWindow},
+        session::{DiffMode, Session},
     },
     ui::{
-        layout::{AlignmentHeaderLayout, PinnedSectionLayout, pinned_section_layout},
-        panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
-        rows::{RowRenderMode, format_row_view_spans, format_translated_row_spans, visible_bytes},
+        layout::{AlignmentHeaderLayout, Window, screen_rows},
+        panes::{
+            column_scroll_state, local_feature_track::LocalFeatureTrack, pane_block, ruler::Ruler,
+        },
+        rows::stretch,
         ui_state::ThemeState,
     },
 };
-
-const SCROLLBAR_THUMB_WIDTH: usize = 3;
-const SCROLLBAR_THUMB_MIN_WIDTH: usize = 1;
 
 pub(crate) struct AlignmentPane<'a> {
     pub(crate) session: &'a Session,
@@ -38,10 +34,7 @@ pub(crate) struct AlignmentPane<'a> {
 
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
+        let block = pane_block(self.theme);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
@@ -50,294 +43,91 @@ impl Widget for AlignmentPane<'_> {
             ==self.header.ruler_rows,
             *=1
         ]);
-        let window = self.viewport.window();
 
         if let Some(gff) = self.gff {
             LocalFeatureTrack {
                 gff,
-                alignment: self.alignment,
-                window: &window,
+                session: self.session,
+                window: self.window,
                 theme: self.theme,
             }
             .render(local_feature_area, buf);
         }
         Ruler {
-            alignment: self.alignment,
-            window: &window,
+            session: self.session,
+            window: self.window,
             theme: self.theme,
         }
         .render(ruler_area, buf);
-        render_sequence_rows(
-            self.alignment,
-            &window,
-            self.stats,
-            sequence_rows_area,
-            self.theme,
-            buf,
-        );
-        render_scrollbar(
-            self.alignment,
-            self.viewport,
-            &window,
-            self.theme,
-            area,
-            buf,
-        );
-    }
-}
 
-fn raw_render_mode<'a>(
-    alignment: &AlignmentModel,
-    reference_bytes: Option<&'a [u8]>,
-    consensus_bytes: Option<&'a [u8]>,
-) -> RowRenderMode<'a> {
-    let diff_against = match alignment.diff_mode {
-        DiffMode::Off => None,
-        DiffMode::Reference => reference_bytes,
-        DiffMode::Consensus => consensus_bytes,
-    };
-
-    RowRenderMode {
-        alignment_type: alignment.base().active_type(),
-        diff_against,
-    }
-}
-
-fn translated_diff_range<'a>(
-    diff_mode: DiffMode,
-    protein_range_start: usize,
-    reference_bytes: Option<&'a [u8]>,
-    consensus_bytes: Option<&'a [u8]>,
-) -> Option<TranslatedDiffRange<'a>> {
-    match diff_mode {
-        DiffMode::Off => None,
-        DiffMode::Reference => {
-            reference_bytes.map(|bytes| TranslatedDiffRange::new(protein_range_start, bytes))
-        }
-        DiffMode::Consensus => {
-            consensus_bytes.map(|bytes| TranslatedDiffRange::new(protein_range_start, bytes))
-        }
-    }
-}
-
-fn emit_band_rows(
-    lines: &mut Vec<Line<'static>>,
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    band_layout: &PinnedSectionLayout,
-    area_width: u16,
-    theme: &ThemeState,
-    render_row: &mut dyn FnMut(usize) -> Option<Line<'static>>,
-) {
-    for &absolute_row in alignment
-        .rows()
-        .pinned()
-        .iter()
-        .take(band_layout.pinned_rendered)
-    {
-        if let Some(line) = render_row(absolute_row) {
-            lines.push(line);
-        }
-    }
-
-    if band_layout.divider_height == 1 {
-        lines.push(Line::from(
-            "─"
-                .repeat(area_width as usize)
-                .set_style(theme.styles.border),
-        ));
-    }
-
-    for relative_row in window.row_range.clone() {
-        let Some(absolute_row) = alignment.view().absolute_row_id(relative_row) else {
-            continue;
+        let (session, columns, theme) = (self.session, self.columns, self.theme);
+        let layout = session.layout();
+        let bytes = |row| {
+            columns
+                .grid
+                .cells(row, &columns.columns)
+                .collect::<Vec<u8>>()
         };
-        if let Some(line) = render_row(absolute_row) {
-            lines.push(line);
-        }
-    }
-}
-
-fn build_sequence_row_lines(
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    stats: Option<&Stats>,
-    area: Rect,
-    theme: &ThemeState,
-) -> Vec<Line<'static>> {
-    let band_layout = pinned_section_layout(alignment.rows().pinned().len(), area.height as usize);
-    let mut lines = Vec::with_capacity(
-        band_layout.pinned_rendered + band_layout.divider_height + window.row_range.len(),
-    );
-
-    if let Some(overlay) = alignment.translation_overlay()
-        && let Some(translated) = alignment.translated_view()
-    {
-        let protein_range = overlay.visible_protein_range(&window.col_range);
-        let reference_bytes: Option<Vec<u8>> = protein_range.clone().and_then(|protein_range| {
-            alignment
-                .rows()
-                .reference()
-                .and_then(|abs_row| translated.project_absolute_row(abs_row))
-                .and_then(|sequence| {
-                    let bytes = sequence.bytes_range(protein_range).ok()?;
-                    Some(bytes.map(|(_, byte)| byte).collect())
-                })
-        });
-        let consensus_bytes: Option<Vec<u8>> = protein_range.clone().and_then(|protein_range| {
-            protein_range
-                .clone()
-                .map(|protein_col: usize| {
-                    stats
-                        .and_then(|stats| stats.summary_at(protein_col))
-                        .map(|summary| summary.consensus.unwrap_or(b' '))
-                })
-                .collect()
-        });
-        let diff_against = protein_range.as_ref().and_then(|protein_range| {
-            translated_diff_range(
-                alignment.diff_mode,
-                protein_range.start,
-                reference_bytes.as_deref(),
-                consensus_bytes.as_deref(),
-            )
-        });
-
-        emit_band_rows(
-            &mut lines,
-            alignment,
-            window,
-            &band_layout,
-            area.width,
-            theme,
-            &mut |absolute_row| {
-                let sequence = translated.project_absolute_row(absolute_row)?;
-                let spans = format_translated_row_spans(
-                    sequence,
-                    &window.col_range,
-                    &overlay,
+        let diff = match session.diff_mode {
+            DiffMode::Off => None,
+            DiffMode::Reference => session.state().reference.map(bytes),
+            DiffMode::Consensus => Some(
+                columns
+                    .summaries
+                    .iter()
+                    .map(|s| s.consensus.unwrap_or(b' '))
+                    .collect(),
+            ),
+        };
+        let lines: Vec<Line> = screen_rows(layout, self.window)
+            .map(|pos| match pos {
+                Some(pos) => Line::from(stretch(
+                    columns,
+                    &bytes(layout.rows()[pos]),
+                    diff.as_deref(),
                     &theme.sequence,
-                    diff_against,
-                );
-                Some(Line::from(spans))
-            },
-        );
+                )),
+                None => Line::from(
+                    "─"
+                        .repeat(usize::from(sequence_rows_area.width))
+                        .set_style(theme.styles.border),
+                ),
+            })
+            .collect();
+        Paragraph::new(lines)
+            .style(theme.styles.base_block)
+            .render(sequence_rows_area, buf);
 
-        return lines;
+        render_scrollbar(layout.columns().len(), self.window, theme, area, buf);
     }
-
-    let reference_bytes: Option<Vec<u8>> = alignment
-        .rows()
-        .reference()
-        .and_then(|abs_row| alignment.view().project_absolute_row(abs_row))
-        .map(|sequence| visible_bytes(sequence, &window.col_range));
-    let consensus_bytes: Option<Vec<u8>> = window
-        .col_range
-        .clone()
-        .map(|relative_col| {
-            stats
-                .and_then(|stats| stats.summary_at(relative_col))
-                .map(|summary| summary.consensus.unwrap_or(b' '))
-        })
-        .collect();
-    let render_mode = raw_render_mode(
-        alignment,
-        reference_bytes.as_deref(),
-        consensus_bytes.as_deref(),
-    );
-
-    emit_band_rows(
-        &mut lines,
-        alignment,
-        window,
-        &band_layout,
-        area.width,
-        theme,
-        &mut |absolute_row| {
-            let projected_row = alignment.view().project_absolute_row(absolute_row)?;
-            let spans = format_row_view_spans(
-                projected_row,
-                &window.col_range,
-                &theme.sequence,
-                render_mode,
-            );
-            Some(Line::from(spans))
-        },
-    );
-
-    lines
-}
-
-fn render_sequence_rows(
-    alignment: &AlignmentModel,
-    window: &ViewportWindow,
-    stats: Option<&Stats>,
-    area: Rect,
-    theme: &ThemeState,
-    buf: &mut Buffer,
-) {
-    let lines = build_sequence_row_lines(alignment, window, stats, area, theme);
-    Paragraph::new(lines)
-        .style(theme.styles.base_block)
-        .render(area, buf);
 }
 
 fn render_scrollbar(
-    alignment: &AlignmentModel,
-    viewport: &Viewport,
-    window: &ViewportWindow,
+    total_columns: usize,
+    window: &Window,
     theme: &ThemeState,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    if area.width < 2 || area.height == 0 {
+    if total_columns <= window.columns.len() {
         return;
     }
 
-    let total_columns = alignment.view().column_count();
-    let visible_columns = window.col_range.len();
-    if total_columns <= visible_columns {
-        return;
-    }
-
-    let width = area.width.saturating_sub(2) as usize;
-    let max_index = total_columns.saturating_sub(1);
-    let col_offset = viewport.window().col_range.start;
-    let percent = col_offset
-        .saturating_mul(100)
-        .checked_div(max_index)
-        .unwrap_or(0);
-    let track_max = width.saturating_sub(1);
-    let thumb_index = if track_max == 0 {
-        0
-    } else {
-        (percent * track_max) / 100
-    };
-    let scrollbar_area = Rect {
-        x: area.x + 1,
-        y: area.y + area.height.saturating_sub(1),
-        width: area.width.saturating_sub(2),
-        height: 1,
-    };
-    let thumb_width = if SCROLLBAR_THUMB_WIDTH <= width {
-        SCROLLBAR_THUMB_WIDTH
-    } else {
-        SCROLLBAR_THUMB_MIN_WIDTH
-    };
-    let thumb_start = thumb_index.saturating_sub(thumb_width / 2);
-    let thumb_end = (thumb_start + thumb_width).min(width);
-    let thumb_y = scrollbar_area.y;
-    let thumb_colour = theme.theme.accent_alt;
-
-    for offset in thumb_start..thumb_end {
-        let thumb_x = scrollbar_area.x + offset as u16;
-        if let Some(cell) = buf.cell_mut((thumb_x, thumb_y)) {
-            let track_colour = cell.fg;
-            cell.set_char('▬');
-            cell.set_fg(thumb_colour);
-            cell.set_bg(track_colour);
-        }
-    }
+    Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(None)
+        .thumb_symbol("▬")
+        .thumb_style(Style {
+            fg: Some(theme.theme.accent_alt),
+            bg: theme.styles.border.fg,
+            ..Style::default()
+        })
+        .render(
+            area.inner(Margin::new(1, 0)),
+            buf,
+            &mut column_scroll_state(total_columns, &window.columns),
+        );
 }
 
 #[cfg(test)]
