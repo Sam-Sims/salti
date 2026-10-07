@@ -7,7 +7,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, Widget},
 };
-use tracing::warn;
 
 use crate::{
     command::Command,
@@ -51,7 +50,7 @@ impl Widget for Minimap<'_> {
         let minimap_layout = layout(area);
         let theme = &self.ui.theme.theme;
         let styles = &self.ui.theme.styles;
-        let total_columns = self.session.view().column_count();
+        let total_columns = self.session.layout().columns().len();
 
         Clear.render(minimap_layout.area, buffer);
         Block::bordered()
@@ -65,12 +64,12 @@ impl Widget for Minimap<'_> {
             &self.ui.theme,
         );
 
-        if let Some(viewport_box) = highlight_box(
+        if let Some(window_box) = highlight_box(
             minimap_layout.track_area,
-            self.ui.viewport.window().col_range,
+            self.ui.window.columns.clone(),
             total_columns,
         ) {
-            shade_highlight_box(buffer, viewport_box, theme);
+            shade_highlight_box(buffer, window_box, theme);
         }
 
         Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
@@ -94,13 +93,6 @@ impl MinimapState {
         track_area.contains((mouse.column, mouse.row).into())
     }
 
-    fn position_from_mouse(mouse_x: u16, track_area: Rect, total_columns: usize) -> usize {
-        let offset = usize::from(mouse_x.saturating_sub(track_area.x));
-        let width = usize::from(track_area.width);
-        let column = offset.saturating_mul(total_columns) / width;
-        column.min(total_columns.saturating_sub(1))
-    }
-
     pub fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
@@ -109,13 +101,8 @@ impl MinimapState {
         total_columns: usize,
     ) -> Option<Command> {
         let track_area = layout(overlay_area).track_area;
-        self.pan_drag.handle_mouse(
-            mouse,
-            track_area,
-            viewport_column_range,
-            total_columns,
-            Self::position_from_mouse,
-        )
+        self.pan_drag
+            .handle_mouse(mouse, track_area, viewport_column_range, total_columns)
     }
 }
 
@@ -133,7 +120,7 @@ fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
 }
 
 fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
-    if total_columns == 0 {
+    if track_area.width == 0 {
         return None;
     }
 
@@ -152,44 +139,28 @@ fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -
     ))
 }
 
-fn render_minimap_track(
-    buffer: &mut Buffer,
-    area: Rect,
-    alignment: &AlignmentModel,
-    theme: &ThemeState,
-) {
-    let view = alignment.view();
-    let row_count = view.row_count();
-    let total_columns = view.column_count();
-    let total_width = usize::from(area.width);
+fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, theme: &ThemeState) {
+    let layout = session.layout();
+    let grid = session.grid();
+    let (shown_rows, shown_columns) = (layout.rows(), layout.columns());
     let empty = theme.theme.panel_bg_dim;
 
-    let row_samples = row_count.min(MINIMAP_ROW_SAMPLES);
+    let row_samples = shown_rows.len().min(MINIMAP_ROW_SAMPLES);
     let rows: Vec<usize> = (0..row_samples)
-        .map(|index| sample(index, row_samples, row_count))
+        .map(|index| shown_rows[sample(index, row_samples, shown_rows.len())])
         .collect();
-    let column_samples = total_width * MINIMAP_COLUMN_SAMPLES_PER_CELL;
-    let byte_styles = theme.sequence.for_type(alignment.base().active_type());
+    let column_samples = usize::from(area.width) * MINIMAP_COLUMN_SAMPLES_PER_CELL;
+    let byte_styles = theme.sequence.for_type(grid.alignment_type());
 
     for (block_index, block_x) in (area.x..area.right()).enumerate() {
-        let block_colour = if row_count == 0 || total_columns == 0 {
-            empty
-        } else {
-            let first = block_index * MINIMAP_COLUMN_SAMPLES_PER_CELL;
-            let columns: Vec<usize> = (first..first + MINIMAP_COLUMN_SAMPLES_PER_CELL)
-                .map(|index| sample(index, column_samples, total_columns))
-                .collect();
-            let consensus = match view.select(&rows, &columns) {
-                Ok(block) => block.consensus(alignment.consensus_method),
-                Err(error) => {
-                    warn!(%error, "Failed to compute minimap colours");
-                    None
-                }
-            };
-            consensus
-                .and_then(|byte| byte_styles[usize::from(byte)].bg)
-                .unwrap_or(empty)
-        };
+        let first = block_index * MINIMAP_COLUMN_SAMPLES_PER_CELL;
+        let columns: Vec<usize> = (first..first + MINIMAP_COLUMN_SAMPLES_PER_CELL)
+            .map(|index| shown_columns[sample(index, column_samples, shown_columns.len())])
+            .collect();
+        let block_colour = grid
+            .consensus(&rows, &columns, session.consensus_method)
+            .and_then(|byte| byte_styles[usize::from(byte)].bg)
+            .unwrap_or(empty);
 
         let block_area = Rect::new(block_x, area.y, 1, area.height);
         for position in block_area.positions() {

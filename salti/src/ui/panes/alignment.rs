@@ -4,7 +4,7 @@ use ratatui::{
     macros::vertical,
     style::{Style, Styled},
     text::Line,
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, StatefulWidget, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{
@@ -15,11 +15,10 @@ use crate::{
     },
     ui::{
         layout::{AlignmentHeaderLayout, Window, screen_rows},
-        panes::{
-            column_scroll_state, local_feature_track::LocalFeatureTrack, pane_block, ruler::Ruler,
-        },
-        rows::stretch,
+        panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
+        rows::{render_column_scrollbar, stretch},
         ui_state::ThemeState,
+        utils::pane_block,
     },
 };
 
@@ -34,7 +33,7 @@ pub(crate) struct AlignmentPane<'a> {
 
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(self.theme);
+        let block = pane_block(&self.theme.styles);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
@@ -98,36 +97,19 @@ impl Widget for AlignmentPane<'_> {
             .style(theme.styles.base_block)
             .render(sequence_rows_area, buf);
 
-        render_scrollbar(layout.columns().len(), self.window, theme, area, buf);
-    }
-}
-
-fn render_scrollbar(
-    total_columns: usize,
-    window: &Window,
-    theme: &ThemeState,
-    area: Rect,
-    buf: &mut Buffer,
-) {
-    if total_columns <= window.columns.len() {
-        return;
-    }
-
-    Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
-        .begin_symbol(None)
-        .end_symbol(None)
-        .track_symbol(None)
-        .thumb_symbol("▬")
-        .thumb_style(Style {
-            fg: Some(theme.theme.accent_alt),
-            bg: theme.styles.border.fg,
-            ..Style::default()
-        })
-        .render(
+        render_column_scrollbar(
+            "▬",
+            Style {
+                fg: Some(theme.theme.accent_alt),
+                bg: theme.styles.border.fg,
+                ..Style::default()
+            },
+            layout.columns().len(),
+            &self.window.columns,
             area.inner(Margin::new(1, 0)),
             buf,
-            &mut column_scroll_state(total_columns, &window.columns),
         );
+    }
 }
 
 #[cfg(test)]

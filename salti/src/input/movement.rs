@@ -19,27 +19,26 @@ impl HorizontalDrag {
         &mut self,
         mouse: MouseEvent,
         area: Rect,
-        viewport_col_range: &Range<usize>,
+        window_columns: &Range<usize>,
         total_columns: usize,
-        position_from_mouse: impl Fn(u16, Rect, usize) -> usize,
     ) -> Option<Command> {
-        let viewport_span = viewport_col_range.len();
+        let window_span = window_columns.len();
         let in_area = area.contains((mouse.column, mouse.row).into());
 
         let (anchor, column) = match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) if in_area => {
-                let column = position_from_mouse(mouse.column, area, total_columns);
-                let anchor = if viewport_col_range.contains(&column) {
-                    column - viewport_col_range.start
+                let column = column_at(mouse.column, area, total_columns);
+                let anchor = if window_columns.contains(&column) {
+                    column - window_columns.start
                 } else {
-                    viewport_span / 2
+                    window_span / 2
                 };
                 self.anchor = Some(anchor);
                 (anchor, column)
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 let anchor = self.anchor?;
-                let column = position_from_mouse(mouse.column, area, total_columns);
+                let column = column_at(mouse.column, area, total_columns);
                 (anchor, column)
             }
             MouseEventKind::Up(MouseButton::Left) => {
@@ -47,7 +46,7 @@ impl HorizontalDrag {
                 if !in_area {
                     return None;
                 }
-                let column = position_from_mouse(mouse.column, area, total_columns);
+                let column = column_at(mouse.column, area, total_columns);
                 (anchor, column)
             }
             _ => return None,
@@ -56,4 +55,10 @@ impl HorizontalDrag {
         let visible_target = column.saturating_sub(anchor);
         Some(Command::JumpToIndex(visible_target))
     }
+}
+
+fn column_at(mouse_x: u16, area: Rect, total_columns: usize) -> usize {
+    let offset = usize::from(mouse_x.saturating_sub(area.x));
+    let column = offset.saturating_mul(total_columns) / usize::from(area.width);
+    column.min(total_columns.saturating_sub(1))
 }

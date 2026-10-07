@@ -1,4 +1,12 @@
-use ratatui::text::Span;
+use std::ops::Range;
+
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    text::Span,
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
+};
 
 use crate::{
     config::theme::SequenceStyles,
@@ -49,10 +57,37 @@ pub fn stretch(
                 // diff mode rendering
                 (true, true) => Span::styled(".", styles.diff_match),
                 (true, false) => Span::raw(" "),
-                // quick translate mode rendering
                 (false, true) => Span::styled(BYTE_TO_CHAR[usize::from(byte)], style),
+                // quick translate mode rendering
                 (false, false) => Span::styled(" ", style),
             }
         })
         .collect()
+}
+
+pub fn render_column_scrollbar(
+    thumb: &str,
+    thumb_style: Style,
+    total: usize,
+    window: &Range<usize>,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    if total <= window.len() {
+        return;
+    }
+
+    Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(None)
+        .thumb_symbol(thumb)
+        .thumb_style(thumb_style)
+        .render(
+            area,
+            buf,
+            &mut ScrollbarState::new(total - window.len() + 1)
+                .position(window.start)
+                .viewport_content_length(window.len()),
+        );
 }

@@ -1,4 +1,13 @@
-use ratatui::buffer::CellWidth;
+use ratatui::{buffer::CellWidth, symbols::merge::MergeStrategy, widgets::Block};
+
+use crate::config::theme::ThemeStyles;
+
+pub fn pane_block(styles: &ThemeStyles) -> Block<'static> {
+    Block::bordered()
+        .border_style(styles.border)
+        .style(styles.base_block)
+        .merge_borders(MergeStrategy::Exact)
+}
 
 pub fn truncate_label(value: &str, width: usize) -> String {
     if usize::from(value.cell_width()) <= width {

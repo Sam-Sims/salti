@@ -11,7 +11,7 @@ use crate::core::layout::Layout;
 /// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
 /// fixed height (rows) for the alignment ruler above sequence rows.
-pub const RULER_HEIGHT_ROWS: u16 = 2;
+const RULER_HEIGHT_ROWS: u16 = 2;
 /// width percentage for the left sequence ID pane (used in alignment and consensus panes).
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
@@ -134,11 +134,7 @@ impl AppLayout {
         let [gff_info_pane_area, gff_pane_area] = gff_area.layout(
             &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
         );
-        let gff_pane_rows = if gff_pane_area.width > 2 && gff_pane_area.height > 2 {
-            ratatui::widgets::Block::bordered().inner(gff_pane_area)
-        } else {
-            Rect::default()
-        };
+        let gff_pane_rows = ratatui::widgets::Block::bordered().inner(gff_pane_area);
 
         Self {
             sequence_id_pane: sequence_id_pane_area,

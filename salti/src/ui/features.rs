@@ -1,125 +1,99 @@
-use std::{num::NonZeroUsize, ops::Range};
+use std::ops::Range;
 
-use ratatui::style::Style;
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    widgets::{Clear, Widget},
+};
 
 use crate::{
     core::{
-        gff::{Feature, Gff},
-        model::AlignmentModel,
+        gff::{Feature, Gff, Strand},
+        session::Session,
     },
     ui::ui_state::ThemeState,
 };
 
-const NUCLEOTIDE_POSITIONS_PER_COL: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-const PROTEIN_POSITIONS_PER_COL: NonZeroUsize = NonZeroUsize::new(3).unwrap();
+const MIN_LABEL_WIDTH: usize = 2;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DisplayFeature<'a> {
     pub(crate) feature: &'a Feature,
-    pub(crate) relative_col_range: Range<usize>,
+    pub(crate) columns: Range<usize>,
     pub(crate) colour_idx: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FeatureStyle {
-    pub(crate) background: Style,
-    pub(crate) text: Style,
+#[derive(Debug, Clone)]
+pub(crate) struct PlacedFeature<'a> {
+    pub(crate) feature: &'a Feature,
+    pub(crate) span: Range<usize>,
+    pub(crate) row: usize,
+    pub(crate) colour_idx: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FeatureMap {
-    absolute_total_columns: usize,
-    offset: usize,
-    positions_to_col: NonZeroUsize,
-}
-
-impl FeatureMap {
-    pub(crate) fn for_alignment(alignment: &AlignmentModel) -> Self {
-        let absolute_total_columns = alignment.base().column_count();
-
-        if alignment.is_reloaded_as_protein() {
-            Self::protein(
-                absolute_total_columns,
-                alignment.translation_frame().offset(),
-            )
-        } else {
-            Self::nucleotide(absolute_total_columns)
-        }
-    }
-
-    pub(crate) fn protein(absolute_total_columns: usize, frame_offset: usize) -> Self {
-        Self {
-            absolute_total_columns,
-            offset: frame_offset,
-            positions_to_col: PROTEIN_POSITIONS_PER_COL,
-        }
-    }
-
-    fn nucleotide(absolute_total_columns: usize) -> Self {
-        Self {
-            absolute_total_columns,
-            offset: 0,
-            positions_to_col: NUCLEOTIDE_POSITIONS_PER_COL,
-        }
-    }
-
-    pub(crate) fn map_feature(
-        &self,
-        view: &libmsa::Alignment,
-        feature: &Feature,
-    ) -> Option<Range<usize>> {
-        let absolute_range = self.map_feature_absolute_range(feature)?;
-        view.relative_column_range_intersecting(absolute_range)
-    }
-
-    fn map_feature_absolute_range(&self, feature: &Feature) -> Option<Range<usize>> {
-        let positions_to_col = self.positions_to_col.get();
-        let start = feature.range.start.saturating_sub(self.offset) / positions_to_col;
-        let end = feature
-            .range
-            .end
-            .saturating_sub(self.offset)
-            .div_ceil(positions_to_col);
-        let clipped_range =
-            start.min(self.absolute_total_columns)..end.min(self.absolute_total_columns);
-        (!clipped_range.is_empty()).then_some(clipped_range)
-    }
-}
-
-pub(crate) fn display_features<'a>(
-    gff: &'a Gff,
-    alignment: &AlignmentModel,
-) -> Vec<DisplayFeature<'a>> {
-    let mapping = FeatureMap::for_alignment(alignment);
+pub(crate) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<DisplayFeature<'a>> {
+    let layout = session.layout();
     gff.features
         .iter()
         .filter_map(|feature| {
-            mapping
-                .map_feature(alignment.view(), feature)
-                .map(|range| (feature, range))
+            let cols = session.column_range_at(feature.range.clone());
+            let shown = layout.column_position(cols.start)..layout.column_position(cols.end);
+            (!shown.is_empty()).then_some((feature, shown))
         })
         .enumerate()
-        .map(
-            |(colour_idx, (feature, relative_col_range))| DisplayFeature {
-                feature,
-                relative_col_range,
-                colour_idx,
-            },
-        )
+        .map(|(colour_idx, (feature, columns))| DisplayFeature {
+            feature,
+            columns,
+            colour_idx,
+        })
         .collect()
 }
 
-pub(crate) fn feature_style(theme: &ThemeState, colour_idx: usize) -> FeatureStyle {
+pub(crate) fn render_features(
+    placed_features: &[PlacedFeature<'_>],
+    area: Rect,
+    theme: &ThemeState,
+    buf: &mut Buffer,
+) {
+    Clear.render(area, buf);
+    buf.set_style(area, theme.styles.base_block);
+    let width = usize::from(area.width);
     let dna = theme.theme.sequence.dna;
-    let colour = match colour_idx % 4 {
-        0 => dna.a,
-        1 => dna.t,
-        2 => dna.c,
-        _ => dna.g,
-    };
-    let background = theme.styles.base_block.bg(colour);
-    let text = background.fg(theme.theme.sequence.foreground);
-    FeatureStyle { background, text }
+
+    for placed in placed_features {
+        let span = placed.span.start.min(width)..placed.span.end.min(width);
+        if usize::from(area.height) <= placed.row || span.is_empty() {
+            continue;
+        }
+        let colour = match placed.colour_idx % 4 {
+            0 => dna.a,
+            1 => dna.t,
+            2 => dna.c,
+            _ => dna.g,
+        };
+        let background = theme.styles.base_block.bg(colour);
+        let text = background.fg(theme.theme.sequence.foreground);
+        let y = area.y + placed.row as u16;
+        let x = |offset: usize| area.x + offset as u16;
+        buf.set_style(
+            Rect::new(x(span.start), y, span.len() as u16, 1),
+            background,
+        );
+
+        let (label, arrow) = match placed.feature.strand {
+            Strand::Forward => (span.start..span.end - 1, Some((span.end - 1, "→"))),
+            Strand::Reverse => (span.start + 1..span.end, Some((span.start, "←"))),
+            Strand::Unknown => (span.clone(), None),
+        };
+        if let Some((at, arrow)) = arrow {
+            buf.set_string(x(at), y, arrow, text);
+        }
+        if MIN_LABEL_WIDTH <= label.len() {
+            let name: String = placed.feature.name.chars().take(label.len()).collect();
+            let offset = (label.len() - name.chars().count()) / 2;
+            buf.set_string(x(label.start + offset), y, name, text);
+        }
+    }
 }
 
 #[cfg(test)]

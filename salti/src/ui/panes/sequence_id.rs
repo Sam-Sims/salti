@@ -10,8 +10,8 @@ use crate::{
     core::session::Session,
     ui::{
         layout::{AlignmentHeaderLayout, Window, screen_rows},
-        panes::pane_block,
         ui_state::ThemeState,
+        utils::pane_block,
     },
 };
 
@@ -24,7 +24,7 @@ pub(crate) struct SequenceIdPane<'a> {
 
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = pane_block(self.theme);
+        let block = pane_block(&self.theme.styles);
         let inner_area = block.inner(area);
         block.render(area, buf);
 
