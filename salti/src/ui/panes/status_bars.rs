@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    core::session::Session,
+    core::session::{Session, ViewMode},
     ui::{
         selection::selection_row_bounds,
         ui_state::{LoadingState, UiState},
@@ -20,60 +20,39 @@ use crate::{
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
 
-fn format_percent(fraction: f32) -> String {
-    let mut text = format!("{:.2}", fraction * 100.0);
-    while text.ends_with('0') {
-        text.pop();
-    }
-    if text.ends_with('.') {
-        text.pop();
-    }
-    text
+fn format_percent(fraction: f64) -> String {
+    ((fraction * 10_000.0).round() / 100.0).to_string()
 }
 
-fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec<Span<'static>> {
+fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
     let mut parts = Vec::new();
 
-    if let Some(alignment) = alignment {
-        if alignment.filter().is_active() {
-            let visible_rows = alignment.view().row_count();
-            let mut filter_text = String::from("Filters:");
-            let mut counts = format!(" ({visible_rows} rows)");
-            if let Some(pattern) = alignment.filter().pattern() {
-                let _ = write!(filter_text, " [rows: {pattern}]");
+    if let Some(session) = session {
+        let (state, layout) = (session.state(), session.layout());
+        if state.row_regex_filter.is_some() || state.filter.is_active() {
+            let mut text = String::from("Filters:");
+            if let Some(regex) = &state.row_regex_filter {
+                let _ = write!(text, " [rows: {regex}]");
             }
-            if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
-                let _ = write!(
-                    filter_text,
-                    " [gaps: <= {}%]",
-                    format_percent(max_gap_fraction)
-                );
+            if let Some(fraction) = state.filter.max_gap_fraction {
+                let _ = write!(text, " [gaps: <= {}%]", format_percent(fraction));
             }
-            if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
-                let _ = write!(
-                    filter_text,
-                    " [constant: >= {}%]",
-                    format_percent(min_constant_fraction)
-                );
+            if let Some(fraction) = state.filter.min_const_fraction {
+                let _ = write!(text, " [constant: >= {}%]", format_percent(fraction));
             }
-            if alignment.filter().has_column_filter() {
-                let visible_cols = alignment.view().column_count();
-                let _ = write!(counts, " ({visible_cols} cols)");
+            let _ = write!(text, " ({} rows)", layout.rows().len());
+            if state.filter.is_active() {
+                let _ = write!(text, " ({} cols)", layout.columns().len());
             }
-            parts.push(format!("{filter_text}{counts}").set_style(theme.warning));
+            parts.push(text.set_style(theme.warning));
         }
 
-        let translation_active =
-            alignment.translation().is_some() || alignment.is_reloaded_as_protein();
-        if translation_active {
+        if state.mode != ViewMode::Default {
             if !parts.is_empty() {
                 parts.push(Span::raw(" | "));
             }
-            parts.push(
-                format!("Translation frame: {}", alignment.translation_frame())
-                    .set_style(theme.text),
-            );
+            parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
         }
     }
 
@@ -138,7 +117,7 @@ fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> 
     parts
 }
 
-fn build_top_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec<Span<'static>> {
+fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
     let file_name = ui
         .meta
@@ -160,29 +139,16 @@ fn build_top_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec
         LoadingState::Failed(_) => Span::styled("Status: Failed", theme.error),
     };
 
-    let alignment_count = alignment
-        .map(|alignment| alignment.view().row_count())
-        .unwrap_or(0);
-    let alignment_length = alignment
-        .map(|alignment| alignment.base().column_count())
-        .unwrap_or(0);
-    let position_range = alignment.map_or_else(
-        || "Positions: 0-0".to_string(),
-        |alignment| {
-            let window = ui.viewport.window();
-            match (
-                alignment.view().absolute_column_id(window.col_range.start),
-                window
-                    .col_range
-                    .end
-                    .checked_sub(1)
-                    .and_then(|end| alignment.view().absolute_column_id(end)),
-            ) {
-                (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
-                _ => "Positions: 0-0".to_string(),
-            }
-        },
-    );
+    let layout = session.map(Session::layout);
+    let alignment_count = layout.map_or(0, |layout| layout.rows().len());
+    let alignment_length = session.map_or(0, |session| session.grid().width());
+    let shown = layout
+        .map(|layout| &layout.columns()[ui.window.columns.clone()])
+        .unwrap_or_default();
+    let position_range = match (shown.first(), shown.last()) {
+        (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
+        _ => "Positions: 0-0".to_string(),
+    };
 
     vec![
         format!("File: {file_name}").set_style(theme.text_dim),
