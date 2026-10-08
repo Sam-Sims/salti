@@ -6,6 +6,7 @@ use crate::{
         layers::{notification::Notification, state::LayerState},
         layout::Window,
         panes::gff::GffPaneState,
+        selection::Selection,
     },
 };
 
@@ -46,14 +47,6 @@ impl From<StartupState> for MetaState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MouseSelection {
-    pub sequence_id: usize,
-    pub column: usize,
-    pub end_sequence_id: usize,
-    pub end_column: usize,
-}
-
 #[derive(Debug, Clone)]
 pub struct ThemeState {
     pub id: ThemeId,
@@ -85,7 +78,7 @@ pub struct UiState {
     pub(crate) layers: LayerState,
     pub(crate) gff_pane: GffPaneState,
     pub notification: Option<Notification>,
-    pub selection: Option<MouseSelection>,
+    pub selection: Option<Selection>,
     pub theme: ThemeState,
     pub position: Position,
     pub window: Window,

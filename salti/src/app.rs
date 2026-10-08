@@ -28,6 +28,7 @@ use crate::{
         layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, Window, fit, gff_pane_height},
         panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
         render::render,
+        selection::Selection,
         ui_state::{LoadingState, UiState},
     },
     update::UpdateResult,
@@ -448,10 +449,16 @@ impl App {
                     ViewMode::Default | ViewMode::FullTranslate => ViewMode::QuickTranslate,
                 };
 
-                let selection = self.ui.selection.take();
-                let result = self.apply(|s| s.mode = next);
-                self.ui.selection = selection;
-                result?;
+                let selection = self.ui.selection;
+                self.apply(|s| s.mode = next)?;
+                let session = self.session()?;
+                self.ui.selection = selection.map(|selection| match next {
+                    ViewMode::QuickTranslate => Selection {
+                        columns: session.codon_columns(selection.columns),
+                        ..selection
+                    },
+                    ViewMode::Default | ViewMode::FullTranslate => selection,
+                });
             }
             Command::ReloadAsProtein { frame } => self.apply(|s| {
                 if let Some(frame) = frame {
@@ -486,7 +493,7 @@ impl App {
         let palette = self
             .session
             .as_ref()
-            .map(|alignment| CommandPaletteState::from_alignment(alignment, self.gff.as_ref()))
+            .map(|session| CommandPaletteState::from_session(session, self.gff.as_ref()))
             .unwrap_or_else(CommandPaletteState::empty);
         self.ui.layers.open_palette(palette);
     }

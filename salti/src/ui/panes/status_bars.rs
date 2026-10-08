@@ -11,7 +11,6 @@ use ratatui::{
 use crate::{
     core::session::{Session, ViewMode},
     ui::{
-        selection::selection_row_bounds,
         ui_state::{LoadingState, UiState},
         utils::truncate_label,
     },
@@ -24,97 +23,75 @@ fn format_percent(fraction: f64) -> String {
     ((fraction * 10_000.0).round() / 100.0).to_string()
 }
 
+fn range_label(start: usize, end: usize) -> String {
+    if start == end {
+        start.to_string()
+    } else {
+        format!("{start}-{end}")
+    }
+}
+
 fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
+    let Some(session) = session else {
+        return Vec::new();
+    };
     let theme = &ui.theme.styles;
+    let (state, layout) = (session.state(), session.layout());
     let mut parts = Vec::new();
 
-    if let Some(session) = session {
-        let (state, layout) = (session.state(), session.layout());
-        if state.row_regex_filter.is_some() || state.filter.is_active() {
-            let mut text = String::from("Filters:");
-            if let Some(regex) = &state.row_regex_filter {
-                let _ = write!(text, " [rows: {regex}]");
-            }
-            if let Some(fraction) = state.filter.max_gap_fraction {
-                let _ = write!(text, " [gaps: <= {}%]", format_percent(fraction));
-            }
-            if let Some(fraction) = state.filter.min_const_fraction {
-                let _ = write!(text, " [constant: >= {}%]", format_percent(fraction));
-            }
-            let _ = write!(text, " ({} rows)", layout.rows().len());
-            if state.filter.is_active() {
-                let _ = write!(text, " ({} cols)", layout.columns().len());
-            }
-            parts.push(text.set_style(theme.warning));
+    if state.row_regex_filter.is_some() || state.filter.is_active() {
+        let mut text = String::from("Filters:");
+        if let Some(regex) = &state.row_regex_filter {
+            let _ = write!(text, " [rows: {regex}]");
         }
-
-        if state.mode != ViewMode::Default {
-            if !parts.is_empty() {
-                parts.push(Span::raw(" | "));
-            }
-            parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
+        if let Some(fraction) = state.filter.max_gap_fraction {
+            let _ = write!(text, " [gaps: <= {}%]", format_percent(fraction));
         }
+        if let Some(fraction) = state.filter.min_const_fraction {
+            let _ = write!(text, " [constant: >= {}%]", format_percent(fraction));
+        }
+        let _ = write!(text, " ({} rows)", layout.rows().len());
+        if state.filter.is_active() {
+            let _ = write!(text, " ({} cols)", layout.columns().len());
+        }
+        parts.push(text.set_style(theme.warning));
     }
 
-    // optional selection info building
+    if state.mode != ViewMode::Default {
+        parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
+    }
+
     if let Some(selection) = ui.selection {
-        let (row_min, row_max) = selection_row_bounds(selection);
-        let selected_sequence_count = row_max - row_min + 1;
-        let col_start = selection.column.min(selection.end_column) + 1;
-        let col_end = selection.column.max(selection.end_column) + 1;
+        let count = selection.rows.last - selection.rows.start + 1;
+        let lo = layout.columns()[selection.columns.start];
+        let hi = layout.columns()[selection.columns.last];
+        let nucleotides = range_label(lo + 1, hi + 1);
 
-        if !parts.is_empty() {
-            parts.push(Span::raw(" | "));
-        }
-
-        if selected_sequence_count == 1 {
-            let position_label = alignment
-                .and_then(|alignment| alignment.translation_overlay())
-                .and_then(|overlay| {
-                    let start_col = selection.column.min(selection.end_column);
-                    let end_col = selection.column.max(selection.end_column);
-                    match (overlay.codon_span(start_col), overlay.codon_span(end_col)) {
-                        (Some(start_span), Some(end_span)) => {
-                            let start = (start_span.start - overlay.frame.offset()) / 3 + 1;
-                            let end = (end_span.start - overlay.frame.offset()) / 3 + 1;
-                            if start == end {
-                                Some(start.to_string())
-                            } else {
-                                Some(format!("{start}-{end}"))
-                            }
-                        }
-                        _ => None,
-                    }
-                })
-                .unwrap_or_else(|| {
-                    if col_start == col_end {
-                        col_start.to_string()
-                    } else {
-                        format!("{col_start}-{col_end}")
-                    }
-                });
-            let sequence_name = if let Some(alignment) = alignment {
-                if let Some(sequence) = alignment.base().project_absolute_row(selection.sequence_id)
-                {
-                    truncate_label(sequence.id(), STATUS_BAR_SELECTED_NAME_MAX_CHARS)
-                } else {
-                    "Unknown".to_string()
-                }
+        let text = if count == 1 {
+            let protein = session.protein_columns(lo..hi + 1);
+            let position = if state.mode == ViewMode::QuickTranslate && !protein.is_empty() {
+                range_label(protein.start + 1, protein.end)
             } else {
-                "Unknown".to_string()
+                nucleotides
             };
-            parts.push(
-                format!("Selected: {sequence_name} @ {position_label}").set_style(theme.text),
-            );
+            let name = session
+                .base_alignment()
+                .id(layout.rows()[selection.rows.start]);
+            format!(
+                "Selected: {} @ {position}",
+                truncate_label(name, STATUS_BAR_SELECTED_NAME_MAX_CHARS)
+            )
         } else {
-            parts.push(
-                format!("{selected_sequence_count} sequence(s) selected @ {col_start}-{col_end}")
-                    .set_style(theme.text),
-            );
-        }
+            format!("{count} sequence(s) selected @ {nucleotides}")
+        };
+        parts.push(text.set_style(theme.text));
     }
 
     parts
+        .into_iter()
+        .flat_map(|part| [Span::raw(" | "), part])
+        .skip(1)
+        .collect()
 }
 
 fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {

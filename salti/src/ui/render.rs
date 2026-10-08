@@ -162,7 +162,7 @@ pub fn render(
         },
         layout.consensus_alignment_pane,
     );
-    render_mouse_selection(f, layout, session, ui);
+    render_mouse_selection(f.buffer_mut(), layout, session, ui);
 
     render_overlays(
         f,
