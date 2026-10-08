@@ -63,12 +63,12 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
 
     if let Some(selection) = ui.selection {
         let count = selection.rows.last - selection.rows.start + 1;
-        let lo = layout.columns()[selection.columns.start];
-        let hi = layout.columns()[selection.columns.last];
-        let nucleotides = range_label(lo + 1, hi + 1);
+        let first = layout.columns()[selection.columns.start];
+        let last = layout.columns()[selection.columns.last];
+        let nucleotides = range_label(first + 1, last + 1);
 
         let text = if count == 1 {
-            let protein = session.protein_columns(lo..hi + 1);
+            let protein = session.protein_columns(first..last + 1);
             let position = if state.mode == ViewMode::QuickTranslate && !protein.is_empty() {
                 range_label(protein.start + 1, protein.end)
             } else {

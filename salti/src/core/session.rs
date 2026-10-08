@@ -2,7 +2,10 @@ use std::{fmt, ops::Range, range::RangeInclusive, str::FromStr};
 
 use anyhow::Result;
 
-use crate::core::{columns::WindowColumns, layout::Layout};
+use crate::core::{
+    columns::{Cell, WindowColumns},
+    layout::Layout,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DiffMode {
@@ -90,7 +93,26 @@ pub struct Session {
 
 impl Session {
     pub fn new(base_alignment: libmsa::Alignment) -> Self {
-        todo!()
+        let state = ViewState {
+            alignment_type: base_alignment.detected_type(),
+            mode: ViewMode::Default,
+            frame: libmsa::ReadingFrame::Frame1,
+            filter: libmsa::ColumnFilter::default(),
+            reference: None,
+            pinned: Vec::new(),
+            row_regex_filter: None,
+        };
+
+        let layout =
+            Layout::build(&base_alignment, &state).expect("default state should always build");
+
+        Self {
+            base_alignment,
+            state,
+            layout,
+            diff_mode: DiffMode::default(),
+            consensus_method: libmsa::ConsensusMethod::default(),
+        }
     }
 
     pub fn update(
@@ -133,25 +155,82 @@ impl Session {
     }
 
     pub fn window_columns(&self, window: Range<usize>) -> WindowColumns<'_> {
-        todo!()
+        let (grid, columns, cells) = match self.state.mode {
+            ViewMode::QuickTranslate if !window.is_empty() => {
+                let frame = self.state.frame;
+                let last_column = self.base_alignment.width() - 1;
+                let protein_window = self.protein_columns(window.clone());
+                let cells = window
+                    .map(|nt| {
+                        let protein_column = frame.protein_col(nt)?;
+                        let codon_start = frame.nt_range(protein_column).start;
+                        Some(Cell {
+                            index: protein_column - protein_window.start,
+                            centre: nt == (codon_start + 1).min(last_column),
+                        })
+                    })
+                    .collect();
+                (
+                    self.base_alignment.translated_grid(frame),
+                    protein_window.collect(),
+                    cells,
+                )
+            }
+            _ => {
+                let columns = self.layout.columns()[window].to_vec();
+                let cells = (0..columns.len())
+                    .map(|index| {
+                        Some(Cell {
+                            index,
+                            centre: true,
+                        })
+                    })
+                    .collect();
+                (self.grid(), columns, cells)
+            }
+        };
+        let summaries = grid.summaries(self.layout.rows(), &columns, self.consensus_method);
+        WindowColumns {
+            grid,
+            columns,
+            cells,
+            summaries,
+        }
     }
 
     pub fn nt_start(&self, column: usize) -> usize {
-        //  need a way to get first nt of a grid which will anchor viewport
-        todo!()
+        match self.state.mode {
+            ViewMode::FullTranslate => self.state.frame.nt_range(column).start,
+            ViewMode::Default | ViewMode::QuickTranslate => column,
+        }
     }
 
     pub fn protein_columns(&self, nt: Range<usize>) -> Range<usize> {
-        // take a nt range and return the protein coordinates
-        todo!()
+        self.state
+            .frame
+            .protein_range(nt, self.base_alignment.width())
     }
 
     pub fn column_range_at(&self, nt: Range<usize>) -> Range<usize> {
-        todo!()
+        match self.state.mode {
+            ViewMode::FullTranslate => self.protein_columns(nt),
+            ViewMode::Default | ViewMode::QuickTranslate => nt,
+        }
     }
 
     pub fn codon_columns(&self, columns: RangeInclusive<usize>) -> RangeInclusive<usize> {
-        // convert columns to the 3 wide codons
-        todo!()
+        let frame = self.state.frame;
+        let last_column = self.base_alignment.width() - 1;
+        let start = frame
+            .protein_col(columns.start)
+            .map_or(columns.start, |protein_column| {
+                frame.nt_range(protein_column).start
+            });
+        let end = frame
+            .protein_col(columns.last)
+            .map_or(columns.last, |protein_column| {
+                frame.nt_range(protein_column).end - 1
+            });
+        (start..=end.min(last_column)).into()
     }
 }
