@@ -97,7 +97,7 @@ impl Widget for AlignmentPane<'_> {
         };
         let diff = match session.diff_mode {
             DiffMode::Off => None,
-            DiffMode::Reference => session.state().reference.map(bytes),
+            DiffMode::Reference => session.state().reference().map(bytes),
             DiffMode::Consensus => Some(
                 columns
                     .summaries

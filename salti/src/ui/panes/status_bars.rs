@@ -37,27 +37,28 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
     };
     let theme = &ui.theme.styles;
     let (state, layout) = (session.state(), session.layout());
+    let filter = state.mode().filter();
     let mut parts = Vec::new();
 
-    if state.row_regex_filter.is_some() || state.filter.is_active() {
+    if state.row_regex_filter.is_some() || filter.is_active() {
         let mut text = String::from("Filters:");
         if let Some(regex) = &state.row_regex_filter {
             let _ = write!(text, " [rows: {regex}]");
         }
-        if let Some(fraction) = state.filter.max_gap_fraction {
+        if let Some(fraction) = filter.max_gap_fraction {
             let _ = write!(text, " [gaps: <= {}%]", format_percent(fraction));
         }
-        if let Some(fraction) = state.filter.min_const_fraction {
+        if let Some(fraction) = filter.min_const_fraction {
             let _ = write!(text, " [constant: >= {}%]", format_percent(fraction));
         }
         let _ = write!(text, " ({} rows)", layout.rows().len());
-        if state.filter.is_active() {
+        if filter.is_active() {
             let _ = write!(text, " ({} cols)", layout.columns().len());
         }
         parts.push(text.set_style(theme.warning));
     }
 
-    if state.mode != ViewMode::Plain {
+    if !matches!(state.mode(), ViewMode::Plain { .. }) {
         parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
     }
 
@@ -69,11 +70,12 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
 
         let text = if count == 1 {
             let protein = session.protein_columns(first..last + 1);
-            let position = if state.mode == ViewMode::TranslationOverlay && !protein.is_empty() {
-                range_label(protein.start + 1, protein.end)
-            } else {
-                nucleotides
-            };
+            let position =
+                if matches!(state.mode(), ViewMode::TranslationOverlay) && !protein.is_empty() {
+                    range_label(protein.start + 1, protein.end)
+                } else {
+                    nucleotides
+                };
             let name = session
                 .base_alignment()
                 .id(layout.rows()[selection.rows.start]);

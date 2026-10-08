@@ -1,6 +1,4 @@
-use anyhow::{Result, bail};
-
-use crate::core::session::{ViewMode, ViewState};
+use crate::core::session::ViewState;
 
 #[derive(Debug)]
 pub struct Layout {
@@ -10,41 +8,35 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn build(base_alignment: &libmsa::Alignment, state: &ViewState) -> Result<Self> {
+    pub fn build(base_alignment: &libmsa::Alignment, state: &ViewState) -> Self {
+        let (pinned, reference) = (state.pinned(), state.reference());
         debug_assert!(
-            state.pinned.iter().enumerate().all(|(i, &row)| {
-                Some(row) != state.reference && !state.pinned[..i].contains(&row)
-            }),
+            pinned
+                .iter()
+                .enumerate()
+                .all(|(i, &row)| Some(row) != reference && !pinned[..i].contains(&row)),
             "pinned rows must be unique and not the reference"
         );
-        if state.mode != ViewMode::Plain && !state.alignment_type.supports_translation() {
-            bail!(
-                "Translation needs a DNA alignment. Use set-sequence-type if the type was detected incorrectly"
-            );
-        }
-        if state.mode == ViewMode::TranslationOverlay && state.filter.is_active() {
-            bail!(
-                "Column filters can't be combined with the translation overlay. Turn the overlay off with t, or run clear-all-filters first"
-            );
-        }
 
-        let mut rows = state.pinned.clone();
+        let mut rows = pinned.to_vec();
         rows.extend((0..base_alignment.row_count()).filter(|&row| {
-            Some(row) != state.reference
-                && !state.pinned.contains(&row)
+            Some(row) != reference
+                && !pinned.contains(&row)
                 && state
                     .row_regex_filter
                     .as_ref()
                     .is_none_or(|regex| regex.is_match(base_alignment.id(row)))
         }));
 
-        let columns = state.grid(base_alignment).kept_columns(&rows, state.filter);
+        let columns = state
+            .grid(base_alignment)
+            .kept_columns(&rows, state.mode().filter());
 
-        Ok(Self {
+        Self {
             rows,
-            pinned: state.pinned.len(),
+            pinned: pinned.len(),
             columns,
-        })
+        }
     }
 
     pub fn rows(&self) -> &[usize] {
@@ -66,6 +58,11 @@ impl Layout {
     /// Position in columns of `column` or the next visible column if its hidden.
     pub fn column_position(&self, column: usize) -> usize {
         self.columns.partition_point(|&c| c < column)
+    }
+
+    pub fn visible_column_position(&self, column: usize) -> Option<usize> {
+        let position = self.column_position(column);
+        (position < self.columns.len()).then_some(position)
     }
 
     /// Position in rows of `row` or the next visible row if its hidden.

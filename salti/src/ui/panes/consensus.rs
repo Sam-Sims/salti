@@ -24,7 +24,7 @@ impl Widget for ConsensusAlignmentPane<'_> {
         let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let (columns, theme) = (self.columns, self.theme);
-        let reference = self.session.state().reference.map_or_else(
+        let reference = self.session.state().reference().map_or_else(
             || Line::from("No reference selected.".fg(theme.theme.text_dim).italic()),
             |row| {
                 let bytes: Vec<u8> = columns.grid.cells(row, &columns.columns).collect();

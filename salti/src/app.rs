@@ -1,6 +1,6 @@
 use std::{env, path::Path, time::Duration};
 
-use anyhow::{Result, bail, format_err};
+use anyhow::{Context, Result};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
 use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::{
@@ -31,7 +31,6 @@ use crate::{
             local_feature_track::local_feature_row_count,
         },
         render::render,
-        selection::Selection,
         ui_state::{LoadingState, UiState},
     },
     update::UpdateResult,
@@ -344,7 +343,7 @@ impl App {
     {
         for command in commands {
             if let Err(error) = self.execute_command(command) {
-                warn!(error = ?error, "Command failed");
+                debug!(error = ?error, "Command failed");
                 self.ui.notification = Some(Notification {
                     level: NotificationLevel::Error,
                     message: error.to_string(),
@@ -356,24 +355,12 @@ impl App {
 
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
-            Command::Quit => {
-                self.should_quit = true;
-            }
-            Command::OpenCommandPalette => {
-                self.open_command_palette();
-            }
-            Command::CloseOverlay => {
-                self.ui.layers.close_active();
-            }
-            Command::ToggleMinimap => {
-                self.ui.layers.toggle_minimap();
-            }
-            Command::SetTheme(theme_id) => {
-                self.ui.set_theme(theme_id);
-            }
-            Command::ShowNotification(notification) => {
-                self.ui.notification = Some(notification);
-            }
+            Command::Quit => self.should_quit = true,
+            Command::OpenCommandPalette => self.open_command_palette(),
+            Command::CloseOverlay => self.ui.layers.close_active(),
+            Command::ToggleMinimap => self.ui.layers.toggle_minimap(),
+            Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
+            Command::ShowNotification(notification) => self.ui.notification = Some(notification),
             Command::LoadFile { input } => {
                 self.clear_mouse_selection();
                 self.start_load_job(input);
@@ -383,12 +370,8 @@ impl App {
                 self.ui.gff_pane = GffPaneState::default();
                 self.show_info(format!("Loaded GFF file: {path}"));
             }
-            Command::CheckForUpdate => {
-                self.spawn_update_check(false);
-            }
-            Command::CheckForUpdateAndNotify => {
-                self.spawn_update_check(true);
-            }
+            Command::CheckForUpdate => self.spawn_update_check(false),
+            Command::CheckForUpdateAndNotify => self.spawn_update_check(true),
 
             Command::ScrollDown { amount } => self.ui.position.row += amount,
             Command::ScrollUp { amount } => {
@@ -403,17 +386,29 @@ impl App {
             }
             Command::ScrollNamesRight { amount } => self.ui.position.name += amount,
             Command::JumpToIndex(index) => self.ui.position.column = index,
-            Command::JumpToColumn(column) => self.jump_to_column(column)?,
+            Command::JumpToColumn(column) => {
+                self.ui.position.column = self
+                    .session()?
+                    .layout()
+                    .visible_column_position(column)
+                    .with_context(|| {
+                        format!("No visible column at or after position {}", column + 1)
+                    })?;
+            }
             Command::JumpToFeature(index) => {
                 let gff = self
                     .gff
                     .as_ref()
-                    .ok_or_else(|| format_err!("No GFF file is loaded. Load one with load-gff"))?;
-                let column = self
-                    .session()?
-                    .column_range_at(gff.features[index].range.clone())
-                    .start;
-                self.jump_to_column(column)?;
+                    .context("No GFF file is loaded. Load one with load-gff")?;
+                let feature = &gff.features[index];
+                let session = self.session()?;
+                let column = session.column_range_at(feature.range.clone()).start;
+                self.ui.position.column = session
+                    .layout()
+                    .visible_column_position(column)
+                    .with_context(|| {
+                        format!("No visible column at or after feature {}", feature.name)
+                    })?;
             }
             Command::JumpToSequence(row) => {
                 self.ui.position.row = self.session()?.layout().row_position(row);
@@ -422,71 +417,56 @@ impl App {
                 self.ui.position.column =
                     self.session()?.layout().columns().len().saturating_sub(1);
             }
-            Command::PinSequence(row) => self.apply(|s| s.pinned.push(row))?,
-            Command::UnpinSequence(row) => self.apply(|s| s.pinned.retain(|&r| r != row))?,
+            Command::PinSequence(row) => self.apply(|s| {
+                s.pin(row);
+                Ok(())
+            })?,
+            Command::UnpinSequence(row) => self.apply(|s| {
+                s.unpin(row);
+                Ok(())
+            })?,
             Command::SetReference(row) => self.apply(|s| {
-                s.pinned.retain(|&r| Some(r) != row);
-                s.reference = row;
+                s.set_reference(row);
+                Ok(())
             })?,
             Command::SetRowFilter(pattern) => {
-                let regex = pattern.as_deref().map(regex::Regex::new).transpose()?;
-                self.apply(|s| s.row_regex_filter = regex)?;
+                let regex = pattern
+                    .as_deref()
+                    .map(regex::Regex::new)
+                    .transpose()
+                    .context("Invalid row filter pattern")?;
+                self.apply(|s| {
+                    s.row_regex_filter = regex;
+                    Ok(())
+                })?;
             }
-            Command::SetGapFilter(fraction) => {
-                self.apply(|s| s.filter.max_gap_fraction = fraction)?;
-            }
+            Command::SetGapFilter(fraction) => self.apply(|s| s.set_gap_filter(fraction))?,
             Command::SetConstantFilter(fraction) => {
-                self.apply(|s| s.filter.min_const_fraction = fraction)?;
+                self.apply(|s| s.set_constant_filter(fraction))?;
             }
             Command::ClearAllFilters => self.apply(|s| {
                 s.row_regex_filter = None;
-                s.filter = libmsa::ColumnFilter::default();
+                s.clear_column_filter();
+                Ok(())
             })?,
             Command::ToggleTranslationOverlay => {
+                let mut selection = self.ui.selection;
+                self.apply(ViewState::toggle_translation_overlay)?;
                 let session = self.session()?;
-                if !session.grid().alignment_type().supports_translation() {
-                    bail!(
-                        "Translation needs a DNA alignment. Use set-sequence-type if the type was detected wrongly"
-                    );
+                if let Some(selection) = &mut selection
+                    && matches!(session.state().mode(), ViewMode::TranslationOverlay)
+                {
+                    selection.columns = session.codon_columns(selection.columns);
                 }
-
-                let next = match session.state().mode {
-                    ViewMode::TranslationOverlay => ViewMode::Plain,
-                    ViewMode::Plain | ViewMode::ProteinView => ViewMode::TranslationOverlay,
-                };
-
-                let selection = self.ui.selection;
-                self.apply(|s| s.mode = next)?;
-                let session = self.session()?;
-                self.ui.selection = selection.map(|selection| match next {
-                    ViewMode::TranslationOverlay => Selection {
-                        columns: session.codon_columns(selection.columns),
-                        ..selection
-                    },
-                    ViewMode::Plain | ViewMode::ProteinView => selection,
-                });
+                self.ui.selection = selection;
             }
-            Command::ToggleProteinView => self.apply(|s| {
-                s.mode = match s.mode {
-                    ViewMode::ProteinView => ViewMode::Plain,
-                    ViewMode::Plain | ViewMode::TranslationOverlay => ViewMode::ProteinView,
-                };
+            Command::ToggleProteinView => self.apply(ViewState::toggle_protein_view)?,
+            Command::SetTranslationFrame(frame) => self.apply(|s| {
+                s.frame = frame;
+                Ok(())
             })?,
-            Command::SetTranslationFrame(frame) => self.apply(|s| s.frame = frame)?,
             Command::SetActiveType(alignment_type) => {
-                if self.session()?.state().mode == ViewMode::ProteinView {
-                    bail!(
-                        "The sequence type can't be changed in the protein view. Press T to leave it first"
-                    );
-                }
-                self.apply(|s| {
-                    s.alignment_type = alignment_type;
-                    if !alignment_type.supports_translation()
-                        && s.mode == ViewMode::TranslationOverlay
-                    {
-                        s.mode = ViewMode::Plain;
-                    }
-                })?;
+                self.apply(|s| s.set_alignment_type(alignment_type))?;
             }
             Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
             Command::SetDiffMode(mode) => self.session_mut()?.diff_mode = mode,
@@ -499,8 +479,9 @@ impl App {
         let palette = self
             .session
             .as_ref()
-            .map(|session| CommandPaletteState::from_session(session, self.gff.as_ref()))
-            .unwrap_or_else(CommandPaletteState::empty);
+            .map_or_else(CommandPaletteState::empty, |session| {
+                CommandPaletteState::from_session(session, self.gff.as_ref())
+            });
         self.ui.layers.open_palette(palette);
     }
 
@@ -519,32 +500,19 @@ impl App {
     fn session(&self) -> Result<&Session> {
         self.session
             .as_ref()
-            .ok_or_else(|| format_err!("No alignment is loaded. Open one with load-alignment"))
+            .context("No alignment is loaded. Open one with load-alignment")
     }
 
     fn session_mut(&mut self) -> Result<&mut Session> {
         self.session
             .as_mut()
-            .ok_or_else(|| format_err!("No alignment is loaded. Open one with load-alignment"))
+            .context("No alignment is loaded. Open one with load-alignment")
     }
 
-    fn apply(&mut self, change: impl FnOnce(&mut ViewState)) -> Result<()> {
+    fn apply(&mut self, change: impl FnOnce(&mut ViewState) -> Result<()>) -> Result<()> {
         let position = self.ui.position;
         self.ui.position = self.session_mut()?.update(position, change)?;
         self.clear_mouse_selection();
-        Ok(())
-    }
-
-    fn jump_to_column(&mut self, column: usize) -> Result<()> {
-        let layout = self.session()?.layout();
-        let (idx, len) = (layout.column_position(column), layout.columns().len());
-        if idx == len {
-            bail!(
-                "No visible column at or after position {}. Choose an earlier position or loosen the column filters",
-                column + 1
-            );
-        }
-        self.ui.position.column = idx;
         Ok(())
     }
 

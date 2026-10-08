@@ -227,9 +227,9 @@ fn anchor_at(
         .columns
         .clone()
         .nth(usize::from(mouse_x - sequence_rows_area.x))?;
-    let columns = match session.state().mode {
+    let columns = match session.state().mode() {
         ViewMode::TranslationOverlay => session.codon_columns((column..=column).into()),
-        ViewMode::Plain | ViewMode::ProteinView => (column..=column).into(),
+        ViewMode::Plain { .. } | ViewMode::ProteinView { .. } => (column..=column).into(),
     };
 
     Some(Selection {
