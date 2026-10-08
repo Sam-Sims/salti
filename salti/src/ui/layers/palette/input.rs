@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use anyhow::format_err;
 use crossterm::event::{KeyCode, KeyEvent};
-use libmsa::AlignmentType;
 
 use super::{
     command_definitions::COMMAND_SPECS,
@@ -13,13 +10,10 @@ use crate::{
     command::Command,
     core::{
         gff::Gff,
-        model::AlignmentModel,
         search::{Direction, FilterMode, SearchableList},
+        session::Session,
     },
-    ui::{
-        features::FeatureMap,
-        layers::notification::{Notification, NotificationLevel},
-    },
+    ui::layers::notification::{Notification, NotificationLevel},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -29,24 +23,9 @@ pub(super) enum PaletteState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VisibleSequence {
-    pub sequence_id: usize,
-    pub sequence_name: Arc<str>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GffFeatureTarget {
-    pub(crate) feature_name: Arc<str>,
-    pub(crate) target_col: Option<usize>,
-}
-
-pub(crate) struct CommandPaletteSnapshot {
-    pub(crate) selectable_sequences: Vec<VisibleSequence>,
-    pub(crate) pinned_sequences: Vec<VisibleSequence>,
-    pub(crate) active_type: AlignmentType,
-    pub(crate) is_reloaded_as_protein: bool,
-    pub(crate) visible_columns: Vec<usize>,
-    pub(crate) gff_feature_targets: Option<Vec<GffFeatureTarget>>,
+pub(super) struct VisibleSequence {
+    pub(super) sequence_id: usize,
+    pub(super) sequence_name: String,
 }
 
 #[derive(Debug)]
@@ -56,91 +35,41 @@ pub struct CommandPaletteState {
     pub(super) phase: PaletteState,
     pub(super) command_list: SearchableList,
     pub(super) completion_list: SearchableList,
-    pub(super) selectable_sequences: Vec<VisibleSequence>,
-    pub(super) pinned_sequences: Vec<VisibleSequence>,
-    pub(super) active_type: AlignmentType,
-    pub(super) is_reloaded_as_protein: bool,
-    pub(super) visible_columns: Vec<usize>,
-    pub(super) gff_feature_targets: Option<Vec<GffFeatureTarget>>,
+    pub(super) rows: Vec<VisibleSequence>,
+    pub(super) pinned: usize,
+    pub(super) feature_names: Option<Vec<String>>,
 }
+
 impl CommandPaletteState {
     pub fn empty() -> Self {
-        Self::new(CommandPaletteSnapshot {
-            selectable_sequences: Vec::new(),
-            pinned_sequences: Vec::new(),
-            active_type: libmsa::AlignmentType::Generic,
-            is_reloaded_as_protein: false,
-            visible_columns: Vec::new(),
-            gff_feature_targets: None,
-        })
+        Self::new(Vec::new(), 0, None)
     }
 
-    pub fn from_alignment(alignment: &AlignmentModel, gff: Option<&Gff>) -> Self {
-        let mut selectable_sequences: Vec<VisibleSequence> = (0..alignment.view().row_count())
-            .filter_map(|rel| {
-                let sequence = alignment.view().sequence(rel)?;
-                Some(VisibleSequence {
-                    sequence_id: sequence.absolute_row_id(),
-                    sequence_name: sequence.id().into(),
-                })
-            })
-            .collect();
-
-        for &abs_id in alignment.rows().pinned() {
-            if let Some(sequence) = alignment.base().project_absolute_row(abs_id) {
-                selectable_sequences.push(VisibleSequence {
-                    sequence_id: abs_id,
-                    sequence_name: sequence.id().into(),
-                });
-            }
-        }
-
-        let pinned_sequences = alignment
+    pub fn from_session(session: &Session, gff: Option<&Gff>) -> Self {
+        let layout = session.layout();
+        let rows = layout
             .rows()
-            .pinned()
             .iter()
-            .filter_map(|&abs_id| {
-                let sequence = alignment.base().project_absolute_row(abs_id)?;
-                Some(VisibleSequence {
-                    sequence_id: abs_id,
-                    sequence_name: sequence.id().into(),
-                })
+            .map(|&row| VisibleSequence {
+                sequence_id: row,
+                sequence_name: session.base_alignment().id(row).to_string(),
             })
             .collect();
-
-        let gff_feature_targets = gff.map(|gff| {
-            let mapping = FeatureMap::for_alignment(alignment);
+        let feature_names = gff.map(|gff| {
             gff.features
                 .iter()
-                .map(|feature| GffFeatureTarget {
-                    feature_name: feature.name.as_str().into(),
-                    target_col: mapping
-                        .map_feature(alignment.view(), feature)
-                        .map(|range| range.start),
-                })
+                .map(|feature| feature.name.clone())
                 .collect()
         });
 
-        Self::new(CommandPaletteSnapshot {
-            selectable_sequences,
-            pinned_sequences,
-            active_type: alignment.base().active_type(),
-            is_reloaded_as_protein: alignment.is_reloaded_as_protein(),
-            visible_columns: alignment.view().absolute_column_ids().collect(),
-            gff_feature_targets,
-        })
+        Self::new(rows, layout.pinned(), feature_names)
     }
 
-    pub(crate) fn new(init: CommandPaletteSnapshot) -> Self {
-        let CommandPaletteSnapshot {
-            selectable_sequences,
-            pinned_sequences,
-            active_type,
-            is_reloaded_as_protein,
-            visible_columns,
-            gff_feature_targets,
-        } = init;
-
+    pub(super) fn new(
+        rows: Vec<VisibleSequence>,
+        pinned: usize,
+        feature_names: Option<Vec<String>>,
+    ) -> Self {
         let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
         command_list.set_items(display_command_names());
         let completion_list = SearchableList::new(FilterMode::Fuzzy, None);
@@ -151,12 +80,9 @@ impl CommandPaletteState {
             phase: PaletteState::Command,
             command_list,
             completion_list,
-            selectable_sequences,
-            pinned_sequences,
-            active_type,
-            is_reloaded_as_protein,
-            visible_columns,
-            gff_feature_targets,
+            rows,
+            pinned,
+            feature_names,
         }
     }
 
