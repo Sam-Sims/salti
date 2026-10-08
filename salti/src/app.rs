@@ -408,7 +408,7 @@ impl App {
                 let gff = self
                     .gff
                     .as_ref()
-                    .ok_or_else(|| format_err!("no GFF file is loaded"))?;
+                    .ok_or_else(|| format_err!("No GFF file is loaded. Load one with load-gff"))?;
                 let column = self
                     .session()?
                     .column_range_at(gff.features[index].range.clone())
@@ -444,7 +444,9 @@ impl App {
             Command::ToggleTranslationView => {
                 let session = self.session()?;
                 if !session.grid().alignment_type().supports_translation() {
-                    bail!("translation needs a DNA alignment");
+                    bail!(
+                        "Translation needs a DNA alignment. Use set-sequence-type if the type was detected wrongly"
+                    );
                 }
 
                 let next = match session.state().mode {
@@ -475,7 +477,9 @@ impl App {
             Command::SetTranslationFrame(frame) => self.apply(|s| s.frame = frame)?,
             Command::SetActiveType(alignment_type) => {
                 if self.session()?.state().mode == ViewMode::FullTranslate {
-                    bail!("leave the translated view (T) before changing the sequence type");
+                    bail!(
+                        "The sequence type can't be changed in the translated view. Press T to leave it first"
+                    );
                 }
                 self.apply(|s| {
                     s.alignment_type = alignment_type;
@@ -516,13 +520,13 @@ impl App {
     fn session(&self) -> Result<&Session> {
         self.session
             .as_ref()
-            .ok_or_else(|| format_err!("no alignment loaded"))
+            .ok_or_else(|| format_err!("No alignment is loaded. Open one with load-alignment"))
     }
 
     fn session_mut(&mut self) -> Result<&mut Session> {
         self.session
             .as_mut()
-            .ok_or_else(|| format_err!("no alignment loaded"))
+            .ok_or_else(|| format_err!("No alignment is loaded. Open one with load-alignment"))
     }
 
     fn apply(&mut self, change: impl FnOnce(&mut ViewState)) -> Result<()> {
@@ -536,7 +540,10 @@ impl App {
         let layout = self.session()?.layout();
         let (idx, len) = (layout.column_position(column), layout.columns().len());
         if idx == len {
-            bail!("no visible column at or after position {}", column + 1);
+            bail!(
+                "No visible column at or after position {}. Choose an earlier position or loosen the column filters",
+                column + 1
+            );
         }
         self.ui.position.column = idx;
         Ok(())

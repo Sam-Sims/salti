@@ -93,7 +93,9 @@ pub fn parse_gff(path: &Path) -> Result<Gff> {
             let end = usize::from(record.end());
             let name = extract_name(&record);
             if end <= start {
-                return Err(format_err!("gff feature {name} ends before it starts"));
+                return Err(format_err!(
+                    "GFF feature {name} ends before it starts. Check its start and end coordinates"
+                ));
             }
 
             Ok(Some(Feature {
