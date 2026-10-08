@@ -54,7 +54,7 @@ impl Widget for ConsensusAlignmentPane<'_> {
 
         Paragraph::new(lines)
             .style(theme.styles.base_block)
-            .render(inner_area, buf)
+            .render(inner_area, buf);
     }
 }
 

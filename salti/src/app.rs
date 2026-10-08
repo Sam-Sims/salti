@@ -26,7 +26,10 @@ use crate::{
             palette::CommandPaletteState,
         },
         layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, Window, fit, gff_pane_height},
-        panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
+        panes::{
+            gff::{GffPaneState, feature_row_count},
+            local_feature_track::local_feature_row_count,
+        },
         render::render,
         selection::Selection,
         ui_state::{LoadingState, UiState},
@@ -377,7 +380,7 @@ impl App {
             }
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse_gff(Path::new(&path))?);
-                self.ui.gff_pane = Default::default();
+                self.ui.gff_pane = GffPaneState::default();
                 self.show_info(format!("Loaded GFF file: {path}"));
             }
             Command::CheckForUpdate => {

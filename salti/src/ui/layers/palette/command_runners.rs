@@ -69,7 +69,7 @@ pub(super) fn run_reload_as_protein(
         let frame = match parse_argument(arguments) {
             Some(arg) => Some(
                 arg.parse()
-                    .map_err(|_| format_err!("Invalid argument for reload-as-protein: {arg}"))?,
+                    .map_err(|()| format_err!("Invalid argument for reload-as-protein: {arg}"))?,
             ),
             None => None,
         };
