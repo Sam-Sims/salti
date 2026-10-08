@@ -2,6 +2,7 @@
 name = "salti"
 version = "0.9.0"
 edition = "2024"
+rust-version = "1.96"
 authors = ["Samuel Sims"]
 description = "A modern, fast, multiple sequence alignment browser - built for the terminal. "
 readme = "../README.md"
