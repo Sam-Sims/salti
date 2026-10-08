@@ -76,23 +76,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::core::session::Session;
-
-    fn session(sequences: &[&[u8]]) -> Session {
-        Session::new(
-            libmsa::Alignment::new(
-                sequences
-                    .iter()
-                    .enumerate()
-                    .map(|(i, residues)| libmsa::Sequence {
-                        id: format!("s{i}"),
-                        residues: residues.to_vec(),
-                    })
-                    .collect(),
-            )
-            .unwrap(),
-        )
-    }
+    use crate::test_utils::session;
 
     fn layout(rows: &[usize], pinned: usize, columns: &[usize]) -> Layout {
         Layout {

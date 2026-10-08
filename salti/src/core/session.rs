@@ -385,24 +385,9 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_utils::session;
 
     type Change = fn(&mut ViewState) -> Result<()>;
-
-    fn session(sequences: &[&[u8]]) -> Session {
-        Session::new(
-            libmsa::Alignment::new(
-                sequences
-                    .iter()
-                    .enumerate()
-                    .map(|(i, residues)| libmsa::Sequence {
-                        id: format!("s{i}"),
-                        residues: residues.to_vec(),
-                    })
-                    .collect(),
-            )
-            .unwrap(),
-        )
-    }
 
     fn set_protein(state: &mut ViewState) -> Result<()> {
         state.set_alignment_type(libmsa::AlignmentType::Protein)
