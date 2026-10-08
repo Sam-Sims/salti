@@ -35,7 +35,7 @@ pub enum Command {
     SetActiveType(libmsa::AlignmentType),
     SetTranslationFrame(libmsa::ReadingFrame),
     SetDiffMode(DiffMode),
-    ToggleTranslationView,
-    ReloadAsProtein { frame: Option<libmsa::ReadingFrame> },
+    ToggleTranslationOverlay,
+    ToggleProteinView,
     LoadGff { path: String },
 }

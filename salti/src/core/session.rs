@@ -48,9 +48,9 @@ impl FromStr for DiffMode {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ViewMode {
-    Default,
-    QuickTranslate,
-    FullTranslate,
+    Plain,
+    TranslationOverlay,
+    ProteinView,
 }
 
 #[derive(Debug, Clone)]
@@ -67,8 +67,8 @@ pub struct ViewState {
 impl ViewState {
     pub(super) fn grid<'a>(&self, base_alignment: &'a libmsa::Alignment) -> libmsa::Grid<'a> {
         match self.mode {
-            ViewMode::FullTranslate => base_alignment.translated_grid(self.frame),
-            ViewMode::Default | ViewMode::QuickTranslate => {
+            ViewMode::ProteinView => base_alignment.translated_grid(self.frame),
+            ViewMode::Plain | ViewMode::TranslationOverlay => {
                 base_alignment.grid(self.alignment_type)
             }
         }
@@ -95,7 +95,7 @@ impl Session {
     pub fn new(base_alignment: libmsa::Alignment) -> Self {
         let state = ViewState {
             alignment_type: base_alignment.detected_type(),
-            mode: ViewMode::Default,
+            mode: ViewMode::Plain,
             frame: libmsa::ReadingFrame::Frame1,
             filter: libmsa::ColumnFilter::default(),
             reference: None,
@@ -156,7 +156,7 @@ impl Session {
 
     pub fn window_columns(&self, window: Range<usize>) -> WindowColumns<'_> {
         let (grid, columns, cells) = match self.state.mode {
-            ViewMode::QuickTranslate if !window.is_empty() => {
+            ViewMode::TranslationOverlay if !window.is_empty() => {
                 let frame = self.state.frame;
                 let last_column = self.base_alignment.width() - 1;
                 let protein_window = self.protein_columns(window.clone());
@@ -200,8 +200,8 @@ impl Session {
 
     pub fn nt_start(&self, column: usize) -> usize {
         match self.state.mode {
-            ViewMode::FullTranslate => self.state.frame.nt_range(column).start,
-            ViewMode::Default | ViewMode::QuickTranslate => column,
+            ViewMode::ProteinView => self.state.frame.nt_range(column).start,
+            ViewMode::Plain | ViewMode::TranslationOverlay => column,
         }
     }
 
@@ -213,8 +213,8 @@ impl Session {
 
     pub fn column_range_at(&self, nt: Range<usize>) -> Range<usize> {
         match self.state.mode {
-            ViewMode::FullTranslate => self.protein_columns(nt),
-            ViewMode::Default | ViewMode::QuickTranslate => nt,
+            ViewMode::ProteinView => self.protein_columns(nt),
+            ViewMode::Plain | ViewMode::TranslationOverlay => nt,
         }
     }
 

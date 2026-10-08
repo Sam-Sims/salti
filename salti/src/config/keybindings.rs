@@ -26,14 +26,14 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Char('t'),
         modifiers: KeyModifiers::NONE,
-        action: Command::ToggleTranslationView,
-        help: "Toggle NT to AA translation view",
+        action: Command::ToggleTranslationOverlay,
+        help: "Toggle the translation overlay",
     },
     Binding {
         code: KeyCode::Char('T'),
         modifiers: KeyModifiers::SHIFT,
-        action: Command::ReloadAsProtein { frame: None },
-        help: "Reload alignment as protein",
+        action: Command::ToggleProteinView,
+        help: "Toggle the protein view",
     },
     Binding {
         code: KeyCode::Char('1'),

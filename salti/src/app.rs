@@ -441,7 +441,7 @@ impl App {
                 s.row_regex_filter = None;
                 s.filter = libmsa::ColumnFilter::default();
             })?,
-            Command::ToggleTranslationView => {
+            Command::ToggleTranslationOverlay => {
                 let session = self.session()?;
                 if !session.grid().alignment_type().supports_translation() {
                     bail!(
@@ -450,42 +450,40 @@ impl App {
                 }
 
                 let next = match session.state().mode {
-                    ViewMode::QuickTranslate => ViewMode::Default,
-                    ViewMode::Default | ViewMode::FullTranslate => ViewMode::QuickTranslate,
+                    ViewMode::TranslationOverlay => ViewMode::Plain,
+                    ViewMode::Plain | ViewMode::ProteinView => ViewMode::TranslationOverlay,
                 };
 
                 let selection = self.ui.selection;
                 self.apply(|s| s.mode = next)?;
                 let session = self.session()?;
                 self.ui.selection = selection.map(|selection| match next {
-                    ViewMode::QuickTranslate => Selection {
+                    ViewMode::TranslationOverlay => Selection {
                         columns: session.codon_columns(selection.columns),
                         ..selection
                     },
-                    ViewMode::Default | ViewMode::FullTranslate => selection,
+                    ViewMode::Plain | ViewMode::ProteinView => selection,
                 });
             }
-            Command::ReloadAsProtein { frame } => self.apply(|s| {
-                if let Some(frame) = frame {
-                    s.frame = frame;
-                }
+            Command::ToggleProteinView => self.apply(|s| {
                 s.mode = match s.mode {
-                    ViewMode::FullTranslate => ViewMode::Default,
-                    ViewMode::Default | ViewMode::QuickTranslate => ViewMode::FullTranslate,
+                    ViewMode::ProteinView => ViewMode::Plain,
+                    ViewMode::Plain | ViewMode::TranslationOverlay => ViewMode::ProteinView,
                 };
             })?,
             Command::SetTranslationFrame(frame) => self.apply(|s| s.frame = frame)?,
             Command::SetActiveType(alignment_type) => {
-                if self.session()?.state().mode == ViewMode::FullTranslate {
+                if self.session()?.state().mode == ViewMode::ProteinView {
                     bail!(
-                        "The sequence type can't be changed in the translated view. Press T to leave it first"
+                        "The sequence type can't be changed in the protein view. Press T to leave it first"
                     );
                 }
                 self.apply(|s| {
                     s.alignment_type = alignment_type;
-                    if !alignment_type.supports_translation() && s.mode == ViewMode::QuickTranslate
+                    if !alignment_type.supports_translation()
+                        && s.mode == ViewMode::TranslationOverlay
                     {
-                        s.mode = ViewMode::Default;
+                        s.mode = ViewMode::Plain;
                     }
                 })?;
             }
@@ -678,10 +676,10 @@ mod tests {
         };
         app.ui.selection = Some(selection);
 
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         assert_eq!(app.ui.selection, Some(selection));
 
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         assert_eq!(app.ui.selection, Some(selection));
     }
 
@@ -696,7 +694,7 @@ mod tests {
             end_column: 2,
         });
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert!(app.session.as_ref().unwrap().is_reloaded_as_protein());
         assert_eq!(
@@ -705,7 +703,7 @@ mod tests {
         );
         assert_eq!(app.ui.selection, None);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert!(!app.session.as_ref().unwrap().is_reloaded_as_protein());
         assert_eq!(
@@ -720,7 +718,7 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert_eq!(app.ui.viewport.window().col_range.start, 66);
     }
@@ -731,10 +729,10 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
         app.ui.viewport.jump_to_position(70);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert_eq!(app.ui.viewport.window().col_range.start, 212);
     }
@@ -743,7 +741,7 @@ mod tests {
     async fn gap_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         app.execute_commands([Command::SetGapFilter(Some(0.25))]);
 
         let notification = app.ui.notification.as_ref().unwrap();
@@ -757,7 +755,7 @@ mod tests {
     async fn constant_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
 
         let notification = app.ui.notification.as_ref().unwrap();
@@ -771,7 +769,7 @@ mod tests {
     async fn translation_blocked_by_gap_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
         app.execute_commands([Command::SetGapFilter(Some(0.0))]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
 
         let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
@@ -784,7 +782,7 @@ mod tests {
     async fn translation_blocked_by_constant_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
         app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
 
         let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(

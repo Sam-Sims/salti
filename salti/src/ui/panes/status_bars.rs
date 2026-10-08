@@ -57,7 +57,7 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
         parts.push(text.set_style(theme.warning));
     }
 
-    if state.mode != ViewMode::Default {
+    if state.mode != ViewMode::Plain {
         parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
     }
 
@@ -69,7 +69,7 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
 
         let text = if count == 1 {
             let protein = session.protein_columns(first..last + 1);
-            let position = if state.mode == ViewMode::QuickTranslate && !protein.is_empty() {
+            let position = if state.mode == ViewMode::TranslationOverlay && !protein.is_empty() {
                 range_label(protein.start + 1, protein.end)
             } else {
                 nucleotides

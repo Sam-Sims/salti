@@ -17,12 +17,12 @@ impl Layout {
             }),
             "pinned rows must be unique and not the reference"
         );
-        if state.mode != ViewMode::Default && !state.alignment_type.supports_translation() {
+        if state.mode != ViewMode::Plain && !state.alignment_type.supports_translation() {
             bail!(
                 "Translation needs a DNA alignment. Use set-sequence-type if the type was detected wrongly"
             );
         }
-        if state.mode == ViewMode::QuickTranslate && state.filter.is_active() {
+        if state.mode == ViewMode::TranslationOverlay && state.filter.is_active() {
             bail!(
                 "Column filters can't be combined with the translation overlay. Turn the overlay off with t, or run clear-all-filters first"
             );

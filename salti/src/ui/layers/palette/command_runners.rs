@@ -51,29 +51,23 @@ pub(super) fn run_clear_reference(
     })
 }
 
-pub(super) fn run_toggle_translation(
+pub(super) fn run_toggle_translation_overlay(
     _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
-    run_command("toggle-translate", arguments, || {
+    run_command("toggle-translation-overlay", arguments, || {
         ensure_no_argument(arguments)?;
-        Ok(Command::ToggleTranslationView)
+        Ok(Command::ToggleTranslationOverlay)
     })
 }
 
-pub(super) fn run_reload_as_protein(
+pub(super) fn run_toggle_protein_view(
     _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
-    run_command("reload-as-protein", arguments, || {
-        let frame = match parse_argument(arguments) {
-            Some(arg) => Some(
-                arg.parse()
-                    .map_err(|()| format_err!("Invalid argument for reload-as-protein: {arg}"))?,
-            ),
-            None => None,
-        };
-        Ok(Command::ReloadAsProtein { frame })
+    run_command("toggle-protein-view", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Command::ToggleProteinView)
     })
 }
 
@@ -569,20 +563,6 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Invalid argument for set-sequence-type: rna"
-        );
-    }
-
-    #[test]
-    fn reload_as_protein_accepts_optional_frame() {
-        let state = palette_state_with_columns(Vec::new());
-
-        let action = run_reload_as_protein(&state, "2").expect("frame should parse");
-
-        assert_eq!(
-            action,
-            Command::ReloadAsProtein {
-                frame: Some(libmsa::ReadingFrame::Frame2),
-            }
         );
     }
 }
