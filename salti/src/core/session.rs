@@ -379,3 +379,312 @@ impl Session {
         (start..=end.min(last_column)).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    type Change = fn(&mut ViewState) -> Result<()>;
+
+    fn session(sequences: &[&[u8]]) -> Session {
+        Session::new(
+            libmsa::Alignment::new(
+                sequences
+                    .iter()
+                    .enumerate()
+                    .map(|(i, residues)| libmsa::Sequence {
+                        id: format!("s{i}"),
+                        residues: residues.to_vec(),
+                    })
+                    .collect(),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn set_protein(state: &mut ViewState) -> Result<()> {
+        state.set_alignment_type(libmsa::AlignmentType::Protein)
+    }
+
+    fn at_column(column: usize) -> Position {
+        Position {
+            column,
+            ..Position::default()
+        }
+    }
+
+    fn at_row(row: usize) -> Position {
+        Position {
+            row,
+            ..Position::default()
+        }
+    }
+
+    #[test]
+    fn set_reference_unpins_row() {
+        let mut state = session(&[b"A", b"A", b"A"]).state().clone();
+        state.pin(2);
+        state.pin(1);
+
+        state.set_reference(Some(2));
+
+        assert_eq!(state.pinned(), [1]);
+        assert_eq!(state.reference(), Some(2));
+    }
+
+    #[test]
+    fn unpin_keeps_other_pins() {
+        let mut state = session(&[b"A", b"A", b"A"]).state().clone();
+        state.pin(2);
+        state.pin(0);
+        state.pin(1);
+
+        state.unpin(0);
+
+        assert_eq!(state.pinned(), [2, 1]);
+    }
+
+    #[rstest]
+    #[case::overlay_on_protein(set_protein, ViewState::toggle_translation_overlay)]
+    #[case::overlay_with_column_filter(
+        |state: &mut ViewState| state.set_gap_filter(Some(0.5)),
+        ViewState::toggle_translation_overlay
+    )]
+    #[case::overlay_in_protein_view(
+        ViewState::toggle_protein_view,
+        ViewState::toggle_translation_overlay
+    )]
+    #[case::protein_view_on_protein(set_protein, ViewState::toggle_protein_view)]
+    #[case::protein_type_in_overlay(ViewState::toggle_translation_overlay, set_protein)]
+    #[case::type_in_protein_view(ViewState::toggle_protein_view, set_protein)]
+    #[case::gap_filter_in_overlay(
+        ViewState::toggle_translation_overlay,
+        |state: &mut ViewState| state.set_gap_filter(Some(0.5))
+    )]
+    #[case::constant_filter_in_overlay(
+        ViewState::toggle_translation_overlay,
+        |state: &mut ViewState| state.set_constant_filter(Some(0.5))
+    )]
+    fn view_state_rejects(#[case] setup: Change, #[case] change: Change) {
+        let mut state = session(&[b"ATG"]).state().clone();
+        setup(&mut state).unwrap();
+
+        assert!(change(&mut state).is_err());
+    }
+
+    #[rstest]
+    #[case::shown_column(|state: &mut ViewState| state.set_gap_filter(Some(0.0)), 2, 1)]
+    #[case::hidden_column_moves_to_next(|state: &mut ViewState| state.set_gap_filter(Some(0.0)), 1, 1)]
+    #[case::past_end_keeps_last_column(|state: &mut ViewState| state.set_gap_filter(Some(0.0)), 9, 3)]
+    #[case::protein_view(ViewState::toggle_protein_view, 4, 1)]
+    fn update_keeps_left_column(
+        #[case] change: Change,
+        #[case] column: usize,
+        #[case] expected: usize,
+    ) {
+        let mut session = session(&[b"A-A-AA", b"AAAAAA"]);
+
+        let position = session.update(at_column(column), change).unwrap();
+
+        assert_eq!(position.column, expected);
+    }
+
+    #[test]
+    fn update_clearing_filter_keeps_left_column() {
+        let mut session = session(&[b"A-A-A", b"AAAAA"]);
+        session
+            .update(Position::default(), |state| state.set_gap_filter(Some(0.0)))
+            .unwrap();
+
+        let position = session
+            .update(at_column(1), |state| {
+                state.clear_column_filter();
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(position.column, 2);
+    }
+
+    #[rstest]
+    fn update_protein_view_round_trip_lands_on_codon_start(#[values(3, 4, 5)] column: usize) {
+        let mut session = session(&[b"ATGATGATG"]);
+
+        let protein = session
+            .update(at_column(column), ViewState::toggle_protein_view)
+            .unwrap();
+        let nt = session
+            .update(protein, ViewState::toggle_protein_view)
+            .unwrap();
+
+        assert_eq!(protein.column, 1);
+        assert_eq!(nt.column, 3);
+    }
+
+    #[rstest]
+    #[case::top_row_still_shown("s[023]", 2, 1)]
+    #[case::top_row_hidden_moves_to_next("s[03]", 2, 1)]
+    #[case::no_rows_left("nothing", 2, 0)]
+    fn update_keeps_top_row(#[case] regex: &str, #[case] row: usize, #[case] expected: usize) {
+        let mut session = session(&[b"A", b"A", b"A", b"A"]);
+
+        let position = session
+            .update(at_row(row), |state| {
+                state.row_regex_filter = Some(regex::Regex::new(regex).unwrap());
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(position.row, expected);
+    }
+
+    #[test]
+    fn update_keeps_name() {
+        let mut session = session(&[b"A"]);
+        let position = Position {
+            name: 3,
+            ..Position::default()
+        };
+
+        let position = session.update(position, |_| Ok(())).unwrap();
+
+        assert_eq!(position.name, 3);
+    }
+
+    #[test]
+    fn update_rejects_failed_change_and_keeps_state() {
+        let mut session = session(&[b"A-A", b"AAA"]);
+        session
+            .update(Position::default(), |state| state.set_gap_filter(Some(0.0)))
+            .unwrap();
+
+        let result = session.update(Position::default(), ViewState::toggle_translation_overlay);
+
+        assert!(result.is_err());
+        assert_eq!(session.state().mode().filter().max_gap_fraction, Some(0.0));
+        assert_eq!(session.layout().columns(), [0, 2]);
+    }
+
+    #[rstest]
+    #[case::plain(|_: &mut ViewState| Ok(()), 3..6)]
+    #[case::translation_overlay(ViewState::toggle_translation_overlay, 3..6)]
+    #[case::protein_view(ViewState::toggle_protein_view, 1..2)]
+    fn column_range_at_works(#[case] change: Change, #[case] expected: Range<usize>) {
+        let mut session = session(&[b"ATGATGATG"]);
+        session.update(Position::default(), change).unwrap();
+
+        assert_eq!(session.column_range_at(3..6), expected);
+    }
+
+    #[rstest]
+    #[case::widens_both_ends(libmsa::ReadingFrame::Frame1, 1..=4, 0..=5)]
+    #[case::whole_codon(libmsa::ReadingFrame::Frame1, 3..=5, 3..=5)]
+    #[case::before_offset(libmsa::ReadingFrame::Frame3, 0..=1, 0..=1)]
+    #[case::from_before_offset(libmsa::ReadingFrame::Frame3, 1..=3, 1..=4)]
+    #[case::clipped_to_width(libmsa::ReadingFrame::Frame1, 9..=9, 9..=9)]
+    fn codon_columns_works(
+        #[case] frame: libmsa::ReadingFrame,
+        #[case] columns: std::ops::RangeInclusive<usize>,
+        #[case] expected: std::ops::RangeInclusive<usize>,
+    ) {
+        let mut session = session(&[b"ATGATGATGA"]);
+        session
+            .update(Position::default(), |state| {
+                state.frame = frame;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.codon_columns(columns.into()),
+            RangeInclusive::from(expected)
+        );
+    }
+
+    #[test]
+    fn window_columns_shows_filtered_columns_in_plain() {
+        let mut session = session(&[b"A-A-A", b"AAAAA"]);
+        session
+            .update(Position::default(), |state| state.set_gap_filter(Some(0.0)))
+            .unwrap();
+
+        let window = session.window_columns(1..3);
+
+        assert_eq!(window.columns, [2, 4]);
+        assert_eq!(
+            window.cells,
+            [
+                Some(Cell {
+                    index: 0,
+                    centre: true
+                }),
+                Some(Cell {
+                    index: 1,
+                    centre: true
+                }),
+            ]
+        );
+    }
+
+    #[rstest]
+    #[case::from_start(0..8, 0..3, &[None, Some((0, false)), Some((0, true)), Some((0, false)), Some((1, false)), Some((1, true)), Some((1, false)), Some((2, true))])]
+    #[case::from_middle(4..8, 1..3, &[Some((0, false)), Some((0, true)), Some((0, false)), Some((1, true))])]
+    fn window_columns_works_in_translation_overlay(
+        #[case] window: Range<usize>,
+        #[case] expected_columns: Range<usize>,
+        #[case] expected_cells: &[Option<(usize, bool)>],
+    ) {
+        let mut session = session(&[b"AATGATGA"]);
+        session
+            .update(Position::default(), |state| {
+                state.frame = libmsa::ReadingFrame::Frame2;
+                state.toggle_translation_overlay()
+            })
+            .unwrap();
+
+        let window = session.window_columns(window);
+
+        assert_eq!(window.columns, expected_columns.collect::<Vec<_>>());
+        assert_eq!(
+            window.cells,
+            expected_cells
+                .iter()
+                .map(|cell| cell.map(|(index, centre)| Cell { index, centre }))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[rstest]
+    #[case::plain(|_: &mut ViewState| Ok(()))]
+    #[case::translation_overlay(ViewState::toggle_translation_overlay)]
+    fn window_columns_is_empty(#[case] change: Change) {
+        let mut session = session(&[b"ATG"]);
+        session.update(Position::default(), change).unwrap();
+
+        let window = session.window_columns(1..1);
+
+        assert!(
+            window.columns.is_empty() && window.cells.is_empty() && window.summaries.is_empty()
+        );
+    }
+
+    #[rstest]
+    #[case::plain(|state: &mut ViewState| {
+        state.pin(1);
+        state.pin(2);
+        state.row_regex_filter = Some(regex::Regex::new("s0").unwrap());
+        Ok(())
+    }, b'C')]
+    #[case::translation_overlay(ViewState::toggle_translation_overlay, b'M')]
+    fn window_columns_summarises_shown_rows(#[case] change: Change, #[case] expected: u8) {
+        let mut session = session(&[b"ATG", b"CCC", b"CCC", b"ATG", b"ATG"]);
+        session.update(Position::default(), change).unwrap();
+
+        let window = session.window_columns(0..1);
+
+        assert_eq!(window.summaries.len(), 1);
+        assert_eq!(window.summaries[0].consensus, Some(expected));
+    }
+}
