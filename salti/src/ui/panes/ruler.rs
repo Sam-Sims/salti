@@ -20,10 +20,12 @@ pub(crate) struct Ruler<'a> {
 impl Widget for Ruler<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let cols = self.session.layout().columns();
+        let (Some(&first), Some(&last)) = (cols.first(), cols.last()) else {
+            return;
+        };
         let shown = self.window.columns.clone();
-        let filtered_leading = shown.start == 0 && cols[0] > 0;
-        let filtered_trailing =
-            shown.end == cols.len() && cols[cols.len() - 1] < self.session.grid().width() - 1;
+        let filtered_leading = shown.start == 0 && first > 0;
+        let filtered_trailing = shown.end == cols.len() && last < self.session.grid().width() - 1;
 
         let (number_line, marker_line) = build_ruler(
             &cols[shown],

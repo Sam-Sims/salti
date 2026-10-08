@@ -121,7 +121,10 @@ impl Session {
         change: impl FnOnce(&mut ViewState),
     ) -> Result<Position> {
         let columns = self.layout.columns();
-        let nt = self.nt_start(columns[position.column.min(columns.len() - 1)]);
+        let nt = columns
+            .get(position.column)
+            .or(columns.last())
+            .map(|&column| self.nt_start(column));
         let top = self.layout.main().get(position.row).copied();
 
         let mut next = self.state.clone();
@@ -130,9 +133,10 @@ impl Session {
         self.state = next;
 
         Ok(Position {
-            column: self
-                .layout
-                .column_position(self.column_range_at(nt..nt + 1).start),
+            column: nt.map_or(position.column, |nt| {
+                self.layout
+                    .column_position(self.column_range_at(nt..nt + 1).start)
+            }),
             row: top.map_or(0, |row| self.layout.row_position(row)),
             ..position
         })

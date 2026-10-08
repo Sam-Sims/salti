@@ -1,10 +1,10 @@
 use ratatui::{
     buffer::{Buffer, CellWidth},
-    layout::Rect,
-    style::Styled,
+    layout::{Constraint, HorizontalAlignment, Rect},
+    style::{Style, Styled},
     symbols::merge::MergeStrategy,
     text::Line,
-    widgets::{Block, Widget},
+    widgets::{Block, Paragraph, Widget},
 };
 
 use crate::config::theme::ThemeStyles;
@@ -29,6 +29,14 @@ pub fn render_pane(
 
 pub fn separator_line(width: u16, styles: &ThemeStyles) -> Line<'static> {
     Line::from("─".repeat(usize::from(width)).set_style(styles.border))
+}
+
+pub fn render_centred_lines(lines: Vec<Line<'_>>, style: Style, area: Rect, buf: &mut Buffer) {
+    let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    Paragraph::new(lines)
+        .alignment(HorizontalAlignment::Center)
+        .style(style)
+        .render(area.centered_vertically(Constraint::Length(height)), buf);
 }
 
 pub fn truncate_label(value: &str, width: usize) -> String {

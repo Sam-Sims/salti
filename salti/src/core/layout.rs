@@ -19,7 +19,7 @@ impl Layout {
         );
         if state.mode != ViewMode::Plain && !state.alignment_type.supports_translation() {
             bail!(
-                "Translation needs a DNA alignment. Use set-sequence-type if the type was detected wrongly"
+                "Translation needs a DNA alignment. Use set-sequence-type if the type was detected incorrectly"
             );
         }
         if state.mode == ViewMode::TranslationOverlay && state.filter.is_active() {
@@ -39,9 +39,6 @@ impl Layout {
         }));
 
         let columns = state.grid(base_alignment).kept_columns(&rows, state.filter);
-        if columns.is_empty() {
-            bail!("No columns would remain visible. Loosen the gap or constant filter");
-        }
 
         Ok(Self {
             rows,

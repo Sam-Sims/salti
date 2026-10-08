@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
     macros::vertical,
-    style::Style,
+    style::{Style, Styled},
     text::Line,
     widgets::{Paragraph, Widget},
 };
@@ -18,7 +18,7 @@ use crate::{
         panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
         rows::{render_column_scrollbar, stretch},
         ui_state::ThemeState,
-        utils::{render_pane, separator_line},
+        utils::{render_centred_lines, render_pane, separator_line},
     },
 };
 
@@ -59,6 +59,36 @@ impl Widget for AlignmentPane<'_> {
 
         let (session, columns, theme) = (self.session, self.columns, self.theme);
         let layout = session.layout();
+        render_column_scrollbar(
+            "▬",
+            Style {
+                fg: Some(theme.theme.accent_alt),
+                bg: theme.styles.border.fg,
+                ..Style::default()
+            },
+            layout.columns().len(),
+            &self.window.columns,
+            area.inner(Margin::new(1, 0)),
+            buf,
+        );
+
+        let empty_message = if layout.columns().is_empty() {
+            Some("No columns to display")
+        } else if layout.rows().is_empty() {
+            Some("No sequences to display")
+        } else {
+            None
+        };
+        if let Some(message) = empty_message {
+            render_centred_lines(
+                vec![Line::from(message.set_style(theme.styles.error))],
+                theme.styles.base_block,
+                sequence_rows_area,
+                buf,
+            );
+            return;
+        }
+
         let bytes = |row| {
             columns
                 .grid
@@ -90,19 +120,6 @@ impl Widget for AlignmentPane<'_> {
         Paragraph::new(lines)
             .style(theme.styles.base_block)
             .render(sequence_rows_area, buf);
-
-        render_column_scrollbar(
-            "▬",
-            Style {
-                fg: Some(theme.theme.accent_alt),
-                bg: theme.styles.border.fg,
-                ..Style::default()
-            },
-            layout.columns().len(),
-            &self.window.columns,
-            area.inner(Margin::new(1, 0)),
-            buf,
-        );
     }
 }
 

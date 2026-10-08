@@ -3,7 +3,6 @@ use ratatui::{
     layout::Rect,
     style::{Styled, Stylize},
     text::Line,
-    widgets::Paragraph,
 };
 
 use crate::{
@@ -20,61 +19,35 @@ use crate::{
         },
         selection::render_mouse_selection,
         ui_state::{LoadingState, UiState},
+        utils::render_centred_lines,
     },
 };
 
 fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
     let theme = &ui.theme;
-    match &ui.meta.loading_state {
-        LoadingState::Failed(error) => {
-            let line = Line::from(
-                format!("Failed to load alignment: {error}").set_style(theme.styles.error),
-            );
-            let centred_area = Rect::new(
-                area.x,
-                area.y + area.height.saturating_sub(1) / 2,
-                area.width,
-                area.height.min(1),
-            );
-            f.render_widget(
-                Paragraph::new(line)
-                    .alignment(ratatui::layout::HorizontalAlignment::Center)
-                    .style(theme.styles.base_block),
-                centred_area,
-            );
-        }
-        LoadingState::Idle => {
-            let lines = vec![
-                Line::from(
-                    "salti: A modern MSA browser for the terminal."
-                        .fg(theme.theme.text)
-                        .bold(),
-                ),
-                Line::from(
-                    "Use the command palette to open an alignment.".set_style(theme.styles.text),
-                ),
-                Line::from(""),
-                Line::from(
-                    "Hint: use :load-alignment <alignment.fasta>"
-                        .fg(theme.theme.text_dim)
-                        .italic(),
-                ),
-            ];
-            let centred_area = Rect::new(
-                area.x,
-                area.y + area.height.saturating_sub(lines.len() as u16) / 2,
-                area.width,
-                area.height.min(lines.len() as u16),
-            );
-            f.render_widget(
-                Paragraph::new(lines)
-                    .alignment(ratatui::layout::HorizontalAlignment::Center)
-                    .style(theme.styles.base_block),
-                centred_area,
-            );
-        }
-        LoadingState::Loading | LoadingState::Loaded => {}
-    }
+    let lines = match &ui.meta.loading_state {
+        LoadingState::Failed(error) => vec![Line::from(
+            format!("Failed to load alignment: {error}").set_style(theme.styles.error),
+        )],
+        LoadingState::Idle => vec![
+            Line::from(
+                "salti: A modern MSA browser for the terminal."
+                    .fg(theme.theme.text)
+                    .bold(),
+            ),
+            Line::from(
+                "Use the command palette to open an alignment.".set_style(theme.styles.text),
+            ),
+            Line::from(""),
+            Line::from(
+                "Hint: use :load-alignment <alignment.fasta>"
+                    .fg(theme.theme.text_dim)
+                    .italic(),
+            ),
+        ],
+        LoadingState::Loading | LoadingState::Loaded => return,
+    };
+    render_centred_lines(lines, theme.styles.base_block, area, f.buffer_mut());
 }
 
 pub fn render(

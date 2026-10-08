@@ -419,7 +419,8 @@ impl App {
                 self.ui.position.row = self.session()?.layout().row_position(row);
             }
             Command::JumpToEnd => {
-                self.ui.position.column = self.session()?.layout().columns().len() - 1;
+                self.ui.position.column =
+                    self.session()?.layout().columns().len().saturating_sub(1);
             }
             Command::PinSequence(row) => self.apply(|s| s.pinned.push(row))?,
             Command::UnpinSequence(row) => self.apply(|s| s.pinned.retain(|&r| r != row))?,

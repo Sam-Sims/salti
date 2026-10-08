@@ -57,19 +57,20 @@ impl Widget for Minimap<'_> {
             .border_style(styles.border)
             .style(styles.panel_block)
             .render(minimap_layout.area, buffer);
-        render_minimap_track(
-            buffer,
-            minimap_layout.track_area,
-            self.session,
-            &self.ui.theme,
-        );
-
-        if let Some(window_box) = highlight_box(
-            minimap_layout.track_area,
-            self.ui.window.columns.clone(),
-            total_columns,
-        ) {
-            shade_highlight_box(buffer, window_box, theme);
+        if total_columns > 0 {
+            render_minimap_track(
+                buffer,
+                minimap_layout.track_area,
+                self.session,
+                &self.ui.theme,
+            );
+            if let Some(window_box) = highlight_box(
+                minimap_layout.track_area,
+                self.ui.window.columns.clone(),
+                total_columns,
+            ) {
+                shade_highlight_box(buffer, window_box, theme);
+            }
         }
 
         Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
