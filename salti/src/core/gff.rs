@@ -91,9 +91,13 @@ pub fn parse_gff(path: &Path) -> Result<Gff> {
                 .checked_sub(1)
                 .ok_or_else(|| format_err!("gff feature start must be one-based"))?;
             let end = usize::from(record.end());
+            let name = extract_name(&record);
+            if end <= start {
+                return Err(format_err!("gff feature {name} ends before it starts"));
+            }
 
             Ok(Some(Feature {
-                name: extract_name(&record),
+                name,
                 kind,
                 range: start..end,
                 strand: record.strand().into(),
