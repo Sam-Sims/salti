@@ -67,160 +67,94 @@ impl Widget for SequenceIdPane<'_> {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::{buffer::Buffer, layout::Rect};
-
     use super::*;
-    use crate::ui::layout::AppLayout;
+    use crate::{
+        core::session::Position,
+        test_utils::{buffer_text, full_window, session_with_ids},
+        ui::layout::AppLayout,
+    };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
-        }
-    }
+    const CAT: &[u8] = b"CATCATCATCATCATCAT";
 
-    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).unwrap();
-        AlignmentModel::new(alignment).unwrap()
-    }
-
-    fn render_sequence_id_pane_text(alignment: &AlignmentModel, window: &ViewportWindow) -> String {
-        render_sequence_id_pane_text_with_header(
-            alignment,
-            window,
-            AlignmentHeaderLayout::without_features(),
-        )
-    }
-
-    fn render_sequence_id_pane_text_with_header(
-        alignment: &AlignmentModel,
-        window: &ViewportWindow,
-        header: AlignmentHeaderLayout,
-    ) -> String {
+    fn render_text(session: &Session, window: &Window, header: AlignmentHeaderLayout) -> String {
         let area = Rect::new(0, 0, 150, 12);
-        let mut buffer = Buffer::empty(area);
         let layout = AppLayout::new(area, 0, header);
         let theme = ThemeState::default();
+        let mut buf = Buffer::empty(area);
 
         SequenceIdPane {
-            alignment,
+            session,
             window,
-            header: layout.alignment_header,
+            header,
             theme: &theme,
         }
-        .render(layout.sequence_id_pane, &mut buffer);
+        .render(layout.sequence_id_pane, &mut buf);
 
-        buffer_text(&buffer)
+        buffer_text(&buf, layout.sequence_id_pane)
     }
 
-    fn buffer_text(buffer: &Buffer) -> String {
-        let area = buffer.area;
-        let mut lines = Vec::new();
-
-        for y in area.top()..area.bottom() {
-            let mut line = String::new();
-            for x in area.left()..area.right() {
-                let symbol = buffer[(x, y)].symbol();
-                if symbol.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(symbol);
-                }
-            }
-            while line.ends_with(' ') {
-                line.pop();
-            }
-            lines.push(line);
-        }
-
-        while matches!(lines.last(), Some(last) if last.is_empty()) {
-            lines.pop();
-        }
-
-        lines.join("\n")
+    fn seqs(count: usize) -> Session {
+        let ids: Vec<String> = (1..=count).map(|i| format!("seq{i}")).collect();
+        let sequences: Vec<(&str, &[u8])> = ids.iter().map(|id| (id.as_str(), CAT)).collect();
+        session_with_ids(&sequences)
     }
 
     #[test]
-    fn basic_sequence_ids_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 0..18,
-        };
+    fn basic() {
+        let session = seqs(3);
 
-        insta::assert_snapshot!(
-            "sequence_id_pane_basic",
-            render_sequence_id_pane_text(&alignment, &window)
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            &full_window(&session),
+            AlignmentHeaderLayout::without_features()
+        ));
     }
 
     #[test]
-    fn local_feature_rows_reserved_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 0..18,
-        };
+    fn feature_rows() {
+        let session = seqs(3);
 
-        insta::assert_snapshot!(
-            "sequence_id_pane_local_feature_rows",
-            render_sequence_id_pane_text_with_header(
-                &alignment,
-                &window,
-                AlignmentHeaderLayout::with_features(2),
-            )
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            &full_window(&session),
+            AlignmentHeaderLayout::with_features(2)
+        ));
     }
 
     #[test]
-    fn pinned_sequence_ids_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-            raw("seq4", b"CATCATCATCATCATCAT"),
-        ]);
-        alignment.pin(1).unwrap();
-        alignment.pin(3).unwrap();
+    fn pinned() {
+        let mut session = seqs(4);
+        session
+            .update(Position::default(), |state| {
+                state.pin(1);
+                state.pin(3);
+                Ok(())
+            })
+            .unwrap();
 
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 0..18,
-        };
-
-        insta::assert_snapshot!(
-            "sequence_id_pane_pinned",
-            render_sequence_id_pane_text(&alignment, &window)
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            &full_window(&session),
+            AlignmentHeaderLayout::without_features()
+        ));
     }
 
     #[test]
-    fn scrolled_sequence_names_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1-loooooooooooong-name", b"CATCATCATCATCATCAT"),
-            raw("seq2-loooooooooooong-name", b"CATCATCATCATCATCAT"),
-            raw("seq3-loooooooooooong-name", b"CATCATCATCATCATCAT"),
+    fn scrolled() {
+        let session = session_with_ids(&[
+            ("seq1-loooooooooooong-name", CAT),
+            ("seq2-loooooooooooong-name", CAT),
+            ("seq3-loooooooooooong-name", CAT),
         ]);
-        let window = ViewportWindow {
-            row_range: 0..alignment.view().row_count(),
-            col_range: 0..alignment.view().column_count(),
-            name_range: 5..23,
+        let window = Window {
+            names: 5..23,
+            ..full_window(&session)
         };
 
-        insta::assert_snapshot!(
-            "sequence_id_pane_name_scroll",
-            render_sequence_id_pane_text(&alignment, &window)
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            &window,
+            AlignmentHeaderLayout::without_features()
+        ));
     }
 }

@@ -77,65 +77,82 @@ fn intersect(left: &Range<usize>, right: &Range<usize>) -> Option<Range<usize>> 
     (start < end).then_some(start..end)
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::core::gff::{Feature, FeatureType, Strand};
+#[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
+mod tests {
+    use rstest::rstest;
 
-//     fn feature_with_name(name: &str, start: usize, end: usize) -> Feature {
-//         Feature {
-//             name: name.to_string(),
-//             kind: FeatureType::Gene,
-//             range: start..end,
-//             strand: Strand::Forward,
-//         }
-//     }
+    use super::*;
+    use crate::{
+        core::gff::{Feature, FeatureType, Strand},
+        test_utils::session,
+    };
 
-//     fn raw(sequence: &[u8]) -> libmsa::Sequence {
-//         libmsa::Sequence {
-//             id: "seq".to_string(),
-//             residues: sequence.to_vec(),
-//         }
-//     }
+    fn genes(ranges: &[Range<usize>]) -> Gff {
+        Gff {
+            features: ranges
+                .iter()
+                .enumerate()
+                .map(|(i, range)| Feature {
+                    name: format!("gene{i}"),
+                    kind: FeatureType::Gene,
+                    range: range.clone(),
+                    strand: Strand::Forward,
+                })
+                .collect(),
+        }
+    }
 
-//     fn model_with_len(len: usize) -> AlignmentModel {
-//         let alignment = libmsa::Alignment::new(vec![raw(&vec![b'A'; len])]).unwrap();
-//         AlignmentModel::new(alignment).unwrap()
-//     }
+    fn display(gff: &Gff) -> Vec<DisplayFeature<'_>> {
+        gff.features
+            .iter()
+            .enumerate()
+            .map(|(colour_idx, feature)| DisplayFeature {
+                feature,
+                columns: feature.range.clone(),
+                colour_idx,
+            })
+            .collect()
+    }
 
-//     #[test]
-//     fn local_feature_row_count_is_one_when_no_feature_is_visible() {
-//         let gff = Gff {
-//             features: vec![feature_with_name("left", 0, 5)],
-//         };
-//         let model = model_with_len(20);
+    #[rstest]
+    #[case::shifted_to_window(&[5..10], 3..13, &[(2..7, 0)])]
+    #[case::clipped_to_window(&[0..10], 5..8, &[(0..3, 0)])]
+    #[case::outside_window_dropped(&[0..5, 6..8], 5..10, &[(1..3, 0)])]
+    #[case::overlaps_stack(&[0..10, 2..8, 10..12], 0..12, &[(0..10, 0), (2..8, 1), (10..12, 0)])]
+    #[case::capped_at_five_rows(
+        &[0..4, 0..4, 0..4, 0..4, 0..4, 0..4, 4..6],
+        0..10,
+        &[(0..4, 0), (0..4, 1), (0..4, 2), (0..4, 3), (0..4, 4), (4..6, 0)],
+    )]
+    fn place_visible_features_works(
+        #[case] ranges: &[Range<usize>],
+        #[case] window: Range<usize>,
+        #[case] expected: &[(Range<usize>, usize)],
+    ) {
+        let gff = genes(ranges);
 
-//         assert_eq!(local_feature_row_count(&gff, &model, &(10..15)), 1);
-//     }
+        let placed: Vec<(Range<usize>, usize)> = place_visible_features(&display(&gff), &window)
+            .into_iter()
+            .map(|placed| (placed.span, placed.row))
+            .collect();
 
-//     #[test]
-//     fn local_features_stack_overlapping_visible_spans() {
-//         let gff = Gff {
-//             features: vec![
-//                 feature_with_name("a", 0, 10),
-//                 feature_with_name("b", 2, 8),
-//                 feature_with_name("c", 10, 12),
-//             ],
-//         };
-//         let model = model_with_len(20);
+        assert_eq!(placed, expected);
+    }
 
-//         assert_eq!(local_feature_row_count(&gff, &model, &(0..12)), 2);
-//     }
+    #[rstest]
+    #[case::none_visible_keeps_one_row(&[0..5], 10..15, 1)]
+    #[case::stacked(&[0..10, 2..8], 0..12, 2)]
+    fn local_feature_row_count_works(
+        #[case] ranges: &[Range<usize>],
+        #[case] columns: Range<usize>,
+        #[case] expected: usize,
+    ) {
+        let session = session(&[&[b'A'; 20]]);
 
-//     #[test]
-//     fn local_feature_rows_are_capped_at_five() {
-//         let gff = Gff {
-//             features: (0..8)
-//                 .map(|idx| feature_with_name(&format!("f{idx}"), 0, 10))
-//                 .collect(),
-//         };
-//         let model = model_with_len(20);
-
-//         assert_eq!(local_feature_row_count(&gff, &model, &(0..12)), 5);
-//     }
-// }
+        assert_eq!(
+            local_feature_row_count(&genes(ranges), &session, &columns),
+            expected
+        );
+    }
+}

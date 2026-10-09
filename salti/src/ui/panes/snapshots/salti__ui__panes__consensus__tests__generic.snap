@@ -1,0 +1,9 @@
+---
+source: salti/src/ui/panes/consensus.rs
+expression: "consensus_text(&[b\"ACDEACDEACDE\", b\"ACDEACDEACDE\"], |state|\n{\n    state.set_reference(Some(0));\n    state.set_alignment_type(libmsa::AlignmentType::Generic)\n})"
+---
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│Reference Sequence│ACDEACDEACDE                                                                   │
+│Consensus Sequence│ACDEACDEACDE                                                                   │
+│                  │                                                                               │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

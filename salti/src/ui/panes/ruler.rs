@@ -238,7 +238,16 @@ fn build_ruler(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
+    use BreakMarker::{Leading, Trailing};
+    use rstest::rstest;
+
     use super::*;
+    use crate::{
+        core::session::Position,
+        test_utils::{buffer_text, session},
+    };
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -247,47 +256,118 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn basic_ruler_marks_positions() {
-        let theme = ThemeState::default();
-        let absolute_columns: Vec<usize> = (0..18).collect();
+    #[rstest]
+    #[case::contiguous(&(0..18).collect::<Vec<_>>(), false, false, "1       10        ", ".   .    |    .   ")]
+    #[case::one_break(&[0, 1, 2, 6, 7], false, false, "1    ", ". ›  ")]
+    #[case::close_breaks_become_span(&[0, 2, 4, 6, 8, 10], false, false, "1 5   ", ".~~~~~")]
+    #[case::filtered_edges(&[2, 3, 4, 5, 6], true, true, "     ", "‹ . ›")]
+    #[case::number_at_run_start(&[0, 1, 2, 14, 15, 16, 17, 18, 19], false, false, "1 15   20", ". ›.    |")]
+    #[case::lone_break_beside_span(&[0, 2, 4, 10, 11, 12, 13, 14, 20], false, false, "1 5      ", ".~~~   › ")]
+    #[case::crowded_numbers_dropped(&[0, 4, 9], false, false, "1  ", ".~~")]
+    fn build_ruler_works(
+        #[case] columns: &[usize],
+        #[case] filtered_leading: bool,
+        #[case] filtered_trailing: bool,
+        #[case] numbers: &str,
+        #[case] markers: &str,
+    ) {
+        let (number_line, marker_line) = build_ruler(
+            columns,
+            filtered_leading,
+            filtered_trailing,
+            &ThemeState::default(),
+        );
 
-        let (number_line, marker_line) = build_ruler(&absolute_columns, false, false, &theme);
-
-        assert_eq!(line_text(&number_line), "1       10        ");
-        assert_eq!(line_text(&marker_line), ".   .    |    .   ");
+        assert_eq!(
+            (
+                line_text(&number_line).as_str(),
+                line_text(&marker_line).as_str()
+            ),
+            (numbers, markers)
+        );
     }
 
-    #[test]
-    fn fragmented_ruler_marks_break() {
-        let theme = ThemeState::default();
-        let absolute_columns = [0, 1, 2, 6, 7];
-
-        let (number_line, marker_line) = build_ruler(&absolute_columns, false, false, &theme);
-
-        assert_eq!(line_text(&number_line), "1    ");
-        assert_eq!(line_text(&marker_line), ". ›  ");
+    #[rstest]
+    #[case::gap(&[0, 1, 5, 6], false, false, &[(1, Trailing)])]
+    #[case::leading(&[3, 4], true, false, &[(0, Leading)])]
+    #[case::trailing(&[0, 1], false, true, &[(1, Trailing)])]
+    #[case::gap_and_trailing(&[0, 1, 5], false, true, &[(1, Trailing), (2, Trailing)])]
+    fn break_positions_works(
+        #[case] columns: &[usize],
+        #[case] filtered_leading: bool,
+        #[case] filtered_trailing: bool,
+        #[case] expected: &[(usize, BreakMarker)],
+    ) {
+        assert_eq!(
+            break_positions(columns, filtered_leading, filtered_trailing),
+            expected
+        );
     }
 
-    #[test]
-    fn dense_fragmented_ruler_uses_span() {
-        let theme = ThemeState::default();
-        let absolute_columns = [0, 2, 4, 6, 8, 10];
-
-        let (number_line, marker_line) = build_ruler(&absolute_columns, false, false, &theme);
-
-        assert_eq!(line_text(&number_line), "1 5   ");
-        assert_eq!(line_text(&marker_line), ".~~~~~");
+    #[rstest]
+    #[case::contiguous(&[0, 1, 2], false)]
+    #[case::no_columns(&[], true)]
+    fn break_positions_is_empty(#[case] columns: &[usize], #[case] filtered_trailing: bool) {
+        assert_eq!(break_positions(columns, false, filtered_trailing), []);
     }
 
-    #[test]
-    fn filtered_ruler_marks_edges() {
-        let theme = ThemeState::default();
-        let absolute_columns = [2, 3, 4, 5, 6];
+    #[rstest]
+    #[case::within_three(&[(0, Trailing), (3, Trailing)], &[(1, 4)])]
+    #[case::leading_marks_own_column(&[(0, Leading), (1, Trailing)], &[(0, 2)])]
+    #[case::trailing_at_end_stays(&[(8, Trailing), (9, Trailing)], &[(9, 9)])]
+    #[case::two_clusters(&[(0, Trailing), (1, Trailing), (6, Trailing), (7, Trailing)], &[(1, 2), (7, 8)])]
+    fn dense_break_spans_works(
+        #[case] breaks: &[(usize, BreakMarker)],
+        #[case] expected: &[(usize, usize)],
+    ) {
+        assert_eq!(dense_break_spans(breaks, 10), expected);
+    }
 
-        let (number_line, marker_line) = build_ruler(&absolute_columns, true, true, &theme);
+    #[rstest]
+    #[case::single(&[(0, Trailing)])]
+    #[case::too_far_apart(&[(0, Trailing), (4, Trailing)])]
+    fn dense_break_spans_is_empty(#[case] breaks: &[(usize, BreakMarker)]) {
+        assert_eq!(dense_break_spans(breaks, 10), []);
+    }
 
-        assert_eq!(line_text(&number_line), "     ");
-        assert_eq!(line_text(&marker_line), "‹ . ›");
+    #[rstest]
+    #[case::whole_window(b"-AAAAAA-", 0..6, "‹  . ›")]
+    #[case::scrolled_from_start(b"-AAAAAA-", 1..6, "  . ›")]
+    #[case::short_of_end(b"-AAAAAA-", 0..5, "‹  . ")]
+    #[case::nothing_hidden(b"AAAAAA", 0..6, ".   . ")]
+    fn ruler_marks_filtered_edges_only_at_window_edges(
+        #[case] sequence: &[u8],
+        #[case] columns: Range<usize>,
+        #[case] expected: &str,
+    ) {
+        let mut session = session(&[sequence, sequence]);
+        session
+            .update(Position::default(), |state| state.set_gap_filter(Some(0.0)))
+            .unwrap();
+        let window = Window {
+            columns,
+            ..Window::default()
+        };
+        let area = Rect::new(0, 0, u16::try_from(window.columns.len()).unwrap(), 2);
+        let mut buf = Buffer::empty(area);
+
+        Ruler {
+            session: &session,
+            window: &window,
+            theme: &ThemeState::default(),
+        }
+        .render(area, &mut buf);
+
+        assert_eq!(buf_line(&buf, area, 1), expected);
+    }
+
+    fn buf_line(buf: &Buffer, area: Rect, y: u16) -> String {
+        let row = Rect {
+            y,
+            height: 1,
+            ..area
+        };
+        let text = buffer_text(buf, row);
+        format!("{text:<width$}", width = usize::from(area.width))
     }
 }

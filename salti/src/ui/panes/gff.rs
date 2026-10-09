@@ -139,20 +139,9 @@ pub(crate) fn tooltip_at(
     mouse_y: u16,
 ) -> Option<String> {
     let track = FeatureTrack::for_alignment(gff, session, usize::from(gff_inner.width));
-    if gff_inner.is_empty() {
-        return None;
-    }
-    let content_rows = Rect {
-        width: u16::try_from(track.width).unwrap_or(u16::MAX),
-        ..gff_inner
-    };
-    if !content_rows.contains((mouse_x, mouse_y).into()) {
-        return None;
-    }
-
     let feature_rows = Rect {
-        height: content_rows.height.saturating_sub(1),
-        ..content_rows
+        height: gff_inner.height.saturating_sub(1),
+        ..gff_inner
     };
     if !feature_rows.contains((mouse_x, mouse_y).into()) {
         return None;
@@ -275,82 +264,146 @@ fn feature_span(
         .end
         .saturating_mul(width)
         .div_ceil(total_columns)
-        .max(start + 1)
         .min(width);
     Some(start..start + (end - start).saturating_sub(1).max(1))
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::core::gff::Strand;
+#[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
+mod tests {
+    use rstest::rstest;
 
-//     fn feature(start: usize, end: usize) -> Feature {
-//         feature_with_name("gene", start, end)
-//     }
+    use super::*;
+    use crate::{
+        core::gff::{FeatureType, Strand},
+        test_utils::{buffer_text, session},
+    };
 
-//     fn feature_with_name(name: &str, start: usize, end: usize) -> Feature {
-//         Feature {
-//             name: name.to_string(),
-//             kind: crate::core::gff::FeatureType::Gene,
-//             range: start..end + 1,
-//             strand: Strand::Forward,
-//         }
-//     }
+    fn feature(name: &str, range: Range<usize>, strand: Strand) -> Feature {
+        Feature {
+            name: name.to_string(),
+            kind: FeatureType::Gene,
+            range,
+            strand,
+        }
+    }
 
-//     fn raw(sequence: &[u8]) -> libmsa::Sequence {
-//         libmsa::Sequence {
-//             id: "seq".to_string(),
-//             residues: sequence.to_vec(),
-//         }
-//     }
+    fn genes(ranges: &[Range<usize>]) -> Gff {
+        Gff {
+            features: ranges
+                .iter()
+                .enumerate()
+                .map(|(i, range)| feature(&format!("gene{i}"), range.clone(), Strand::Forward))
+                .collect(),
+        }
+    }
 
-//     fn model_with_sequence(sequence: &[u8]) -> AlignmentModel {
-//         let alignment = libmsa::Alignment::new(vec![raw(sequence)]).unwrap();
-//         AlignmentModel::new(alignment).unwrap()
-//     }
+    fn display(gff: &Gff) -> Vec<DisplayFeature<'_>> {
+        gff.features
+            .iter()
+            .enumerate()
+            .map(|(colour_idx, feature)| DisplayFeature {
+                feature,
+                columns: feature.range.clone(),
+                colour_idx,
+            })
+            .collect()
+    }
 
-//     fn model_with_len(len: usize) -> AlignmentModel {
-//         model_with_sequence(&vec![b'A'; len])
-//     }
+    #[rstest]
+    #[case::same_scale_leaves_gap(2..5, 10, 10, 2..4)]
+    #[case::one_column(3..4, 10, 10, 3..4)]
+    #[case::scaled_down(0..50, 10, 100, 0..4)]
+    #[case::short_feature_keeps_one_cell(50..51, 10, 100, 5..6)]
+    #[case::at_end(95..100, 10, 100, 9..10)]
+    fn feature_span_works(
+        #[case] columns: Range<usize>,
+        #[case] width: usize,
+        #[case] total_columns: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        let gff = genes(&[columns]);
 
-//     #[test]
-//     fn placed_features_alternate_rows() {
-//         let gff = Gff {
-//             features: vec![feature(0, 1), feature(2, 3), feature(4, 5)],
-//         };
-//         let model = model_with_len(6);
-//         let display_features = display_features(&gff, &model);
-//         let rows: Vec<usize> = placed_features(&display_features, 6, model.view().column_count())
-//             .into_iter()
-//             .map(|placed_feature| placed_feature.row)
-//             .collect();
+        assert_eq!(
+            feature_span(&display(&gff)[0], width, total_columns),
+            Some(expected)
+        );
+    }
 
-//         assert_eq!(rows, vec![0, 1, 0]);
-//         assert_eq!(feature_row_count(&gff, &model, 6), 2);
-//     }
+    #[test]
+    fn feature_span_rejects_zero_width() {
+        let gff = genes(&[0..5]);
 
-//     #[test]
-//     fn tooltip_uses_stacked_feature_rows() {
-//         let gff = Gff {
-//             features: vec![
-//                 feature_with_name("gene1", 0, 0),
-//                 feature_with_name("gene2", 1, 1),
-//             ],
-//         };
-//         let model = model_with_len(100);
-//         let rows = Rect::new(10, 5, 1, 3);
+        assert_eq!(feature_span(&display(&gff)[0], 0, 10), None);
+    }
 
-//         let tooltip = tooltip_at(&gff, &model, rows, 10, 6).unwrap();
+    #[rstest]
+    #[case::alternating(&[0..3, 4..7, 8..11], &[0, 1, 0])]
+    #[case::same_span_stacks(&[0..3, 0..3, 0..3, 5..8], &[0, 1, 2, 1])]
+    #[case::stacks_below_second_row(&[0..3, 5..8, 5..8], &[0, 1, 2])]
+    fn placed_features_works(#[case] ranges: &[Range<usize>], #[case] expected: &[usize]) {
+        let gff = genes(ranges);
 
-//         assert!(tooltip.starts_with("gene2 "));
-//     }
+        let rows: Vec<usize> = placed_features(&display(&gff), 20, 20)
+            .into_iter()
+            .map(|placed| placed.row)
+            .collect();
 
-//     #[test]
-//     fn content_area_shrinks_to_visible_columns() {
-//         let area = Rect::new(10, 5, 100, 3);
+        assert_eq!(rows, expected);
+    }
 
-//         assert_eq!(gff_content_area(area, 12), Rect::new(10, 5, 12, 3));
-//         assert_eq!(gff_content_area(area, 120), area);
-//     }
-// }
+    #[rstest]
+    #[case::no_features_shown(&[30..40], 0)]
+    #[case::alternating(&[0..3, 4..7, 8..11], 2)]
+    fn feature_row_count_works(#[case] ranges: &[Range<usize>], #[case] expected: usize) {
+        let session = session(&[&[b'A'; 20]]);
+
+        assert_eq!(feature_row_count(&genes(ranges), &session, 20), expected);
+    }
+
+    #[rstest]
+    #[case::first_row(10, 5, Some(0))]
+    #[case::stacked_row(10, 6, Some(1))]
+    #[case::empty_cell(12, 5, None)]
+    #[case::navigation_row(10, 7, None)]
+    #[case::left_of_area(9, 5, None)]
+    fn tooltip_at_works(#[case] x: u16, #[case] y: u16, #[case] expected: Option<usize>) {
+        let session = session(&[&[b'A'; 100]]);
+        let gff = genes(&[0..1, 1..2, 2..3]);
+
+        assert_eq!(
+            tooltip_at(&gff, &session, Rect::new(10, 5, 4, 3), x, y),
+            expected.map(|i| format_tooltip(&gff.features[i]))
+        );
+    }
+
+    #[test]
+    fn pane() {
+        let session = session(&[&[b'A'; 40]]);
+        let gff = Gff {
+            features: vec![
+                feature("alpha", 0..12, Strand::Forward),
+                feature("beta", 14..30, Strand::Reverse),
+                feature("gamma", 32..40, Strand::Unknown),
+                feature("delta", 32..40, Strand::Forward),
+            ],
+        };
+        let window = Window {
+            columns: 0..10,
+            ..Window::default()
+        };
+        let theme = ThemeState::default();
+        let area = Rect::new(0, 0, 42, 6);
+        let mut buf = Buffer::empty(area);
+
+        GffPane {
+            gff: &gff,
+            session: &session,
+            window: &window,
+            theme: &theme,
+        }
+        .render(area, &mut buf);
+
+        insta::assert_snapshot!(buffer_text(&buf, area));
+    }
+}

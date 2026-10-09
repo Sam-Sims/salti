@@ -125,306 +125,237 @@ impl Widget for AlignmentPane<'_> {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::buffer::Buffer;
+    use std::ops::Range;
+
+    use anyhow::Result;
 
     use super::*;
     use crate::{
         core::{
-            gff::{Feature, FeatureType, Gff, Strand},
-            stats::tests::from_consensus,
+            gff::{Feature, FeatureType, Strand},
+            session::{Position, ViewState},
         },
-        ui::layout::AppLayout,
+        test_utils::{buffer_text, full_window, session},
+        ui::{layout::AppLayout, panes::local_feature_track::local_feature_row_count},
     };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
-        }
+    const CAT: &[u8] = b"CATCATCATCATCATCAT";
+
+    fn changed(sequences: &[&[u8]], change: impl FnOnce(&mut ViewState) -> Result<()>) -> Session {
+        let mut session = session(sequences);
+        session.update(Position::default(), change).unwrap();
+        session
     }
 
-    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).unwrap();
-        AlignmentModel::new(alignment).unwrap()
-    }
-
-    fn render_alignment_pane_text(
-        alignment: &AlignmentModel,
-        stats: Option<&Stats>,
-        area: Rect,
-        row_offset: usize,
-        col_offset: usize,
-    ) -> String {
-        render_alignment_pane_text_with_gff(alignment, stats, None, area, row_offset, col_offset)
-    }
-
-    fn render_alignment_pane_text_with_gff(
-        alignment: &AlignmentModel,
-        stats: Option<&Stats>,
-        gff: Option<&Gff>,
-        area: Rect,
-        row_offset: usize,
-        col_offset: usize,
-    ) -> String {
-        let mut buffer = Buffer::empty(area);
-        let header = match gff {
-            Some(gff) => {
-                let probe_layout =
-                    AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
-                let col_range = col_offset
-                    ..col_offset
-                        .saturating_add(probe_layout.alignment_pane_sequence_rows.width as usize)
-                        .min(alignment.view().column_count());
-                let local_rows = crate::ui::panes::local_feature_track::local_feature_row_count(
-                    gff, alignment, &col_range,
-                );
-                AlignmentHeaderLayout::with_features(local_rows as u16)
-            }
-            None => AlignmentHeaderLayout::without_features(),
-        };
+    fn render_text(session: &Session, gff: Option<&Gff>, window: &Window, area: Rect) -> String {
+        let header = gff.map_or(AlignmentHeaderLayout::without_features(), |gff| {
+            let rows = local_feature_row_count(gff, session, &window.columns);
+            AlignmentHeaderLayout::with_features(u16::try_from(rows).unwrap())
+        });
         let layout = AppLayout::new(area, 0, header);
-        let mut viewport = Viewport::default();
-        viewport.update_dimensions(
-            layout.alignment_pane_sequence_rows.width as usize,
-            layout.alignment_pane_sequence_rows.height as usize,
-            0,
-        );
-        viewport.set_bounds(
-            alignment.view().row_count(),
-            alignment.view().column_count(),
-            alignment.base().max_id_len(),
-        );
-        viewport.offsets.rows = row_offset;
-        viewport.offsets.cols = col_offset;
-
+        let columns = session.window_columns(window.columns.clone());
         let theme = ThemeState::default();
+        let mut buf = Buffer::empty(area);
+
         AlignmentPane {
-            alignment,
-            viewport: &viewport,
-            stats,
+            session,
+            window,
+            columns: &columns,
             gff,
-            header: layout.alignment_header,
+            header,
             theme: &theme,
         }
-        .render(layout.alignment_pane, &mut buffer);
+        .render(layout.alignment_pane, &mut buf);
 
-        buffer_text(&buffer, layout.alignment_pane)
+        buffer_text(&buf, layout.alignment_pane)
     }
 
-    fn buffer_text(buffer: &Buffer, area: Rect) -> String {
-        let mut lines = Vec::new();
-
-        for y in area.top()..area.bottom() {
-            let mut line = String::new();
-            for x in area.left()..area.right() {
-                let symbol = buffer[(x, y)].symbol();
-                if symbol.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(symbol);
-                }
-            }
-            while line.ends_with(' ') {
-                line.pop();
-            }
-            lines.push(line);
-        }
-
-        while matches!(lines.last(), Some(last) if last.is_empty()) {
-            lines.pop();
-        }
-
-        lines.join("\n")
+    fn render_full(session: &Session) -> String {
+        render_text(
+            session,
+            None,
+            &full_window(session),
+            Rect::new(0, 0, 100, 12),
+        )
     }
 
-    #[test]
-    fn alignment_pane_basic_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-
-        insta::assert_snapshot!(
-            "alignment_pane_basic",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_reserves_blank_local_feature_row_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-        let gff = Gff {
+    fn gene(name: &str, range: Range<usize>) -> Gff {
+        Gff {
             features: vec![Feature {
-                name: "Offscreen".to_string(),
+                name: name.to_string(),
                 kind: FeatureType::Gene,
-                range: 30..40,
+                range,
                 strand: Strand::Forward,
             }],
+        }
+    }
+
+    #[test]
+    fn basic() {
+        let session = session(&[CAT, CAT, CAT]);
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn feature_track_offscreen() {
+        let session = session(&[CAT, CAT, CAT]);
+        let gff = gene("Offscreen", 30..40);
+
+        insta::assert_snapshot!(render_text(
+            &session,
+            Some(&gff),
+            &full_window(&session),
+            Rect::new(0, 0, 100, 12)
+        ));
+    }
+
+    #[test]
+    fn feature_track() {
+        let session = session(&[CAT, CAT, CAT]);
+        let gff = gene("Spike", 2..14);
+
+        insta::assert_snapshot!(render_text(
+            &session,
+            Some(&gff),
+            &full_window(&session),
+            Rect::new(0, 0, 100, 12)
+        ));
+    }
+
+    #[test]
+    fn pinned_fragmented() {
+        let session = changed(
+            &[
+                b"AAA---CATCATCATCAT",
+                b"CCC---CATCATCATCAT",
+                b"GGG---CATCATCATCAT",
+                b"TTT---CATCATCATCAT",
+            ],
+            |state| {
+                state.pin(1);
+                state.pin(3);
+                state.set_gap_filter(Some(0.5))
+            },
+        );
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn translated() {
+        let session = changed(&[CAT, CAT, CAT], ViewState::toggle_translation_overlay);
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn protein_partial_codon() {
+        let session = changed(
+            &[b"CATCATCATCATCATCA", b"CATCATCATCATCATCA"],
+            ViewState::toggle_protein_view,
+        );
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn diff_reference() {
+        let mut session = changed(
+            &[CAT, b"CATCATGATCATCATCAT", b"CATCATCATCATGATCAT"],
+            |state| {
+                state.set_reference(Some(0));
+                Ok(())
+            },
+        );
+        session.diff_mode = DiffMode::Reference;
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn translated_diff_reference() {
+        let mut session = changed(
+            &[CAT, b"CATCATGATCATCATCAT", b"CATCATCATCATGATCAT"],
+            |state| {
+                state.set_reference(Some(0));
+                state.toggle_translation_overlay()
+            },
+        );
+        session.diff_mode = DiffMode::Reference;
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn diff_consensus() {
+        let mut session = session(&[CAT, b"CATCATGATCATCATCAT", b"CATCATCATCATGATCAT"]);
+        session.diff_mode = DiffMode::Consensus;
+
+        insta::assert_snapshot!(render_full(&session));
+    }
+
+    #[test]
+    fn scrolled() {
+        let long: &[u8] = b"CATCATCATCATCATCATCATCATCATCATCATCAT";
+        let session = session(&[long, long, long]);
+        let window = Window {
+            columns: 10..36,
+            ..full_window(&session)
         };
 
-        insta::assert_snapshot!(
-            "alignment_pane_blank_local_feature_track",
-            render_alignment_pane_text_with_gff(
-                &alignment,
-                None,
-                Some(&gff),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            None,
+            &window,
+            Rect::new(0, 0, 60, 12)
+        ));
     }
 
     #[test]
-    fn alignment_pane_with_local_feature_track_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-        let gff = Gff {
-            features: vec![Feature {
-                name: "Spike".to_string(),
-                kind: FeatureType::Gene,
-                range: 2..14,
-                strand: Strand::Forward,
-            }],
+    fn pinned_scrolled() {
+        let session = changed(
+            &[
+                b"AAACATCATCATCATCAT",
+                b"CCCCATCATCATCATCAT",
+                b"GGGCATCATCATCATCAT",
+                b"TTTCATCATCATCATCAT",
+                b"ACGCATCATCATCATCAT",
+                b"TGACATCATCATCATCAT",
+            ],
+            |state| {
+                state.pin(1);
+                state.pin(4);
+                Ok(())
+            },
+        );
+        let window = Window {
+            rows: 2..3,
+            ..full_window(&session)
         };
 
-        insta::assert_snapshot!(
-            "alignment_pane_with_local_feature_track",
-            render_alignment_pane_text_with_gff(
-                &alignment,
-                None,
-                Some(&gff),
-                Rect::new(0, 0, 100, 12),
-                0,
-                0,
-            )
-        );
+        insta::assert_snapshot!(render_text(
+            &session,
+            None,
+            &window,
+            Rect::new(0, 0, 100, 12)
+        ));
     }
 
     #[test]
-    fn alignment_pane_pinned_and_fragmented_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CAT---CATCATCATCAT"),
-            raw("seq2", b"CAT---CATCATCATCAT"),
-            raw("seq3", b"CAT---CATCATCATCAT"),
-            raw("seq4", b"CAT---CATCATCATCAT"),
-        ]);
-        alignment.pin(1).unwrap();
-        alignment.pin(3).unwrap();
-        alignment.set_gap_filter(Some(0.5)).unwrap();
+    fn no_rows() {
+        let session = changed(&[CAT, CAT], |state| {
+            state.row_regex_filter = Some(regex::Regex::new("nothing").unwrap());
+            Ok(())
+        });
 
-        insta::assert_snapshot!(
-            "alignment_pane_pinned_and_fragmented",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
+        insta::assert_snapshot!(render_full(&session));
     }
 
     #[test]
-    fn alignment_pane_translated_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-        ]);
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .unwrap();
+    fn no_columns() {
+        let session = changed(&[CAT, CAT], |state| state.set_constant_filter(Some(0.0)));
 
-        insta::assert_snapshot!(
-            "alignment_pane_translated",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_raw_diff_reference_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.set_reference(0).unwrap();
-        alignment.diff_mode = DiffMode::Reference;
-
-        insta::assert_snapshot!(
-            "alignment_pane_raw_diff_reference",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_translated_diff_reference_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.set_reference(0).unwrap();
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .unwrap();
-        alignment.diff_mode = DiffMode::Reference;
-
-        insta::assert_snapshot!(
-            "alignment_pane_translated_diff_reference",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_raw_diff_consensus_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.diff_mode = DiffMode::Consensus;
-        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
-
-        insta::assert_snapshot!(
-            "alignment_pane_raw_diff_consensus",
-            render_alignment_pane_text(&alignment, Some(&stats), Rect::new(0, 0, 100, 12), 0, 0,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_scrolled_with_scrollbar_snapshot() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-        ]);
-
-        insta::assert_snapshot!(
-            "alignment_pane_scrolled_with_scrollbar",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 60, 12), 0, 10,)
-        );
-    }
-
-    #[test]
-    fn alignment_pane_pinned_with_vertical_scroll_snapshot() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCAT"),
-            raw("seq4", b"CATCATCATCATCATCAT"),
-            raw("seq5", b"CATCATCATCATCATCAT"),
-            raw("seq6", b"CATCATCATCATCATCAT"),
-        ]);
-        alignment.pin(1).unwrap();
-        alignment.pin(4).unwrap();
-
-        insta::assert_snapshot!(
-            "alignment_pane_pinned_with_vertical_scroll",
-            render_alignment_pane_text(&alignment, None, Rect::new(0, 0, 100, 10), 2, 0,)
-        );
+        insta::assert_snapshot!(render_full(&session));
     }
 }

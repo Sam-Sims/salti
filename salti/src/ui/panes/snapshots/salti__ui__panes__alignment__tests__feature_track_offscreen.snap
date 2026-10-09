@@ -1,0 +1,12 @@
+---
+source: salti/src/ui/panes/alignment.rs
+expression: "render_text(&session, Some(&gff), &full_window(&session),\nRect::new(0, 0, 100, 12))"
+---
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                                                                               │
+│1       10                                                                     │
+│.   .    |    .                                                                │
+│CATCATCATCATCATCAT                                                             │
+│CATCATCATCATCATCAT                                                             │
+│CATCATCATCATCATCAT                                                             │
+└───────────────────────────────────────────────────────────────────────────────┘

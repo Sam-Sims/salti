@@ -1,0 +1,5 @@
+---
+source: salti/src/ui/panes/status_bars.rs
+expression: "status_text(&build_bottom_status_bar(Some(&session), &ui_state()))"
+---
+Filters: [rows: seq1|seq2] [gaps: <= 50%] (2 rows) (3 cols) | Translation frame: 2

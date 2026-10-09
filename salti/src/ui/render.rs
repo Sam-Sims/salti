@@ -148,49 +148,46 @@ pub fn render(
 
 #[cfg(test)]
 mod tests {
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+    use std::ops;
+
+    use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
     use crate::{
-        cli::StartupState,
-        core::{model::DiffMode, stats::tests::from_consensus},
+        core::session::{DiffMode, Position, ViewState},
+        test_utils::{buffer_text, full_window, session_with_ids, ui_state},
         ui::{
             layers::{
                 notification::{Notification, NotificationLevel},
                 palette::CommandPaletteState,
             },
             layout::AlignmentHeaderLayout,
-            ui_state::MouseSelection,
+            selection::Selection,
         },
     };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
-        }
+    const AREA: Rect = Rect::new(0, 0, 100, 24);
+
+    fn seqs(sequences: &[&[u8]]) -> Session {
+        let ids: Vec<String> = (1..=sequences.len()).map(|i| format!("seq{i}")).collect();
+        let sequences: Vec<(&str, &[u8])> = ids
+            .iter()
+            .map(String::as_str)
+            .zip(sequences.iter().copied())
+            .collect();
+        session_with_ids(&sequences)
     }
 
-    fn alignment_model(sequences: Vec<libmsa::Sequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).unwrap();
-        AlignmentModel::new(alignment).unwrap()
-    }
-
-    fn ui_state() -> UiState {
-        let mut ui = UiState::new(StartupState::default());
+    fn loaded_ui(session: &Session) -> UiState {
+        let mut ui = ui_state();
         ui.meta.loading_state = LoadingState::Loaded;
+        ui.window = full_window(session);
         ui
     }
 
-    fn render_text(
-        alignment: Option<&AlignmentModel>,
-        ui: &UiState,
-        stats: Option<&Stats>,
-        area: Rect,
-    ) -> String {
-        let backend = TestBackend::new(area.width, area.height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let frame_layout = FrameLayout::new(area);
+    fn render_text(session: Option<&Session>, ui: &UiState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
+        let frame_layout = FrameLayout::new(AREA);
         let layout = AppLayout::new(
             frame_layout.content_area,
             0,
@@ -198,184 +195,97 @@ mod tests {
         );
 
         terminal
-            .draw(|frame| {
-                render(frame, alignment, None, ui, stats, &frame_layout, &layout);
+            .draw(|frame| render(frame, session, None, ui, &frame_layout, &layout))
+            .unwrap();
+
+        buffer_text(terminal.backend().buffer(), AREA)
+    }
+
+    fn selection(
+        rows: ops::RangeInclusive<usize>,
+        columns: ops::RangeInclusive<usize>,
+    ) -> Selection {
+        Selection {
+            rows: rows.into(),
+            columns: columns.into(),
+        }
+    }
+
+    #[test]
+    fn idle() {
+        insta::assert_snapshot!(render_text(None, &ui_state()));
+    }
+
+    #[test]
+    fn failed() {
+        let mut ui = ui_state();
+        ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+
+        insta::assert_snapshot!(render_text(None, &ui));
+    }
+
+    #[test]
+    fn loaded() {
+        let session = seqs(&[
+            b"CATCATCATCATCATCAT",
+            b"CATCATGATCATCATCAT",
+            b"CATCATCATCATGATCAT",
+            b"CATCATCATCATCATCAT",
+        ]);
+
+        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui(&session)));
+    }
+
+    #[test]
+    fn selection_status() {
+        let session = seqs(&[
+            b"CATCATCATCATCATCAT",
+            b"CATCATGATCATCATCAT",
+            b"CATCATCATCATGATCAT",
+            b"CATCATCATCATCATCAT",
+        ]);
+        let mut ui = loaded_ui(&session);
+        ui.selection = Some(selection(1..=2, 2..=8));
+
+        insta::assert_snapshot!(render_text(Some(&session), &ui));
+    }
+
+    #[test]
+    fn translated() {
+        let mut session = seqs(&[
+            b"CATCATCATCATCATCAT",
+            b"CATCATGATCATCATCAT",
+            b"CATCATCATCATGATCAT",
+        ]);
+        session
+            .update(Position::default(), |state: &mut ViewState| {
+                state.set_reference(Some(0));
+                state.toggle_translation_overlay()
             })
             .unwrap();
+        session.diff_mode = DiffMode::Reference;
 
-        buffer_text(terminal.backend().buffer(), area)
-    }
-
-    fn buffer_text(buffer: &Buffer, area: Rect) -> String {
-        let mut lines = Vec::new();
-
-        for y in area.top()..area.bottom() {
-            let mut line = String::new();
-            for x in area.left()..area.right() {
-                let symbol = buffer[(x, y)].symbol();
-                if symbol.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(symbol);
-                }
-            }
-            while line.ends_with(' ') {
-                line.pop();
-            }
-            lines.push(line);
-        }
-
-        while matches!(lines.last(), Some(last) if last.is_empty()) {
-            lines.pop();
-        }
-
-        lines.join("\n")
-    }
-
-    fn set_viewport(ui: &mut UiState, alignment: &AlignmentModel, area: Rect) {
-        let frame_layout = FrameLayout::new(area);
-        let layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(
-            layout.alignment_pane_sequence_rows.width as usize,
-            layout.alignment_pane_sequence_rows.height as usize,
-            layout.sequence_id_pane.width.saturating_sub(2) as usize,
-        );
-        ui.viewport.set_bounds(
-            alignment.view().row_count(),
-            alignment.view().column_count(),
-            alignment.base().max_id_len(),
-        );
+        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui(&session)));
     }
 
     #[test]
-    fn render_empty_state_snapshots() {
-        let area = Rect::new(0, 0, 100, 24);
-
-        let idle_ui = UiState::new(StartupState::default());
-        insta::assert_snapshot!("render_empty_idle", render_text(None, &idle_ui, None, area));
-
-        let mut failed_ui = UiState::new(StartupState::default());
-        failed_ui.meta.loading_state = LoadingState::Failed("boom".to_string());
-        insta::assert_snapshot!(
-            "render_empty_failed",
-            render_text(None, &failed_ui, None, area)
-        );
-    }
-
-    #[test]
-    fn render_loaded_alignment_snapshots() {
-        let area = Rect::new(0, 0, 100, 24);
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-            raw("seq4", b"CATCATCATCATCATCAT"),
-        ]);
-        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
-        let mut ui = ui_state();
-        set_viewport(&mut ui, &alignment, area);
-
-        insta::assert_snapshot!(
-            "render_loaded_basic",
-            render_text(Some(&alignment), &ui, Some(&stats), area)
-        );
-
-        let mut selection_ui = ui_state();
-        set_viewport(&mut selection_ui, &alignment, area);
-        selection_ui.selection = Some(MouseSelection {
-            sequence_id: 1,
-            column: 2,
-            end_sequence_id: 2,
-            end_column: 8,
-        });
-        insta::assert_snapshot!(
-            "render_loaded_with_selection_status",
-            render_text(Some(&alignment), &selection_ui, Some(&stats), area)
-        );
-    }
-
-    #[test]
-    fn render_loaded_translation_snapshot() {
-        let area = Rect::new(0, 0, 100, 24);
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATGATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATGATCAT"),
-        ]);
-        alignment.set_reference(0).unwrap();
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .unwrap();
-        alignment.diff_mode = DiffMode::Reference;
-        let stats = from_consensus(0, b"HHHHHH");
-        let mut ui = ui_state();
-        set_viewport(&mut ui, &alignment, area);
-
-        insta::assert_snapshot!(
-            "render_loaded_translation",
-            render_text(Some(&alignment), &ui, Some(&stats), area)
-        );
-    }
-
-    #[test]
-    fn render_notification_snapshot() {
-        let area = Rect::new(0, 0, 100, 24);
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-        ]);
-        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
-        let mut ui = ui_state();
-        set_viewport(&mut ui, &alignment, area);
+    fn notification() {
+        let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
+        let mut ui = loaded_ui(&session);
         ui.notification = Some(Notification {
             level: NotificationLevel::Info,
             message: "Loaded alignment".to_string(),
         });
 
-        insta::assert_snapshot!(
-            "render_notification",
-            render_text(Some(&alignment), &ui, Some(&stats), area)
-        );
+        insta::assert_snapshot!(render_text(Some(&session), &ui));
     }
 
     #[test]
-    fn render_command_palette_snapshot() {
-        let area = Rect::new(0, 0, 100, 24);
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCAT"),
-        ]);
-        let stats = from_consensus(0, b"CATCATCATCATCATCAT");
-        let mut ui = ui_state();
-        set_viewport(&mut ui, &alignment, area);
+    fn palette() {
+        let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
+        let mut ui = loaded_ui(&session);
         ui.layers.open_palette(CommandPaletteState::empty());
 
-        insta::assert_snapshot!(
-            "render_command_palette",
-            render_text(Some(&alignment), &ui, Some(&stats), area)
-        );
-    }
-
-    #[test]
-    fn render_minimap_snapshot() {
-        let area = Rect::new(0, 0, 100, 24);
-        let alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-            raw("seq2", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-            raw("seq3", b"CATCATCATCATCATCATCATCATCATCATCATCAT"),
-        ]);
-        let stats = from_consensus(0, b"CATCATCATCATCATCATCATCATCATCATCATCAT");
-        let mut ui = ui_state();
-        set_viewport(&mut ui, &alignment, area);
-        ui.layers.toggle_minimap();
-
-        insta::assert_snapshot!(
-            "render_minimap",
-            render_text(Some(&alignment), &ui, Some(&stats), area)
-        );
+        insta::assert_snapshot!(render_text(Some(&session), &ui));
     }
 }
