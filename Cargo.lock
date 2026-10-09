@@ -2768,6 +2768,7 @@ dependencies = [
  "ratatui",
  "regex",
  "reqwest 0.13.2",
+ "rstest",
  "semver",
  "serde",
  "tempfile",
