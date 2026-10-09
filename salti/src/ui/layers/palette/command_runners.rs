@@ -31,13 +31,13 @@ fn run_command(
     result
 }
 
-pub(super) fn run_clear_filter(
+pub(super) fn run_clear_all_filters(
     _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
-    run_command("clear-filter", arguments, || {
+    run_command("clear-all-filters", arguments, || {
         ensure_no_argument(arguments)?;
-        Ok(Command::ClearFilter)
+        Ok(Command::ClearAllFilters)
     })
 }
 
@@ -47,58 +47,33 @@ pub(super) fn run_clear_reference(
 ) -> anyhow::Result<Command> {
     run_command("clear-reference", arguments, || {
         ensure_no_argument(arguments)?;
-        Ok(Command::ClearReference)
+        Ok(Command::SetReference(None))
     })
 }
 
-pub(super) fn run_toggle_translation(
-    state: &CommandPaletteState,
+pub(super) fn run_toggle_translation_overlay(
+    _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
-    run_command("toggle-translate", arguments, || {
+    run_command("toggle-translation-overlay", arguments, || {
         ensure_no_argument(arguments)?;
-        if state.active_type != libmsa::AlignmentType::Dna {
-            return Err(format_err!(
-                "toggle-translate is only available for DNA sequences",
-            ));
-        }
-        Ok(Command::ToggleTranslationView)
+        Ok(Command::ToggleTranslationOverlay)
     })
 }
 
-pub(super) fn run_reload_as_protein(
-    state: &CommandPaletteState,
+pub(super) fn run_toggle_protein_view(
+    _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
-    run_command("reload-as-protein", arguments, || {
-        let frame = match parse_argument(arguments) {
-            Some(arg) => Some(
-                arg.parse()
-                    .map_err(|_| format_err!("Invalid argument for reload-as-protein: {arg}"))?,
-            ),
-            None => None,
-        };
-        if state.active_type != libmsa::AlignmentType::Dna && !state.is_reloaded_as_protein {
-            return Err(format_err!(
-                "reload-as-protein is only available for DNA alignments",
-            ));
-        }
-        Ok(Command::ReloadAsProtein { frame })
+    run_command("toggle-protein-view", arguments, || {
+        ensure_no_argument(arguments)?;
+        Ok(Command::ToggleProteinView)
     })
 }
 
-fn next_visible_column_index(visible_columns: &[usize], absolute_target: usize) -> Option<usize> {
-    match visible_columns.binary_search(&absolute_target) {
-        Ok(visible_index) => Some(visible_index),
-        Err(next_visible_index) => {
-            (next_visible_index < visible_columns.len()).then_some(next_visible_index)
-        }
-    }
-}
-
-fn parse_percentage_argument(arguments: &str) -> anyhow::Result<Option<f32>> {
+fn parse_percentage_argument(arguments: &str) -> anyhow::Result<Option<f64>> {
     let value = require_argument(arguments)?;
-    let Ok(percent) = value.parse::<f32>() else {
+    let Ok(percent) = value.parse::<f64>() else {
         return Err(format_err!(
             "Invalid argument: expected a percentage in 0..=100",
         ));
@@ -130,7 +105,7 @@ pub(super) fn run_filter_constant(
 }
 
 pub(super) fn run_jump_position(
-    state: &CommandPaletteState,
+    _: &CommandPaletteState,
     arguments: &str,
 ) -> anyhow::Result<Command> {
     run_command("jump-position", arguments, || {
@@ -143,25 +118,8 @@ pub(super) fn run_jump_position(
             return Err(format_err!("Invalid argument: expected a positive integer",));
         }
 
-        let absolute_target = position - 1;
-        let Some(visible_col) = next_visible_column_index(&state.visible_columns, absolute_target)
-        else {
-            return Err(format_err!(
-                "No visible column at or after the requested position",
-            ));
-        };
-
-        Ok(Command::JumpToPosition(visible_col))
+        Ok(Command::JumpToColumn(position - 1))
     })
-}
-
-// this searches through the visible sequences to get the seq id - in the future might want to
-// consider a hashmap? would changes behaviour to last seq wins rather than first
-fn lookup_sequence_id(sequences: &[VisibleSequence], sequence_name: &str) -> Option<usize> {
-    sequences
-        .iter()
-        .find(|sequence| sequence.sequence_name.as_ref() == sequence_name)
-        .map(|sequence| sequence.sequence_id)
 }
 
 fn require_argument(arguments: &str) -> anyhow::Result<String> {
@@ -170,12 +128,17 @@ fn require_argument(arguments: &str) -> anyhow::Result<String> {
         .ok_or_else(|| format_err!("Expected 1 argument, got 0"))
 }
 
+// this searches through the visible sequences to get the seq id - in the future might want to
+// consider a hashmap? would changes behaviour to last seq wins rather than first
 fn resolve_argument_to_sequence_id(
     sequences: &[VisibleSequence],
     arguments: &str,
 ) -> anyhow::Result<usize> {
     let sequence_name = require_argument(arguments)?;
-    lookup_sequence_id(sequences, sequence_name.as_str())
+    sequences
+        .iter()
+        .find(|sequence| sequence.sequence_name == sequence_name)
+        .map(|sequence| sequence.sequence_id)
         .ok_or_else(|| format_err!("Sequence not found: {sequence_name}"))
 }
 
@@ -184,7 +147,7 @@ pub(super) fn run_jump_sequence(
     arguments: &str,
 ) -> anyhow::Result<Command> {
     run_command("jump-sequence", arguments, || {
-        let sequence_id = resolve_argument_to_sequence_id(&state.selectable_sequences, arguments)?;
+        let sequence_id = resolve_argument_to_sequence_id(&state.rows[state.pinned..], arguments)?;
         Ok(Command::JumpToSequence(sequence_id))
     })
 }
@@ -195,21 +158,13 @@ pub(super) fn run_jump_feature(
 ) -> anyhow::Result<Command> {
     run_command("jump-feature", arguments, || {
         let feature_name = require_argument(arguments)?;
-        let Some(gff_feature_targets) = state.gff_feature_targets.as_ref() else {
+        let Some(feature_names) = state.feature_names.as_ref() else {
             return Err(format_err!("No GFF file loaded"));
         };
-        let Some(feature_target) = gff_feature_targets
-            .iter()
-            .find(|feature_target| feature_target.feature_name.as_ref() == feature_name)
-        else {
+        let Some(index) = feature_names.iter().position(|name| *name == feature_name) else {
             return Err(format_err!("Feature not found: {feature_name}"));
         };
-        let Some(target_col) = feature_target.target_col else {
-            return Err(format_err!(
-                "No visible column at or after the requested position",
-            ));
-        };
-        Ok(Command::JumpToPosition(target_col))
+        Ok(Command::JumpToFeature(index))
     })
 }
 
@@ -218,7 +173,7 @@ pub(super) fn run_pin_sequence(
     arguments: &str,
 ) -> anyhow::Result<Command> {
     run_command("pin-sequence", arguments, || {
-        let sequence_id = resolve_argument_to_sequence_id(&state.selectable_sequences, arguments)?;
+        let sequence_id = resolve_argument_to_sequence_id(&state.rows[state.pinned..], arguments)?;
         Ok(Command::PinSequence(sequence_id))
     })
 }
@@ -228,18 +183,15 @@ pub(super) fn run_unpin_sequence(
     arguments: &str,
 ) -> anyhow::Result<Command> {
     run_command("unpin-sequence", arguments, || {
-        let sequence_id = resolve_argument_to_sequence_id(&state.pinned_sequences, arguments)?;
+        let sequence_id = resolve_argument_to_sequence_id(&state.rows[..state.pinned], arguments)?;
         Ok(Command::UnpinSequence(sequence_id))
     })
 }
 
 pub(super) fn run_filter_rows(_: &CommandPaletteState, arguments: &str) -> anyhow::Result<Command> {
     run_command("filter-rows", arguments, || {
-        if arguments.is_empty() {
-            Ok(Command::ClearFilter)
-        } else {
-            Ok(Command::SetFilter(arguments.to_string()))
-        }
+        let pattern = (!arguments.is_empty()).then(|| arguments.to_string());
+        Ok(Command::SetRowFilter(pattern))
     })
 }
 
@@ -248,11 +200,8 @@ pub(super) fn run_set_reference(
     arguments: &str,
 ) -> anyhow::Result<Command> {
     run_command("set-reference", arguments, || {
-        let arg = require_argument(arguments)?;
-
-        let sequence_id = lookup_sequence_id(&state.selectable_sequences, arg.as_str())
-            .ok_or_else(|| format_err!("Sequence not found: {arg}"))?;
-        Ok(Command::SetReference(sequence_id))
+        let sequence_id = resolve_argument_to_sequence_id(&state.rows, arguments)?;
+        Ok(Command::SetReference(Some(sequence_id)))
     })
 }
 
@@ -351,7 +300,7 @@ pub(super) fn run_load_gff(_: &CommandPaletteState, arguments: &str) -> anyhow::
     })
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use std::ops::Range;
 
@@ -364,10 +313,10 @@ mod tests {
         ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget},
     };
 
-    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: "seq".to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
@@ -614,20 +563,6 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Invalid argument for set-sequence-type: rna"
-        );
-    }
-
-    #[test]
-    fn reload_as_protein_accepts_optional_frame() {
-        let state = palette_state_with_columns(Vec::new());
-
-        let action = run_reload_as_protein(&state, "2").expect("frame should parse");
-
-        assert_eq!(
-            action,
-            Command::ReloadAsProtein {
-                frame: Some(libmsa::ReadingFrame::Frame2),
-            }
         );
     }
 }

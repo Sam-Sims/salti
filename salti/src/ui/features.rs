@@ -1,224 +1,192 @@
-use std::{num::NonZeroUsize, ops::Range};
+use std::ops::Range;
 
-use ratatui::style::Style;
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    widgets::{Clear, Widget},
+};
 
 use crate::{
     core::{
-        gff::{Feature, Gff},
-        model::AlignmentModel,
+        gff::{Feature, Gff, Strand},
+        session::Session,
     },
     ui::ui_state::ThemeState,
 };
 
-const NUCLEOTIDE_POSITIONS_PER_COL: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-const PROTEIN_POSITIONS_PER_COL: NonZeroUsize = NonZeroUsize::new(3).unwrap();
+const MIN_LABEL_WIDTH: usize = 2;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DisplayFeature<'a> {
     pub(crate) feature: &'a Feature,
-    pub(crate) relative_col_range: Range<usize>,
+    pub(crate) columns: Range<usize>,
     pub(crate) colour_idx: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FeatureStyle {
-    pub(crate) background: Style,
-    pub(crate) text: Style,
+#[derive(Debug, Clone)]
+pub(crate) struct PlacedFeature<'a> {
+    pub(crate) feature: &'a Feature,
+    pub(crate) span: Range<usize>,
+    pub(crate) row: usize,
+    pub(crate) colour_idx: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FeatureMap {
-    absolute_total_columns: usize,
-    offset: usize,
-    positions_to_col: NonZeroUsize,
-}
-
-impl FeatureMap {
-    pub(crate) fn for_alignment(alignment: &AlignmentModel) -> Self {
-        let absolute_total_columns = alignment.base().column_count();
-
-        if alignment.is_reloaded_as_protein() {
-            Self::protein(
-                absolute_total_columns,
-                alignment.translation_frame().offset(),
-            )
-        } else {
-            Self::nucleotide(absolute_total_columns)
-        }
-    }
-
-    pub(crate) fn protein(absolute_total_columns: usize, frame_offset: usize) -> Self {
-        Self {
-            absolute_total_columns,
-            offset: frame_offset,
-            positions_to_col: PROTEIN_POSITIONS_PER_COL,
-        }
-    }
-
-    fn nucleotide(absolute_total_columns: usize) -> Self {
-        Self {
-            absolute_total_columns,
-            offset: 0,
-            positions_to_col: NUCLEOTIDE_POSITIONS_PER_COL,
-        }
-    }
-
-    pub(crate) fn map_feature(
-        &self,
-        view: &libmsa::Alignment,
-        feature: &Feature,
-    ) -> Option<Range<usize>> {
-        let absolute_range = self.map_feature_absolute_range(feature)?;
-        view.relative_column_range_intersecting(absolute_range)
-    }
-
-    fn map_feature_absolute_range(&self, feature: &Feature) -> Option<Range<usize>> {
-        let positions_to_col = self.positions_to_col.get();
-        let start = feature.range.start.saturating_sub(self.offset) / positions_to_col;
-        let end = feature
-            .range
-            .end
-            .saturating_sub(self.offset)
-            .div_ceil(positions_to_col);
-        let clipped_range =
-            start.min(self.absolute_total_columns)..end.min(self.absolute_total_columns);
-        (!clipped_range.is_empty()).then_some(clipped_range)
-    }
-}
-
-pub(crate) fn display_features<'a>(
-    gff: &'a Gff,
-    alignment: &AlignmentModel,
-) -> Vec<DisplayFeature<'a>> {
-    let mapping = FeatureMap::for_alignment(alignment);
+pub(crate) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<DisplayFeature<'a>> {
+    let layout = session.layout();
     gff.features
         .iter()
         .filter_map(|feature| {
-            mapping
-                .map_feature(alignment.view(), feature)
-                .map(|range| (feature, range))
+            let cols = session.column_range_at(feature.range.clone());
+            let shown = layout.column_position(cols.start)..layout.column_position(cols.end);
+            (!shown.is_empty()).then_some((feature, shown))
         })
         .enumerate()
-        .map(
-            |(colour_idx, (feature, relative_col_range))| DisplayFeature {
-                feature,
-                relative_col_range,
-                colour_idx,
-            },
-        )
+        .map(|(colour_idx, (feature, columns))| DisplayFeature {
+            feature,
+            columns,
+            colour_idx,
+        })
         .collect()
 }
 
-pub(crate) fn feature_style(theme: &ThemeState, colour_idx: usize) -> FeatureStyle {
+pub(crate) fn render_features(
+    placed_features: &[PlacedFeature<'_>],
+    area: Rect,
+    theme: &ThemeState,
+    buf: &mut Buffer,
+) {
+    Clear.render(area, buf);
+    buf.set_style(area, theme.styles.base_block);
+    let width = usize::from(area.width);
     let dna = theme.theme.sequence.dna;
-    let colour = match colour_idx % 4 {
-        0 => dna.a,
-        1 => dna.t,
-        2 => dna.c,
-        _ => dna.g,
-    };
-    let background = theme.styles.base_block.bg(colour);
-    let text = background.fg(theme.theme.sequence.foreground);
-    FeatureStyle { background, text }
+
+    for placed in placed_features {
+        let span = placed.span.start.min(width)..placed.span.end.min(width);
+        if usize::from(area.height) <= placed.row || span.is_empty() {
+            continue;
+        }
+        let colour = match placed.colour_idx % 4 {
+            0 => dna.a,
+            1 => dna.t,
+            2 => dna.c,
+            _ => dna.g,
+        };
+        let background = theme.styles.base_block.bg(colour);
+        let text = background.fg(theme.theme.sequence.foreground);
+        let y = area.y + placed.row as u16;
+        let x = |offset: usize| area.x + offset as u16;
+        buf.set_style(
+            Rect::new(x(span.start), y, span.len() as u16, 1),
+            background,
+        );
+
+        let (label, arrow) = match placed.feature.strand {
+            Strand::Forward => (span.start..span.end - 1, Some((span.end - 1, "→"))),
+            Strand::Reverse => (span.start + 1..span.end, Some((span.start, "←"))),
+            Strand::Unknown => (span.clone(), None),
+        };
+        if let Some((at, arrow)) = arrow {
+            buf.set_string(x(at), y, arrow, text);
+        }
+        if MIN_LABEL_WIDTH <= label.len() {
+            let name: String = placed.feature.name.chars().take(label.len()).collect();
+            let offset = (label.len() - name.chars().count()) / 2;
+            buf.set_string(x(label.start + offset), y, name, text);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+    use rstest::rstest;
+
     use super::*;
-    use crate::core::gff::Strand;
+    use crate::{
+        core::{
+            gff::FeatureType,
+            session::{Position, ViewState},
+        },
+        test_utils::session,
+    };
 
-    fn feature(start: usize, end: usize) -> Feature {
-        Feature {
-            name: "gene".to_owned(),
-            kind: crate::core::gff::FeatureType::Gene,
-            range: start..end + 1,
-            strand: Strand::Forward,
+    type Change = fn(&mut ViewState) -> Result<()>;
+
+    fn gff(ranges: &[Range<usize>]) -> Gff {
+        Gff {
+            features: ranges
+                .iter()
+                .map(|range| Feature {
+                    name: format!("gene{}", range.start),
+                    kind: FeatureType::Gene,
+                    range: range.clone(),
+                    strand: Strand::Forward,
+                })
+                .collect(),
         }
     }
 
-    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
-            id: "seq".to_owned(),
-            sequence: sequence.to_vec(),
-        }
+    fn gap_filter(state: &mut ViewState) -> Result<()> {
+        state.set_gap_filter(Some(0.0))
     }
 
-    fn model_with_sequence(sequence: &[u8]) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![raw(sequence)]).unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn protein_view_frame3(state: &mut ViewState) -> Result<()> {
+        state.frame = libmsa::ReadingFrame::Frame3;
+        state.toggle_protein_view()
     }
 
-    fn model_with_len(len: usize) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![libmsa::RawSequence {
-            id: "seq".to_owned(),
-            sequence: vec![b'A'; len],
-        }])
-        .unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn shown_columns(sequence: &[u8], change: Change, feature: Range<usize>) -> Vec<Range<usize>> {
+        let mut session = session(&[sequence]);
+        session.update(Position::default(), change).unwrap();
+        let gff = gff(&[feature]);
+
+        display_features(&gff, &session)
+            .into_iter()
+            .map(|display| display.columns)
+            .collect()
     }
 
-    #[test]
-    fn filtered_nt_collapses_hidden_cols() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
+    #[rstest]
+    #[case::plain(b"ACGTACGT", |_: &mut ViewState| Ok(()), 2..5, 2..5)]
+    #[case::partly_hidden_shrinks(b"-A-CC--G", gap_filter, 2..7, 1..3)]
+    #[case::clipped_past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 6..11, 6..8)]
+    #[case::protein_view(b"ATGAAATTTCC", ViewState::toggle_protein_view, 3..9, 1..3)]
+    #[case::protein_view_after_offset(b"AAATGAAATTT", protein_view_frame3, 0..5, 0..1)]
+    fn display_features_works(
+        #[case] sequence: &[u8],
+        #[case] change: Change,
+        #[case] feature: Range<usize>,
+        #[case] expected: Range<usize>,
+    ) {
+        assert_eq!(shown_columns(sequence, change, feature), [expected]);
+    }
 
-        assert!(model.view().absolute_column_ids().eq([1, 3, 4, 7]));
+    #[rstest]
+    #[case::hidden_by_filter(b"-A-CC--G", gap_filter, 5..7)]
+    #[case::past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 10..12)]
+    #[case::before_frame_offset(b"AAATGAAATTT", protein_view_frame3, 0..2)]
+    fn display_features_hides(
+        #[case] sequence: &[u8],
+        #[case] change: Change,
+        #[case] feature: Range<usize>,
+    ) {
         assert_eq!(
-            mapping.map_feature(model.view(), &feature(2, 6)),
-            Some(1..3)
+            shown_columns(sequence, change, feature),
+            Vec::<Range<usize>>::new()
         );
     }
 
     #[test]
-    fn filtered_nt_hides_feature() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
+    fn display_features_colours_only_shown_features() {
+        let mut session = session(&[b"-A-CC--G"]);
+        session.update(Position::default(), gap_filter).unwrap();
+        let gff = gff(&[5..7, 1..2, 3..5]);
 
-        assert_eq!(mapping.map_feature(model.view(), &feature(5, 6)), None);
-    }
+        let colours: Vec<(usize, usize)> = display_features(&gff, &session)
+            .into_iter()
+            .map(|display| (display.feature.range.start, display.colour_idx))
+            .collect();
 
-    #[test]
-    fn filtered_protein_projects_cols() {
-        let mut model = model_with_sequence(b"M-M-M");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::protein(5, 0);
-
-        assert!(model.view().absolute_column_ids().eq([0, 2, 4]));
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(3, 8)),
-            Some(1..2)
-        );
-    }
-
-    #[test]
-    fn protein_clips_before_frame() {
-        let model = model_with_len(5);
-        let mapping = FeatureMap::protein(5, 2);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(0, 4)),
-            Some(0..1)
-        );
-    }
-
-    #[test]
-    fn mapping_clips_past_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(6, 10)),
-            Some(6..8)
-        );
-    }
-
-    #[test]
-    fn mapping_hides_after_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(mapping.map_feature(model.view(), &feature(10, 12)), None);
+        assert_eq!(colours, [(1, 0), (3, 1)]);
     }
 }

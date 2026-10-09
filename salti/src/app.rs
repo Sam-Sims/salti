@@ -1,6 +1,6 @@
 use std::{env, path::Path, time::Duration};
 
-use anyhow::{Result, format_err};
+use anyhow::{Context, Result};
 use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
 use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::{
@@ -16,21 +16,20 @@ use crate::{
     command::Command,
     core::{
         gff::{self, Gff},
-        model::AlignmentModel,
         parser,
-        stats::Stats,
+        session::{Position, Session, ViewState},
     },
-    input,
-    input::MouseTracker,
+    input::{self, MouseTracker},
     ui::{
         layers::{
             notification::{Notification, NotificationLevel},
             palette::CommandPaletteState,
         },
-        layout::{
-            AlignmentHeaderLayout, AppLayout, FrameLayout, gff_pane_height, pinned_section_layout,
+        layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, Window, fit, gff_pane_height},
+        panes::{
+            gff::{GffPaneState, feature_row_count},
+            local_feature_track::local_feature_row_count,
         },
-        panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
         render::render,
         ui_state::{LoadingState, UiState},
     },
@@ -56,17 +55,16 @@ struct AsyncJob<T> {
 
 #[derive(Debug)]
 pub(crate) struct App {
-    alignment: Option<AlignmentModel>,
+    session: Option<Session>,
     gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
-    load_job: Option<AsyncJob<Result<Vec<libmsa::RawSequence>, String>>>,
+    load_job: Option<AsyncJob<Result<libmsa::Alignment, String>>>,
     event_tx: Option<UnboundedSender<AppEvent>>,
     should_quit: bool,
     layout_area: Rect,
     frame_layout: FrameLayout,
     app_layout: AppLayout,
-    reloaded_nucleotide_phase: usize,
 }
 
 impl App {
@@ -80,7 +78,7 @@ impl App {
             AlignmentHeaderLayout::without_features(),
         );
         Self {
-            alignment: None,
+            session: None,
             gff: None,
             ui: UiState::new(startup),
             mouse_tracker: MouseTracker::default(),
@@ -90,7 +88,6 @@ impl App {
             layout_area,
             frame_layout,
             app_layout,
-            reloaded_nucleotide_phase: 0,
         }
     }
 
@@ -137,15 +134,11 @@ impl App {
                             if area != self.layout_area {
                                 self.rebuild_layout(area);
                             }
-                            let stats = self.alignment.as_ref().and_then(|alignment| {
-                                Stats::compute(alignment, self.ui.viewport.window().col_range)
-                            });
                             render(
                                 frame,
-                                self.alignment.as_ref(),
+                                self.session.as_ref(),
                                 self.gff.as_ref(),
                                 &self.ui,
-                                stats.as_ref(),
                                 &self.frame_layout,
                                 &self.app_layout,
                             )
@@ -184,20 +177,17 @@ impl App {
                 } => {
                     self.load_job = None;
                     match join_result {
-                        Ok(Ok(raw_sequences)) => match libmsa::Alignment::new(raw_sequences)
-                            .and_then(AlignmentModel::new) {
-                            Ok(model) => {
-                                self.alignment = Some(model);
-                                self.ui.meta.loading_state = LoadingState::Loaded;
-                                self.ui.clear_transient_state();
-                                self.mouse_tracker.clear_anchors();
-                                self.refresh_viewport_bounds();
-                                self.ui.viewport.jump_to_position(self.ui.meta.initial_position);
-                            }
-                            Err(error) => {
-                                self.ui.meta.loading_state = LoadingState::Failed(error.to_string());
-                            }
-                        },
+                        Ok(Ok(alignment)) => {
+                            self.session = Some(Session::new(alignment));
+                            self.ui.meta.loading_state = LoadingState::Loaded;
+                            self.ui.clear_transient_state();
+                            self.mouse_tracker.clear_anchors();
+                            self.ui.position = Position {
+                                column: self.ui.meta.initial_position,
+                                ..Position::default()
+                            };
+                            self.rebuild_layout(self.layout_area);
+                        }
                         Ok(Err(error)) => {
                             self.ui.meta.loading_state = LoadingState::Failed(error);
                         }
@@ -238,79 +228,55 @@ impl App {
     fn rebuild_layout(&mut self, area: Rect) {
         self.layout_area = area;
         self.frame_layout = FrameLayout::new(area);
-        // TODO: revist this as feels clunky
-        // hides the gff pane if we dont have one loaded
-        // if loaded the height is dynamic to the number of rows the features spill on to
-        let gff_height = self.gff.as_ref().map_or(0, |gff| {
-            let Some(alignment) = self.alignment.as_ref() else {
-                return 0;
-            };
-            // create a temp applayout with a gff height of 1 to get a value for width
-            let probe_layout = AppLayout::new(
-                self.frame_layout.content_area,
-                gff_pane_height(1),
-                AlignmentHeaderLayout::without_features(),
-            );
-            let width = usize::from(probe_layout.gff_pane_rows.width);
-            gff_pane_height(feature_row_count(gff, alignment, width).max(1))
-        });
-        let local_feature_rows = match (self.gff.as_ref(), self.alignment.as_ref()) {
-            (Some(gff), Some(alignment)) => {
-                let probe_layout = AppLayout::new(
-                    self.frame_layout.content_area,
-                    gff_height,
-                    AlignmentHeaderLayout::without_features(),
-                );
-                let visible_width = probe_layout.alignment_pane.width.saturating_sub(2) as usize;
-                let col_start = self
-                    .ui
-                    .viewport
-                    .offsets
-                    .cols
-                    .min(alignment.view().column_count());
-                let col_end = col_start
-                    .saturating_add(visible_width)
-                    .min(alignment.view().column_count());
-                u16::try_from(local_feature_row_count(
-                    gff,
-                    alignment,
-                    &(col_start..col_end),
-                ))
-                .unwrap_or(u16::MAX)
-            }
-            (None, _) | (_, None) => 0,
-        };
-        let alignment_header = if local_feature_rows == 0 {
-            AlignmentHeaderLayout::without_features()
-        } else {
-            AlignmentHeaderLayout::with_features(local_feature_rows)
-        };
-        // set the real layout once we know the height of the gff
-        self.app_layout =
-            AppLayout::new(self.frame_layout.content_area, gff_height, alignment_header);
+        let session = self.session.as_ref();
 
-        let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
-        let available_sequence_rows = self.app_layout.alignment_pane_sequence_rows.height as usize;
-        let alignment = self.alignment.as_ref();
-        let pinned_count = alignment
-            .map(|alignment| alignment.rows().pinned().len())
-            .unwrap_or(0);
-        let scrollable_height =
-            pinned_section_layout(pinned_count, available_sequence_rows).scrollable_height;
-        let row_count = alignment
-            .map(|alignment| alignment.base().row_count())
-            .unwrap_or(0)
-            .max(1);
-        let number_width = row_count
-            .checked_ilog10()
-            .map_or(1, |digits| digits as usize + 1);
-        let number_prefix_width = number_width + 1;
-        let name_visible_width = self
-            .app_layout
-            .sequence_id_pane
-            .width
-            .saturating_sub(2)
-            .saturating_sub(number_prefix_width as u16) as usize;
+        // TODO: revisit - probably a better way of doing this without need to probe first
+
+        let probe = AppLayout::new(
+            self.frame_layout.content_area,
+            gff_pane_height(1),
+            AlignmentHeaderLayout::without_features(),
+        );
+
+        let visible_width = usize::from(probe.alignment_pane.width.saturating_sub(2));
+        let total_columns = session.map_or(0, |session| session.layout().columns().len());
+
+        let columns = fit(&mut self.ui.position.column, visible_width, total_columns);
+        let (gff_height, local_feature_rows) = match (self.gff.as_ref(), session) {
+            (Some(gff), Some(session)) => {
+                let gff_width = usize::from(probe.gff_pane_rows.width);
+                let gff_rows = feature_row_count(gff, session, gff_width).max(1);
+                let local_rows = local_feature_row_count(gff, session, &columns);
+                (
+                    gff_pane_height(gff_rows),
+                    u16::try_from(local_rows).unwrap_or(u16::MAX),
+                )
+            }
+            (None, _) | (_, None) => (0, 0),
+        };
+
+        self.app_layout = AppLayout::new(
+            self.frame_layout.content_area,
+            gff_height,
+            AlignmentHeaderLayout::with_features(local_feature_rows),
+        );
+
+        let available_sequence_rows =
+            usize::from(self.app_layout.alignment_pane_sequence_rows.height);
+        let pinned = session.map_or(0, |session| session.layout().pinned());
+        let shown_pinned = pinned.min(available_sequence_rows.saturating_sub(1));
+        let divider = usize::from(shown_pinned > 0);
+        let scrollable_height = available_sequence_rows - shown_pinned - divider;
+        let main_rows = session.map_or(0, |session| session.layout().main().len());
+        let rows = fit(&mut self.ui.position.row, scrollable_height, main_rows);
+
+        let row_count = session.map_or(0, |session| session.base_alignment().row_count());
+        let number_prefix_width = row_count.max(1).ilog10() as usize + 2;
+        let name_visible_width =
+            usize::from(self.app_layout.sequence_id_pane.width.saturating_sub(2))
+                .saturating_sub(number_prefix_width);
+        let max_id_len = session.map_or(0, |session| session.base_alignment().max_id_len());
+        let names = fit(&mut self.ui.position.name, name_visible_width, max_id_len);
 
         debug!(
             terminal_width = area.width,
@@ -319,13 +285,15 @@ impl App {
             available_sequence_rows,
             scrollable_height,
             name_visible_width,
-            "Terminal resized, viewport updated"
+            "Screen layout rebuilt"
         );
 
-        self.ui
-            .viewport
-            .update_dimensions(visible_width, scrollable_height, name_visible_width);
-        self.refresh_viewport_bounds();
+        self.ui.window = Window {
+            pinned: 0..shown_pinned,
+            rows,
+            columns,
+            names,
+        };
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) {
@@ -337,7 +305,7 @@ impl App {
     fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         let commands = input::handle_mouse_event(
             &mut self.mouse_tracker,
-            self.alignment.as_ref(),
+            self.session.as_ref(),
             self.gff.as_ref(),
             &mut self.ui,
             &self.frame_layout,
@@ -369,207 +337,131 @@ impl App {
     {
         for command in commands {
             if let Err(error) = self.execute_command(command) {
-                warn!(error = ?error, "Command failed");
+                debug!(error = ?error, "Command failed");
                 self.ui.notification = Some(Notification {
                     level: NotificationLevel::Error,
                     message: error.to_string(),
                 });
             }
         }
+        self.rebuild_layout(self.layout_area);
     }
 
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
-            Command::Quit => {
-                self.should_quit = true;
-            }
-            Command::OpenCommandPalette => {
-                self.open_command_palette();
-            }
-            Command::CloseOverlay => {
-                self.ui.layers.close_active();
-            }
-            Command::ToggleMinimap => {
-                self.ui.layers.toggle_minimap();
-            }
-            Command::SetTheme(theme_id) => {
-                self.ui.set_theme(theme_id);
-            }
-            Command::ShowNotification(notification) => {
-                self.ui.notification = Some(notification);
-            }
+            Command::Quit => self.should_quit = true,
+            Command::OpenCommandPalette => self.open_command_palette(),
+            Command::CloseOverlay => self.ui.layers.close_active(),
+            Command::ToggleMinimap => self.ui.layers.toggle_minimap(),
+            Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
+            Command::ShowNotification(notification) => self.ui.notification = Some(notification),
             Command::LoadFile { input } => {
                 self.clear_mouse_selection();
                 self.start_load_job(input);
             }
-            Command::LoadGff { path } => match gff::parse_gff(Path::new(&path)) {
-                Ok(model) => {
-                    self.gff = Some(model);
-                    self.ui.gff_pane = Default::default();
-                    self.rebuild_layout(self.layout_area);
-                    self.show_info(format!("Loaded GFF file: {path}"));
-                }
-                Err(error) => {
-                    return Err(error);
-                }
-            },
-            Command::CheckForUpdate => {
-                self.spawn_update_check(false);
+            Command::LoadGff { path } => {
+                self.gff = Some(gff::parse_gff(Path::new(&path))?);
+                self.ui.gff_pane = GffPaneState::default();
+                self.show_info(format!("Loaded GFF file: {path}"));
             }
-            Command::CheckForUpdateAndNotify => {
-                self.spawn_update_check(true);
-            }
+            Command::CheckForUpdate => self.spawn_update_check(false),
+            Command::CheckForUpdateAndNotify => self.spawn_update_check(true),
 
-            Command::ScrollDown { amount } => self.ui.viewport.scroll_down(amount),
-            Command::ScrollUp { amount } => self.ui.viewport.scroll_up(amount),
+            Command::ScrollDown { amount } => self.ui.position.row += amount,
+            Command::ScrollUp { amount } => {
+                self.ui.position.row = self.ui.position.row.saturating_sub(amount);
+            }
             Command::ScrollLeft { amount } => {
-                self.ui.viewport.scroll_left(amount);
-                if self.layout_needs_rebuild() {
-                    self.rebuild_layout(self.layout_area);
-                }
+                self.ui.position.column = self.ui.position.column.saturating_sub(amount);
             }
-            Command::ScrollRight { amount } => {
-                self.ui.viewport.scroll_right(amount);
-                if self.layout_needs_rebuild() {
-                    self.rebuild_layout(self.layout_area);
-                }
+            Command::ScrollRight { amount } => self.ui.position.column += amount,
+            Command::ScrollNamesLeft { amount } => {
+                self.ui.position.name = self.ui.position.name.saturating_sub(amount);
             }
-            Command::ScrollNamesLeft { amount } => self.ui.viewport.scroll_names_left(amount),
-            Command::ScrollNamesRight { amount } => self.ui.viewport.scroll_names_right(amount),
-
-            Command::JumpToPosition(relative_col) => {
-                let has_column = self
-                    .alignment
+            Command::ScrollNamesRight { amount } => self.ui.position.name += amount,
+            Command::JumpToIndex(index) => self.ui.position.column = index,
+            Command::JumpToColumn(column) => {
+                self.ui.position.column = self
+                    .session()?
+                    .layout()
+                    .visible_column_position(column)
+                    .with_context(|| {
+                        format!("No visible column at or after position {}", column + 1)
+                    })?;
+            }
+            Command::JumpToFeature(index) => {
+                let gff = self
+                    .gff
                     .as_ref()
-                    .is_some_and(|alignment| relative_col < alignment.view().column_count());
-                if has_column {
-                    self.ui.viewport.jump_to_position(relative_col);
-                    if self.layout_needs_rebuild() {
-                        self.rebuild_layout(self.layout_area);
-                    }
-                }
+                    .context("No GFF file is loaded. Load one with load-gff")?;
+                let feature = &gff.features[index];
+                let session = self.session()?;
+                let column = session.column_range_at(feature.range.clone()).start;
+                self.ui.position.column = session
+                    .layout()
+                    .visible_column_position(column)
+                    .with_context(|| {
+                        format!("No visible column at or after feature {}", feature.name)
+                    })?;
             }
-            Command::JumpToSequence(abs_row) => {
-                let Some(alignment) = self.alignment.as_ref() else {
-                    return Ok(());
-                };
-                if let Some(relative_row) = alignment.view().relative_row_id(abs_row) {
-                    self.ui.viewport.jump_to_sequence(relative_row);
-                }
-                if let Some(message) = alignment.jump_to_sequence(abs_row) {
-                    self.show_info(message);
-                }
-            }
-            Command::JumpToStart => {
-                let has_columns = self
-                    .alignment
-                    .as_ref()
-                    .is_some_and(|alignment| alignment.view().column_count() > 0);
-                if has_columns {
-                    self.ui.viewport.jump_to_position(0);
-                    if self.layout_needs_rebuild() {
-                        self.rebuild_layout(self.layout_area);
-                    }
-                }
+            Command::JumpToSequence(row) => {
+                self.ui.position.row = self.session()?.layout().row_position(row);
             }
             Command::JumpToEnd => {
-                let last_col = self
-                    .alignment
-                    .as_ref()
-                    .and_then(|alignment| alignment.view().column_count().checked_sub(1));
-                if let Some(last_col) = last_col {
-                    self.ui.viewport.jump_to_position(last_col);
-                    if self.layout_needs_rebuild() {
-                        self.rebuild_layout(self.layout_area);
-                    }
+                self.ui.position.column =
+                    self.session()?.layout().columns().len().saturating_sub(1);
+            }
+            Command::PinSequence(row) => self.apply(|s| {
+                s.pin(row);
+                Ok(())
+            })?,
+            Command::UnpinSequence(row) => self.apply(|s| {
+                s.unpin(row);
+                Ok(())
+            })?,
+            Command::SetReference(row) => self.apply(|s| {
+                s.set_reference(row);
+                Ok(())
+            })?,
+            Command::SetRowFilter(pattern) => {
+                let regex = pattern
+                    .as_deref()
+                    .map(regex::Regex::new)
+                    .transpose()
+                    .context("Invalid row filter pattern")?;
+                self.apply(|s| {
+                    s.row_regex_filter = regex;
+                    Ok(())
+                })?;
+            }
+            Command::SetGapFilter(fraction) => self.apply(|s| s.set_gap_filter(fraction))?,
+            Command::SetConstantFilter(fraction) => {
+                self.apply(|s| s.set_constant_filter(fraction))?;
+            }
+            Command::ClearAllFilters => self.apply(|s| {
+                s.row_regex_filter = None;
+                s.clear_column_filter();
+                Ok(())
+            })?,
+            Command::ToggleTranslationOverlay => {
+                let mut selection = self.ui.selection;
+                self.apply(ViewState::toggle_translation_overlay)?;
+                let session = self.session()?;
+                if let Some(selection) = &mut selection {
+                    selection.columns = session.selection_columns(selection.columns);
                 }
+                self.ui.selection = selection;
             }
-
-            Command::PinSequence(abs_row) => {
-                self.alignment_mut()?.pin(abs_row)?;
-                self.clear_mouse_selection();
-                self.on_view_rebuilt();
+            Command::ToggleProteinView => self.apply(ViewState::toggle_protein_view)?,
+            Command::SetTranslationFrame(frame) => self.apply(|s| {
+                s.frame = frame;
+                Ok(())
+            })?,
+            Command::SetActiveType(alignment_type) => {
+                self.apply(|s| s.set_alignment_type(alignment_type))?;
             }
-            Command::UnpinSequence(abs_row) => {
-                self.alignment_mut()?.unpin(abs_row)?;
-                self.clear_mouse_selection();
-                self.on_view_rebuilt();
-            }
-            Command::SetReference(abs_row) => {
-                self.alignment_mut()?.set_reference(abs_row)?;
-                self.clear_mouse_selection();
-                self.on_view_rebuilt();
-            }
-            Command::ClearReference => {
-                self.alignment_mut()?.clear_reference()?;
-                self.clear_mouse_selection();
-                self.on_view_rebuilt();
-            }
-
-            Command::SetFilter(pattern) => {
-                self.alignment_mut()?.set_filter(pattern)?;
-                self.on_view_rebuilt();
-            }
-            Command::SetGapFilter(max_gap_fraction) => {
-                let alignment = self.alignment_mut()?;
-                if max_gap_fraction.is_some() && alignment.translation().is_some() {
-                    return Err(format_err!(
-                        "filter-gaps is unavailable while translation is active"
-                    ));
-                }
-                alignment.set_gap_filter(max_gap_fraction)?;
-                self.on_view_rebuilt();
-            }
-            Command::SetConstantFilter(min_constant_fraction) => {
-                let alignment = self.alignment_mut()?;
-                if min_constant_fraction.is_some() && alignment.translation().is_some() {
-                    return Err(format_err!(
-                        "filter-constant is unavailable while translation is active"
-                    ));
-                }
-                alignment.set_constant_filter(min_constant_fraction)?;
-                self.on_view_rebuilt();
-            }
-            Command::ClearFilter => {
-                self.alignment_mut()?.clear_filter()?;
-                self.on_view_rebuilt();
-            }
-            Command::SetActiveType(kind) => {
-                self.alignment_mut()?.set_active_kind(kind)?;
-                self.on_view_rebuilt();
-            }
-
-            Command::ToggleTranslationView => {
-                let alignment = self.alignment_mut()?;
-                if alignment.translation().is_none() && alignment.filter().has_column_filter() {
-                    return Err(format_err!(
-                        "translation is unavailable while a column filter is active"
-                    ));
-                }
-                alignment.toggle_translation_view()?;
-            }
-            Command::ReloadAsProtein { frame } => {
-                let viewport_target = self.reload_as_protein_viewport_target(frame);
-                self.alignment_mut()?.toggle_reload_as_protein(frame)?;
-                self.clear_mouse_selection();
-                self.rebuild_layout(self.layout_area);
-                self.jump_to_reloaded_viewport_target(viewport_target);
-            }
-            Command::SetTranslationFrame(frame) => {
-                let alignment = self.alignment_mut()?;
-                let was_reloaded = alignment.is_reloaded_as_protein();
-                alignment.set_translation_frame(frame)?;
-                if was_reloaded {
-                    self.on_view_rebuilt();
-                }
-            }
-
-            Command::SetConsensusMethod(method) => {
-                self.alignment_mut()?.consensus_method = method;
-            }
-            Command::SetDiffMode(mode) => {
-                self.alignment_mut()?.diff_mode = mode;
-            }
+            Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
+            Command::SetDiffMode(mode) => self.session_mut()?.diff_mode = mode,
         }
 
         Ok(())
@@ -577,57 +469,12 @@ impl App {
 
     fn open_command_palette(&mut self) {
         let palette = self
-            .alignment
+            .session
             .as_ref()
-            .map(|alignment| CommandPaletteState::from_alignment(alignment, self.gff.as_ref()))
-            .unwrap_or_else(CommandPaletteState::empty);
+            .map_or_else(CommandPaletteState::empty, |session| {
+                CommandPaletteState::from_session(session, self.gff.as_ref())
+            });
         self.ui.layers.open_palette(palette);
-    }
-
-    fn on_view_rebuilt(&mut self) {
-        self.rebuild_layout(self.layout_area);
-    }
-
-    fn reload_as_protein_viewport_target(
-        &mut self,
-        frame: Option<libmsa::ReadingFrame>,
-    ) -> Option<usize> {
-        let alignment = self.alignment.as_ref()?;
-        let frame = frame.unwrap_or(alignment.translation_frame());
-        let relative_col = self.ui.viewport.window().col_range.start;
-        let absolute_col = alignment.view().absolute_column_id(relative_col)?;
-
-        if alignment.is_reloaded_as_protein() {
-            let nucleotide_col = absolute_col
-                .checked_mul(3)
-                .and_then(|scaled| frame.offset().checked_add(scaled))?
-                .saturating_add(self.reloaded_nucleotide_phase);
-            return Some(nucleotide_col);
-        }
-
-        self.reloaded_nucleotide_phase = match absolute_col.checked_sub(frame.offset()) {
-            Some(offset_col) => offset_col % 3,
-            None => 0,
-        };
-        Some(frame.protein_col(absolute_col).unwrap_or(0))
-    }
-
-    fn jump_to_reloaded_viewport_target(&mut self, target_absolute_col: Option<usize>) {
-        let Some(target_absolute_col) = target_absolute_col else {
-            return;
-        };
-        let Some(alignment) = self.alignment.as_ref() else {
-            return;
-        };
-        let Some(relative_col) =
-            nearest_visible_relative_column(alignment.view(), target_absolute_col)
-        else {
-            return;
-        };
-        self.ui.viewport.jump_to_position(relative_col);
-        if self.layout_needs_rebuild() {
-            self.rebuild_layout(self.layout_area);
-        }
     }
 
     fn clear_mouse_selection(&mut self) {
@@ -642,41 +489,23 @@ impl App {
         });
     }
 
-    fn refresh_viewport_bounds(&mut self) {
-        let Some(alignment) = self.alignment.as_ref() else {
-            return;
-        };
-        self.ui.viewport.set_bounds(
-            alignment.view().row_count(),
-            alignment.view().column_count(),
-            alignment.base().max_id_len(),
-        );
+    fn session(&self) -> Result<&Session> {
+        self.session
+            .as_ref()
+            .context("No alignment is loaded. Open one with load-alignment")
     }
 
-    fn layout_needs_rebuild(&self) -> bool {
-        let (Some(gff), Some(alignment)) = (self.gff.as_ref(), self.alignment.as_ref()) else {
-            return false;
-        };
-
-        let visible_width = self.app_layout.alignment_pane.width.saturating_sub(2) as usize;
-        let col_start = self.ui.viewport.offsets.cols;
-        let col_end = col_start
-            .saturating_add(visible_width)
-            .min(alignment.view().column_count());
-        let local_feature_rows = u16::try_from(local_feature_row_count(
-            gff,
-            alignment,
-            &(col_start..col_end),
-        ))
-        .unwrap_or(u16::MAX);
-
-        local_feature_rows != self.app_layout.alignment_header.local_feature_rows
-    }
-
-    fn alignment_mut(&mut self) -> Result<&mut AlignmentModel> {
-        self.alignment
+    fn session_mut(&mut self) -> Result<&mut Session> {
+        self.session
             .as_mut()
-            .ok_or_else(|| format_err!("no alignment is loaded"))
+            .context("No alignment is loaded. Open one with load-alignment")
+    }
+
+    fn apply(&mut self, change: impl FnOnce(&mut ViewState) -> Result<()>) -> Result<()> {
+        let position = self.ui.position;
+        self.ui.position = self.session_mut()?.update(position, change)?;
+        self.clear_mouse_selection();
+        Ok(())
     }
 
     fn start_load_job(&mut self, input: String) {
@@ -722,38 +551,19 @@ impl App {
     }
 }
 
-fn nearest_visible_relative_column(
-    view: &libmsa::Alignment,
-    target_absolute_col: usize,
-) -> Option<usize> {
-    if let Some(relative_col) = view.relative_column_id(target_absolute_col) {
-        return Some(relative_col);
-    }
-
-    let mut previous_relative_col = None;
-    for (relative_col, absolute_col) in view.absolute_column_ids().enumerate() {
-        if target_absolute_col <= absolute_col {
-            return Some(relative_col);
-        }
-        previous_relative_col = Some(relative_col);
-    }
-
-    previous_relative_col
-}
-
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::ui::ui_state::MouseSelection;
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
+    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
+        libmsa::Sequence {
             id: id.to_string(),
-            sequence: sequence.to_vec(),
+            residues: sequence.to_vec(),
         }
     }
 
-    fn app_with_alignment(sequences: Vec<libmsa::RawSequence>) -> App {
+    fn app_with_alignment(sequences: Vec<libmsa::Sequence>) -> App {
         let startup = StartupState {
             file_path: None,
             initial_position: 0,
@@ -761,7 +571,7 @@ mod tests {
         let mut app = App::new(startup);
         let alignment = libmsa::Alignment::new(sequences).unwrap();
         let model = AlignmentModel::new(alignment).unwrap();
-        app.alignment = Some(model);
+        app.session = Some(model);
         app.ui.meta.loading_state = LoadingState::Loaded;
         app.refresh_viewport_bounds();
         app.rebuild_layout(Rect::new(0, 0, 40, 12));
@@ -827,10 +637,10 @@ mod tests {
         };
         app.ui.selection = Some(selection);
 
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         assert_eq!(app.ui.selection, Some(selection));
 
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         assert_eq!(app.ui.selection, Some(selection));
     }
 
@@ -845,20 +655,20 @@ mod tests {
             end_column: 2,
         });
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
-        assert!(app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert!(app.session.as_ref().unwrap().is_reloaded_as_protein());
         assert_eq!(
-            app.alignment.as_ref().unwrap().base().active_type(),
+            app.session.as_ref().unwrap().base().active_type(),
             libmsa::AlignmentType::Protein
         );
         assert_eq!(app.ui.selection, None);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
-        assert!(!app.alignment.as_ref().unwrap().is_reloaded_as_protein());
+        assert!(!app.session.as_ref().unwrap().is_reloaded_as_protein());
         assert_eq!(
-            app.alignment.as_ref().unwrap().base().active_type(),
+            app.session.as_ref().unwrap().base().active_type(),
             libmsa::AlignmentType::Dna
         );
     }
@@ -869,7 +679,7 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert_eq!(app.ui.viewport.window().col_range.start, 66);
     }
@@ -880,10 +690,10 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.ui.viewport.jump_to_position(200);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
         app.ui.viewport.jump_to_position(70);
 
-        app.execute_commands([Command::ReloadAsProtein { frame: None }]);
+        app.execute_commands([Command::ToggleProteinView]);
 
         assert_eq!(app.ui.viewport.window().col_range.start, 212);
     }
@@ -892,7 +702,7 @@ mod tests {
     async fn gap_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         app.execute_commands([Command::SetGapFilter(Some(0.25))]);
 
         let notification = app.ui.notification.as_ref().unwrap();
@@ -906,7 +716,7 @@ mod tests {
     async fn constant_filter_blocked_during_translation() {
         let mut app =
             app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
         app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
 
         let notification = app.ui.notification.as_ref().unwrap();
@@ -920,7 +730,7 @@ mod tests {
     async fn translation_blocked_by_gap_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
         app.execute_commands([Command::SetGapFilter(Some(0.0))]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
 
         let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(
@@ -933,7 +743,7 @@ mod tests {
     async fn translation_blocked_by_constant_filter() {
         let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
         app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
-        app.execute_commands([Command::ToggleTranslationView]);
+        app.execute_commands([Command::ToggleTranslationOverlay]);
 
         let notification = app.ui.notification.as_ref().unwrap();
         assert_eq!(

@@ -1,28 +1,24 @@
+use std::ops::Range;
+
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 use crate::{
     command::Command,
-    core::{gff::Gff, model::AlignmentModel},
+    core::{gff::Gff, session::Session},
     input::route::{MouseRoute, route_mouse},
     ui::{
         layers::{minimap::MinimapState, state::ActiveLayer},
-        layout::{AppLayout, FrameLayout},
+        layout::{AppLayout, FrameLayout, Window, screen_rows},
         panes::gff,
-        selection::selection_point_crosshair,
-        ui_state::{MouseSelection, UiState},
+        selection::Selection,
+        ui_state::UiState,
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MouseAnchor {
-    sequence_id: usize,
-    column: usize,
-    end_column: usize,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct MouseTracker {
-    box_anchor: Option<MouseAnchor>,
+    box_anchor: Option<Selection>,
     pan_anchor: Option<(u16, u16)>,
 }
 
@@ -69,7 +65,7 @@ impl MouseTracker {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_mouse_event(
     tracker: &mut MouseTracker,
-    alignment: Option<&AlignmentModel>,
+    session: Option<&Session>,
     gff: Option<&Gff>,
     ui: &mut UiState,
     frame_layout: &FrameLayout,
@@ -82,31 +78,30 @@ pub(crate) fn handle_mouse_event(
     match route_mouse(ui, frame_layout, app_layout, mouse, gff.is_some()) {
         MouseRoute::Palette => (),
         MouseRoute::Minimap => {
-            if let Some(alignment) = alignment {
-                let viewport_col_range = ui.viewport.window().col_range;
-                if let Some(ActiveLayer::Minimap(minimap_state)) = ui.layers.active.as_mut() {
-                    handle_minimap_mouse_event(
-                        &mut commands,
-                        alignment,
-                        viewport_col_range,
-                        minimap_state,
-                        frame_layout,
-                        mouse,
-                    );
-                }
+            if let Some(session) = session
+                && let Some(ActiveLayer::Minimap(minimap_state)) = ui.layers.active.as_mut()
+            {
+                handle_minimap_mouse_event(
+                    &mut commands,
+                    session,
+                    &ui.window.columns,
+                    minimap_state,
+                    frame_layout,
+                    mouse,
+                );
             }
         }
         MouseRoute::GffPane => {
-            if let (Some(gff), Some(alignment)) = (gff, alignment) {
-                handle_gff_mouse_event(&mut commands, gff, alignment, ui, app_layout, mouse);
+            if let (Some(gff), Some(session)) = (gff, session) {
+                handle_gff_mouse_event(&mut commands, gff, session, ui, app_layout, mouse);
             }
         }
         MouseRoute::Alignment => {
-            if let Some(alignment) = alignment {
+            if let Some(session) = session {
                 handle_alignment_mouse_event(
                     &mut commands,
                     tracker,
-                    alignment,
+                    session,
                     ui,
                     app_layout,
                     mouse,
@@ -119,17 +114,17 @@ pub(crate) fn handle_mouse_event(
 
 fn handle_minimap_mouse_event(
     commands: &mut Vec<Command>,
-    alignment: &AlignmentModel,
-    viewport_col_range: std::ops::Range<usize>,
+    session: &Session,
+    window_columns: &Range<usize>,
     minimap_state: &mut MinimapState,
     frame_layout: &FrameLayout,
     mouse: MouseEvent,
 ) {
-    let total_columns = alignment.view().column_count();
+    let total_columns = session.layout().columns().len();
     let overlay_area = frame_layout.overlay_area;
 
     if let Some(cmd) =
-        minimap_state.handle_mouse(mouse, overlay_area, &viewport_col_range, total_columns)
+        minimap_state.handle_mouse(mouse, overlay_area, window_columns, total_columns)
     {
         commands.push(cmd);
     }
@@ -138,41 +133,39 @@ fn handle_minimap_mouse_event(
 fn handle_gff_mouse_event(
     commands: &mut Vec<Command>,
     gff: &Gff,
-    alignment: &AlignmentModel,
+    session: &Session,
     ui: &mut UiState,
     app_layout: &AppLayout,
     mouse: MouseEvent,
 ) {
-    let viewport_col_range = ui.viewport.window().col_range;
     let gff_pane_rows = app_layout.gff_pane_rows;
+    let total_columns = session.layout().columns().len();
 
     if let Some(cmd) =
         ui.gff_pane
-            .handle_mouse(mouse, gff_pane_rows, &viewport_col_range, alignment)
+            .handle_mouse(mouse, gff_pane_rows, &ui.window.columns, total_columns)
     {
         commands.push(cmd);
     }
 
-    ui.gff_tooltip = gff::tooltip_at(gff, alignment, gff_pane_rows, mouse.column, mouse.row);
+    ui.gff_tooltip = gff::tooltip_at(gff, session, gff_pane_rows, mouse.column, mouse.row);
 }
 
 fn handle_alignment_mouse_event(
     commands: &mut Vec<Command>,
     tracker: &mut MouseTracker,
-    alignment: &AlignmentModel,
+    session: &Session,
     ui: &mut UiState,
     app_layout: &AppLayout,
     mouse: MouseEvent,
 ) {
-    let crosshair = selection_point_crosshair(
-        alignment,
-        &ui.viewport,
+    let resolved_anchor = anchor_at(
+        session,
+        &ui.window,
         app_layout.alignment_pane_sequence_rows,
         mouse.column,
         mouse.row,
     );
-    let resolved_anchor = crosshair
-        .and_then(|(sequence_id, column)| anchor_from_crosshair(alignment, sequence_id, column));
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
@@ -183,24 +176,17 @@ fn handle_alignment_mouse_event(
             };
             let store_anchor = mouse.modifiers.contains(KeyModifiers::CONTROL);
 
-            tracker.box_anchor = if store_anchor { Some(anchor) } else { None };
-            ui.selection = Some(selection_from_anchors(anchor, anchor));
+            tracker.box_anchor = store_anchor.then_some(anchor);
+            ui.selection = Some(anchor);
         }
-        MouseEventKind::Drag(MouseButton::Left) => {
-            let Some(current) = resolved_anchor else {
-                return;
-            };
-            let anchor = tracker.box_anchor.unwrap_or(current);
-            ui.selection = Some(selection_from_anchors(anchor, current));
-        }
-        MouseEventKind::Up(MouseButton::Left) => {
-            let Some(current) = resolved_anchor else {
+        MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(current) = resolved_anchor {
+                let anchor = tracker.box_anchor.unwrap_or(current);
+                ui.selection = Some(selection_from_anchors(anchor, current));
+            }
+            if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
                 tracker.clear_anchors();
-                return;
-            };
-            let anchor = tracker.box_anchor.unwrap_or(current);
-            ui.selection = Some(selection_from_anchors(anchor, current));
-            tracker.clear_anchors();
+            }
         }
         MouseEventKind::Down(MouseButton::Middle) => {
             tracker.pan_anchor = Some((mouse.column, mouse.row));
@@ -220,415 +206,375 @@ fn handle_alignment_mouse_event(
     }
 }
 
-fn anchor_from_crosshair(
-    alignment: &AlignmentModel,
-    sequence_id: usize,
-    column: usize,
-) -> Option<MouseAnchor> {
-    let Some(overlay) = alignment.translation_overlay() else {
-        return Some(MouseAnchor {
-            sequence_id,
-            column,
-            end_column: column,
-        });
-    };
-    let codon_span = overlay.codon_span(column)?;
-    Some(MouseAnchor {
-        sequence_id,
-        column: codon_span.start,
-        end_column: codon_span.end - 1,
+fn anchor_at(
+    session: &Session,
+    window: &Window,
+    sequence_rows_area: Rect,
+    mouse_x: u16,
+    mouse_y: u16,
+) -> Option<Selection> {
+    if !sequence_rows_area.contains((mouse_x, mouse_y).into()) {
+        return None;
+    }
+
+    let row = screen_rows(session.layout(), window)
+        .nth(usize::from(mouse_y - sequence_rows_area.y))
+        .flatten()?;
+    let column = window
+        .columns
+        .clone()
+        .nth(usize::from(mouse_x - sequence_rows_area.x))?;
+    let columns = session.selection_columns((column..=column).into());
+
+    Some(Selection {
+        rows: (row..=row).into(),
+        columns,
     })
 }
 
-fn selection_from_anchors(anchor: MouseAnchor, current: MouseAnchor) -> MouseSelection {
-    let (column, end_column) = if current.column < anchor.column {
-        (anchor.end_column, current.column)
-    } else {
-        (anchor.column, current.end_column)
-    };
-
-    MouseSelection {
-        sequence_id: anchor.sequence_id,
-        column,
-        end_sequence_id: current.sequence_id,
-        end_column,
+fn selection_from_anchors(anchor: Selection, current: Selection) -> Selection {
+    Selection {
+        rows: (anchor.rows.start.min(current.rows.start)..=anchor.rows.last.max(current.rows.last))
+            .into(),
+        columns: (anchor.columns.start.min(current.columns.start)
+            ..=anchor.columns.last.max(current.columns.last))
+            .into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-    use ratatui::layout::Rect;
+    use std::ops;
+
+    use rstest::rstest;
 
     use super::*;
     use crate::{
-        cli::StartupState,
-        core::gff::{Feature, FeatureType, Strand},
-        ui::{
-            layers::palette::CommandPaletteState,
-            layout::{AlignmentHeaderLayout, AppLayout, FrameLayout},
+        core::{
+            gff::{Feature, FeatureType, Strand},
+            session::{Position, ViewState},
         },
+        test_utils::{mouse_event, pinned_session, session, ui_state},
+        ui::{layers::palette::CommandPaletteState, layout::AlignmentHeaderLayout},
     };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
+    const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);
+    const LEFT_DRAG: MouseEventKind = MouseEventKind::Drag(MouseButton::Left);
+    const LEFT_UP: MouseEventKind = MouseEventKind::Up(MouseButton::Left);
+    const MIDDLE_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Middle);
+    const MIDDLE_DRAG: MouseEventKind = MouseEventKind::Drag(MouseButton::Middle);
+    const MIDDLE_UP: MouseEventKind = MouseEventKind::Up(MouseButton::Middle);
+
+    fn selection(
+        rows: ops::RangeInclusive<usize>,
+        columns: ops::RangeInclusive<usize>,
+    ) -> Selection {
+        Selection {
+            rows: rows.into(),
+            columns: columns.into(),
         }
     }
 
-    fn ui_state() -> UiState {
-        UiState::new(StartupState {
-            file_path: None,
-            initial_position: 0,
-        })
+    fn layouts(gff_height: u16) -> (FrameLayout, AppLayout) {
+        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
+        let app_layout = AppLayout::new(
+            frame_layout.content_area,
+            gff_height,
+            AlignmentHeaderLayout::without_features(),
+        );
+        (frame_layout, app_layout)
     }
 
-    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).expect("alignment should be valid");
-        AlignmentModel::new(alignment).expect("alignment model should be valid")
-    }
-
-    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column,
-            row,
-            modifiers: KeyModifiers::empty(),
+    fn pinned_window() -> Window {
+        Window {
+            pinned: 0..1,
+            rows: 0..4,
+            columns: 0..20,
+            ..Window::default()
         }
     }
 
-    fn left_mouse_event(
-        kind: MouseEventKind,
-        area: Rect,
-        column_offset: u16,
-        row_offset: u16,
-    ) -> MouseEvent {
-        mouse_event(kind, area.x + column_offset, area.y + row_offset)
-    }
-
-    fn feature(name: &str, start: usize, end: usize) -> Feature {
-        Feature {
-            name: name.to_string(),
-            kind: FeatureType::Gene,
-            range: start..end,
-            strand: Strand::Forward,
-        }
-    }
-
-    #[test]
-    fn palette_route_masks_mouse_commands() {
-        let mut tracker = MouseTracker::default();
-        let mut ui = ui_state();
-        ui.layers.open_palette(CommandPaletteState::empty());
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        let mouse = mouse_event(MouseEventKind::Down(MouseButton::Left), 10, 10);
-
-        let commands = handle_mouse_event(
-            &mut tracker,
-            None,
-            None,
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse,
-        );
-
-        assert!(commands.is_empty());
-    }
-
-    #[test]
-    fn minimap_route_emits_jump_command() {
-        let sequence_a = vec![b'A'; 200];
-        let sequence_c = vec![b'C'; 200];
-        let model = alignment_model(vec![
-            raw("row1", sequence_a.as_slice()),
-            raw("row2", sequence_c.as_slice()),
-        ]);
-        let mut tracker = MouseTracker::default();
-        let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(78, 10, 20);
-        ui.viewport.set_bounds(2, 200, 4);
-        ui.layers.toggle_minimap();
-        let mouse = mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            frame_layout.overlay_area.x + frame_layout.overlay_area.width - 2,
-            frame_layout.overlay_area.y + frame_layout.overlay_area.height - 2,
-        );
-
-        let commands = handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            None,
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse,
-        );
-
-        assert!(matches!(commands.as_slice(), [Command::JumpToPosition(_)]));
-    }
-
-    #[test]
-    fn translated_click_selects_codon() {
-        let mut model = alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        model
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-        let mut tracker = MouseTracker::default();
-        let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(60, 10, 20);
-        ui.viewport.set_bounds(2, 9, 4);
-
-        let mouse = left_mouse_event(
-            MouseEventKind::Down(MouseButton::Left),
-            app_layout.alignment_pane_sequence_rows,
-            1,
-            0,
-        );
-        handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            None,
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse,
-        );
-
-        assert_eq!(
-            ui.selection,
-            Some(MouseSelection {
-                sequence_id: 0,
-                column: 0,
-                end_sequence_id: 0,
-                end_column: 2,
-            })
-        );
-    }
-
-    #[test]
-    fn translated_ctrl_drag_spans_codons() {
-        let mut model = alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        model
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-        let mut tracker = MouseTracker::default();
-        let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(60, 10, 20);
-        ui.viewport.set_bounds(2, 9, 4);
+    fn handle_all(
+        session: &Session,
+        gff: Option<&Gff>,
+        ui: &mut UiState,
+        gff_height: u16,
+        events: &[(MouseEventKind, KeyModifiers, u16, u16)],
+    ) -> Vec<Command> {
+        let (frame_layout, app_layout) = layouts(gff_height);
         let area = app_layout.alignment_pane_sequence_rows;
-
-        for mouse in [
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: area.x + 1,
-                row: area.y,
-                modifiers: KeyModifiers::CONTROL,
-            },
-            left_mouse_event(MouseEventKind::Drag(MouseButton::Left), area, 7, 0),
-            left_mouse_event(MouseEventKind::Up(MouseButton::Left), area, 7, 0),
-        ] {
-            handle_mouse_event(
-                &mut tracker,
-                Some(&model),
-                None,
-                &mut ui,
-                &frame_layout,
-                &app_layout,
-                mouse,
-            );
-        }
-
-        assert_eq!(
-            ui.selection,
-            Some(MouseSelection {
-                sequence_id: 0,
-                column: 0,
-                end_sequence_id: 0,
-                end_column: 8,
+        let mut tracker = MouseTracker::default();
+        events
+            .iter()
+            .flat_map(|&(kind, modifiers, x, y)| {
+                let mouse = MouseEvent {
+                    modifiers,
+                    ..mouse_event(kind, area.x + x, area.y + y)
+                };
+                handle_mouse_event(
+                    &mut tracker,
+                    Some(session),
+                    gff,
+                    ui,
+                    &frame_layout,
+                    &app_layout,
+                    mouse,
+                )
             })
-        );
+            .collect()
+    }
+
+    #[rstest]
+    #[case::pinned_row(10, 5, Some(selection(0..=0, 5..=5)))]
+    #[case::main_row(12, 7, Some(selection(1..=1, 7..=7)))]
+    #[case::divider(10, 6, None)]
+    #[case::past_window_rows(10, 9, None)]
+    #[case::past_window_columns(18, 5, None)]
+    #[case::left_of_area(9, 5, None)]
+    fn anchor_at_works(#[case] x: u16, #[case] y: u16, #[case] expected: Option<Selection>) {
+        let session = pinned_session(6, &[3]);
+        let window = Window {
+            pinned: 0..1,
+            rows: 0..2,
+            columns: 5..13,
+            ..Window::default()
+        };
+        let area = Rect::new(10, 5, 10, 6);
+
+        let anchor = anchor_at(&session, &window, area, x, y);
+
+        assert_eq!(anchor, expected);
     }
 
     #[test]
-    fn left_click_outside_msa_clears_selection() {
-        let model = alignment_model(vec![raw("seq1", b"ATG"), raw("seq2", b"ATG")]);
-        let mut tracker = MouseTracker::default();
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 0,
-            end_sequence_id: 0,
-            end_column: 0,
-        });
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(60, 10, 20);
-        ui.viewport.set_bounds(2, 3, 4);
+    fn anchor_at_widens_to_codon_in_translation_overlay() {
+        let mut session = session(&[b"ATGAAATTT"]);
+        session
+            .update(Position::default(), ViewState::toggle_translation_overlay)
+            .unwrap();
+        let window = Window {
+            rows: 0..1,
+            columns: 0..9,
+            ..Window::default()
+        };
 
-        handle_mouse_event(
-            &mut tracker,
-            Some(&model),
+        let anchor = anchor_at(&session, &window, Rect::new(0, 0, 9, 1), 4, 0);
+
+        assert_eq!(anchor, Some(selection(0..=0, 3..=5)));
+    }
+
+    #[rstest]
+    #[case::forward(selection(1..=1, 2..=2), selection(3..=3, 5..=5), selection(1..=3, 2..=5))]
+    #[case::backward(selection(3..=3, 5..=5), selection(1..=1, 2..=2), selection(1..=3, 2..=5))]
+    #[case::crossed(selection(1..=1, 5..=5), selection(3..=3, 2..=2), selection(1..=3, 2..=5))]
+    #[case::codons(selection(0..=0, 3..=5), selection(0..=0, 0..=2), selection(0..=0, 0..=5))]
+    fn selection_from_anchors_works(
+        #[case] anchor: Selection,
+        #[case] current: Selection,
+        #[case] expected: Selection,
+    ) {
+        assert_eq!(selection_from_anchors(anchor, current), expected);
+    }
+
+    #[rstest]
+    #[case::down_right(12, 13, &[Command::ScrollUp { amount: 3 }, Command::ScrollLeft { amount: 2 }])]
+    #[case::up_left(8, 7, &[Command::ScrollDown { amount: 3 }, Command::ScrollRight { amount: 2 }])]
+    #[case::vertical_only(10, 12, &[Command::ScrollUp { amount: 2 }])]
+    #[case::no_movement(10, 10, &[])]
+    fn pan_drag_commands_works(#[case] x: u16, #[case] y: u16, #[case] expected: &[Command]) {
+        let mut tracker = MouseTracker {
+            pan_anchor: Some((10, 10)),
+            ..MouseTracker::default()
+        };
+
+        let commands: Vec<Command> = tracker
+            .pan_drag_commands(x, y)
+            .into_iter()
+            .flatten()
+            .collect();
+
+        assert_eq!(commands, expected);
+    }
+
+    #[test]
+    fn pan_drag_commands_measures_from_last_drag() {
+        let mut tracker = MouseTracker {
+            pan_anchor: Some((10, 10)),
+            ..MouseTracker::default()
+        };
+        tracker.pan_drag_commands(10, 12);
+
+        let commands = tracker.pan_drag_commands(10, 13);
+
+        assert_eq!(commands, [Some(Command::ScrollUp { amount: 1 }), None]);
+    }
+
+    #[test]
+    fn pan_drag_commands_rejects_without_anchor() {
+        let mut tracker = MouseTracker::default();
+
+        assert_eq!(tracker.pan_drag_commands(12, 12), [None, None]);
+    }
+
+    #[rstest]
+    #[case::click(&[(LEFT_DOWN, KeyModifiers::NONE, 3, 2)], Some(selection(1..=1, 3..=3)))]
+    #[case::drag_without_control_follows_mouse(
+        &[(LEFT_DOWN, KeyModifiers::NONE, 0, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 3)],
+        Some(selection(2..=2, 3..=3)),
+    )]
+    #[case::control_drag_from_pinned_into_main(
+        &[(LEFT_DOWN, KeyModifiers::CONTROL, 0, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 3)],
+        Some(selection(0..=2, 0..=3)),
+    )]
+    #[case::control_drag_within_main(
+        &[(LEFT_DOWN, KeyModifiers::CONTROL, 1, 2), (LEFT_DRAG, KeyModifiers::NONE, 3, 4)],
+        Some(selection(1..=3, 1..=3)),
+    )]
+    #[case::drag_over_divider_keeps_selection(
+        &[(LEFT_DOWN, KeyModifiers::CONTROL, 0, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 1)],
+        Some(selection(0..=0, 0..=0)),
+    )]
+    #[case::release_ends_box(
+        &[(LEFT_DOWN, KeyModifiers::CONTROL, 0, 0), (LEFT_UP, KeyModifiers::NONE, 1, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 3)],
+        Some(selection(2..=2, 3..=3)),
+    )]
+    fn handle_mouse_event_selects(
+        #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],
+        #[case] expected: Option<Selection>,
+    ) {
+        let session = pinned_session(6, &[3]);
+        let mut ui = ui_state();
+        ui.window = pinned_window();
+
+        handle_all(&session, None, &mut ui, 0, events);
+
+        assert_eq!(ui.selection, expected);
+    }
+
+    #[test]
+    fn handle_mouse_event_click_outside_rows_clears_selection() {
+        let session = pinned_session(6, &[3]);
+        let mut ui = ui_state();
+        ui.window = pinned_window();
+        ui.selection = Some(selection(0..=0, 0..=0));
+
+        handle_all(
+            &session,
             None,
             &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 0, 0),
+            0,
+            &[(LEFT_DOWN, KeyModifiers::NONE, 30, 1)],
         );
 
         assert_eq!(ui.selection, None);
     }
 
     #[test]
-    fn middle_drag_pans_msa() {
-        let model = alignment_model(vec![raw("seq1", b"ATG"), raw("seq2", b"ATG")]);
-        let mut tracker = MouseTracker::default();
+    fn handle_mouse_event_palette_ignores_mouse() {
+        let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
+        ui.window = pinned_window();
+        ui.layers.open_palette(CommandPaletteState::empty());
+
+        let commands = handle_all(
+            &session,
+            None,
+            &mut ui,
             0,
-            AlignmentHeaderLayout::without_features(),
-        );
-        let area = app_layout.alignment_pane_sequence_rows;
-
-        handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            None,
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            left_mouse_event(MouseEventKind::Down(MouseButton::Middle), area, 10, 5),
-        );
-        let commands = handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            None,
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            left_mouse_event(MouseEventKind::Drag(MouseButton::Middle), area, 12, 7),
+            &[
+                (LEFT_DOWN, KeyModifiers::NONE, 0, 0),
+                (MIDDLE_DOWN, KeyModifiers::NONE, 0, 0),
+                (MIDDLE_DRAG, KeyModifiers::NONE, 2, 2),
+            ],
         );
 
-        assert_eq!(
-            commands,
-            vec![
-                Command::ScrollUp { amount: 2 },
-                Command::ScrollLeft { amount: 2 }
-            ]
-        );
+        assert_eq!(commands, []);
+        assert_eq!(ui.selection, None);
+    }
+
+    #[rstest]
+    #[case::middle_drag(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[Command::ScrollLeft { amount: 2 }])]
+    #[case::after_release(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_UP, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[])]
+    fn handle_mouse_event_pans(
+        #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],
+        #[case] expected: &[Command],
+    ) {
+        let session = pinned_session(6, &[3]);
+        let mut ui = ui_state();
+        ui.window = pinned_window();
+
+        assert_eq!(handle_all(&session, None, &mut ui, 0, events), expected);
     }
 
     #[test]
-    fn gff_hover_sets_tooltip() {
-        let model = alignment_model(vec![raw("seq1", &[b'A'; 100])]);
+    fn handle_mouse_event_gff_hover_sets_tooltip_until_mouse_leaves() {
+        let session = session(&[&[b'A'; 100]]);
         let gff = Gff {
-            features: vec![feature("gene1", 0, 100)],
+            features: vec![Feature {
+                name: "gene1".to_string(),
+                kind: FeatureType::Gene,
+                range: 0..100,
+                strand: Strand::Forward,
+            }],
         };
-        let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            4,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(60, 10, 20);
-        ui.viewport.set_bounds(1, 100, 4);
-        let mouse = mouse_event(
-            MouseEventKind::Moved,
-            app_layout.gff_pane_rows.x,
-            app_layout.gff_pane_rows.y,
-        );
+        ui.window = Window {
+            rows: 0..1,
+            columns: 0..60,
+            ..Window::default()
+        };
+        let (frame_layout, app_layout) = layouts(4);
+        let mut tracker = MouseTracker::default();
+        let gff_rows = app_layout.gff_pane_rows;
+        let alignment_rows = app_layout.alignment_pane_sequence_rows;
+        let mut handle = |x, y| {
+            handle_mouse_event(
+                &mut tracker,
+                Some(&session),
+                Some(&gff),
+                &mut ui,
+                &frame_layout,
+                &app_layout,
+                mouse_event(MouseEventKind::Moved, x, y),
+            );
+            ui.gff_tooltip.is_some()
+        };
 
-        let commands = handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            Some(&gff),
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse,
-        );
-
-        assert!(commands.is_empty());
-        assert!(
-            ui.gff_tooltip
-                .as_deref()
-                .is_some_and(|it| it.starts_with("gene1 "))
-        );
+        assert!(handle(gff_rows.x, gff_rows.y));
+        assert!(!handle(alignment_rows.x, alignment_rows.y));
     }
 
     #[test]
-    fn gff_drag_emits_jump() {
-        let model = alignment_model(vec![raw("seq1", &[b'A'; 100])]);
+    fn handle_mouse_event_gff_click_jumps() {
+        let session = session(&[&[b'A'; 100]]);
         let gff = Gff {
-            features: vec![feature("gene1", 0, 100)],
+            features: vec![Feature {
+                name: "gene1".to_string(),
+                kind: FeatureType::Gene,
+                range: 0..100,
+                strand: Strand::Forward,
+            }],
         };
-        let mut tracker = MouseTracker::default();
         let mut ui = ui_state();
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            4,
-            AlignmentHeaderLayout::without_features(),
-        );
-        ui.viewport.update_dimensions(60, 10, 20);
-        ui.viewport.set_bounds(1, 100, 4);
+        ui.window = Window {
+            rows: 0..1,
+            columns: 0..60,
+            ..Window::default()
+        };
+        let (frame_layout, app_layout) = layouts(4);
+        let mut tracker = MouseTracker::default();
         let area = app_layout.gff_pane_rows;
 
-        handle_mouse_event(
-            &mut tracker,
-            Some(&model),
-            Some(&gff),
-            &mut ui,
-            &frame_layout,
-            &app_layout,
-            mouse_event(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y),
-        );
         let commands = handle_mouse_event(
             &mut tracker,
-            Some(&model),
+            Some(&session),
             Some(&gff),
             &mut ui,
             &frame_layout,
             &app_layout,
-            mouse_event(
-                MouseEventKind::Drag(MouseButton::Left),
-                area.x + area.width - 1,
-                area.y,
-            ),
+            mouse_event(LEFT_DOWN, area.x + 1, area.y),
         );
 
-        assert!(matches!(commands.as_slice(), [Command::JumpToPosition(_)]));
+        assert!(matches!(commands.as_slice(), [Command::JumpToIndex(_)]));
     }
 }

@@ -5,52 +5,44 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::Styled,
-    symbols::merge::MergeStrategy,
-    text::{Line, Span},
-    widgets::{Block, Paragraph, Widget},
+    text::Line,
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{
     command::Command,
     core::{
-        gff::{Feature, Gff, Strand},
-        model::AlignmentModel,
+        gff::{Feature, Gff},
+        session::Session,
     },
     input::movement::HorizontalDrag,
     ui::{
-        features::{DisplayFeature, display_features, feature_style},
+        features::{DisplayFeature, PlacedFeature, display_features, render_features},
+        layout::Window,
+        rows::render_column_scrollbar,
         ui_state::ThemeState,
+        utils::render_pane,
     },
 };
 
-const MIN_LABEL_WIDTH: usize = 2;
 pub(crate) struct GffPane<'a> {
     pub(crate) gff: &'a Gff,
-    pub(crate) alignment: &'a AlignmentModel,
-    pub(crate) viewport_col_range: &'a Range<usize>,
+    pub(crate) session: &'a Session,
+    pub(crate) window: &'a Window,
     pub(crate) theme: &'a ThemeState,
 }
 
 impl Widget for GffPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
-        let inner_area = if area.width > 2 && area.height > 2 {
-            block.inner(area)
-        } else {
-            Rect::default()
-        };
-        block.render(area, buf);
+        let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let track =
-            FeatureTrack::for_alignment(self.gff, self.alignment, usize::from(inner_area.width));
+            FeatureTrack::for_alignment(self.gff, self.session, usize::from(inner_area.width));
         let content_rows = Rect {
-            width: u16::try_from(track.width()).unwrap_or(u16::MAX),
+            width: u16::try_from(track.width).unwrap_or(u16::MAX),
             ..inner_area
         };
-        if content_rows.width == 0 || content_rows.height == 0 || track.total_columns() == 0 {
+        if content_rows.is_empty() {
             return;
         }
 
@@ -65,17 +57,16 @@ impl Widget for GffPane<'_> {
             1,
         );
 
-        render_features(&track, feature_rows, self.theme, buf);
+        render_features(&track.placed_features, feature_rows, self.theme, buf);
 
-        let line = generate_scroll_line(
-            usize::from(navigation_row.width),
-            self.viewport_col_range,
-            track.total_columns(),
-            self.theme,
+        render_column_scrollbar(
+            "▁",
+            self.theme.styles.accent,
+            track.total_columns,
+            &self.window.columns,
+            navigation_row,
+            buf,
         );
-        Paragraph::new(line)
-            .style(self.theme.styles.base_block)
-            .render(navigation_row, buf);
     }
 }
 
@@ -86,20 +77,15 @@ pub(crate) struct GffInfoPane<'a> {
 
 impl Widget for GffInfoPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::bordered()
-            .title(Line::from(
+        let inner_area = render_pane(
+            &self.theme.styles,
+            Some(Line::from(
                 "Feature Info".set_style(self.theme.styles.text_muted),
-            ))
-            .border_style(self.theme.styles.border)
-            .style(self.theme.styles.base_block)
-            .merge_borders(MergeStrategy::Exact);
-        let inner_area = if area.width > 2 && area.height > 2 {
-            block.inner(area)
-        } else {
-            Rect::default()
-        };
-        block.render(area, buf);
-        if inner_area.width == 0 || inner_area.height == 0 {
+            )),
+            area,
+            buf,
+        );
+        if inner_area.is_empty() {
             return;
         }
 
@@ -129,16 +115,14 @@ impl GffPaneState {
         &mut self,
         mouse: MouseEvent,
         gff_inner: Rect,
-        viewport_col_range: &Range<usize>,
-        alignment: &AlignmentModel,
+        window_columns: &Range<usize>,
+        total_columns: usize,
     ) -> Option<Command> {
-        let total_columns = FeatureTrack::total_columns_for_alignment(alignment);
         self.pan_drag.handle_mouse(
             mouse,
             gff_content_area(gff_inner, total_columns),
-            viewport_col_range,
+            window_columns,
             total_columns,
-            position_from_mouse,
         )
     }
 
@@ -149,26 +133,15 @@ impl GffPaneState {
 
 pub(crate) fn tooltip_at(
     gff: &Gff,
-    alignment: &AlignmentModel,
+    session: &Session,
     gff_inner: Rect,
     mouse_x: u16,
     mouse_y: u16,
 ) -> Option<String> {
-    let track = FeatureTrack::for_alignment(gff, alignment, usize::from(gff_inner.width));
-    if gff_inner.width == 0 || gff_inner.height == 0 || track.total_columns() == 0 {
-        return None;
-    }
-    let content_rows = Rect {
-        width: u16::try_from(track.width()).unwrap_or(u16::MAX),
-        ..gff_inner
-    };
-    if !content_rows.contains((mouse_x, mouse_y).into()) {
-        return None;
-    }
-
+    let track = FeatureTrack::for_alignment(gff, session, usize::from(gff_inner.width));
     let feature_rows = Rect {
-        height: content_rows.height.saturating_sub(1),
-        ..content_rows
+        height: gff_inner.height.saturating_sub(1),
+        ..gff_inner
     };
     if !feature_rows.contains((mouse_x, mouse_y).into()) {
         return None;
@@ -180,8 +153,8 @@ pub(crate) fn tooltip_at(
     track.feature_at(x, row).map(format_tooltip)
 }
 
-pub(crate) fn feature_row_count(gff: &Gff, alignment: &AlignmentModel, width: usize) -> usize {
-    FeatureTrack::for_alignment(gff, alignment, width).row_count()
+pub(crate) fn feature_row_count(gff: &Gff, session: &Session, width: usize) -> usize {
+    FeatureTrack::for_alignment(gff, session, width).row_count()
 }
 
 fn gff_content_area(area: Rect, total_columns: usize) -> Rect {
@@ -204,90 +177,6 @@ fn format_tooltip(feature: &Feature) -> String {
     )
 }
 
-fn render_features(track: &FeatureTrack<'_>, inner: Rect, theme: &ThemeState, buf: &mut Buffer) {
-    let width = usize::from(inner.width);
-    let max_row = usize::from(inner.height);
-    let blank = (' ', theme.styles.base_block);
-    let mut cells = vec![blank; width * max_row];
-
-    for placed_feature in track.placed_features() {
-        if placed_feature.row >= max_row {
-            continue;
-        }
-
-        let feature = placed_feature.feature;
-        let feature_span = &placed_feature.span;
-        let styles = feature_style(theme, placed_feature.colour_idx);
-        let feature_style = styles.background;
-        let text_style = styles.text;
-
-        for x in feature_span.start..feature_span.end {
-            let idx = placed_feature.row * width + x;
-            cells[idx] = (' ', feature_style);
-        }
-
-        let available = feature_span.len();
-        let (label_x, label_width, strand_arrow) = match feature.strand {
-            Strand::Forward if 0 < available => (
-                feature_span.start,
-                available.saturating_sub(1),
-                Some((available - 1, '→')),
-            ),
-            Strand::Reverse if 0 < available => (
-                feature_span.start + 1,
-                available.saturating_sub(1),
-                Some((0, '←')),
-            ),
-            Strand::Unknown | Strand::Forward | Strand::Reverse => {
-                (feature_span.start, available, None)
-            }
-        };
-
-        if let Some((arrow_offset, arrow)) = strand_arrow {
-            let x = feature_span.start + arrow_offset;
-            let idx = placed_feature.row * width + x;
-            cells[idx] = (arrow, text_style);
-        }
-
-        if label_width >= MIN_LABEL_WIDTH {
-            let truncated_len = feature.name.chars().take(label_width).count();
-            let label_offset = (label_width - truncated_len) / 2;
-            let label_start = label_x + label_offset;
-            for (i, ch) in feature.name.chars().take(label_width).enumerate() {
-                let x = label_start + i;
-                let idx = placed_feature.row * width + x;
-                cells[idx] = (ch, text_style);
-            }
-        }
-    }
-
-    let lines: Vec<Line<'static>> = cells
-        .chunks(width)
-        .map(|row| {
-            let mut spans = Vec::new();
-            let mut text = String::new();
-            let mut current_style = row[0].1;
-
-            for &(ch, style) in row {
-                if style != current_style && !text.is_empty() {
-                    spans.push(Span::styled(std::mem::take(&mut text), current_style));
-                    current_style = style;
-                }
-                text.push(ch);
-            }
-
-            if !text.is_empty() {
-                spans.push(Span::styled(text, current_style));
-            }
-
-            Line::from(spans)
-        })
-        .collect();
-    Paragraph::new(lines)
-        .style(theme.styles.base_block)
-        .render(inner, buf);
-}
-
 #[derive(Debug, Clone)]
 struct FeatureTrack<'a> {
     placed_features: Vec<PlacedFeature<'a>>,
@@ -296,32 +185,16 @@ struct FeatureTrack<'a> {
 }
 
 impl<'a> FeatureTrack<'a> {
-    fn for_alignment(gff: &'a Gff, alignment: &AlignmentModel, available_width: usize) -> Self {
-        let total_columns = alignment.view().column_count();
+    fn for_alignment(gff: &'a Gff, session: &Session, available_width: usize) -> Self {
+        let total_columns = session.layout().columns().len();
         let width = available_width.min(total_columns);
-        let display_features = display_features(gff, alignment);
-        let placed_features = placed_features(&display_features, width, total_columns);
+        let placed_features =
+            placed_features(&display_features(gff, session), width, total_columns);
         Self {
             placed_features,
             total_columns,
             width,
         }
-    }
-
-    fn total_columns_for_alignment(alignment: &AlignmentModel) -> usize {
-        alignment.view().column_count()
-    }
-
-    fn total_columns(&self) -> usize {
-        self.total_columns
-    }
-
-    fn width(&self) -> usize {
-        self.width
-    }
-
-    fn placed_features(&self) -> &[PlacedFeature<'a>] {
-        &self.placed_features
     }
 
     fn row_count(&self) -> usize {
@@ -340,14 +213,6 @@ impl<'a> FeatureTrack<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct PlacedFeature<'a> {
-    feature: &'a Feature,
-    span: Range<usize>,
-    row: usize,
-    colour_idx: usize,
-}
-
 fn placed_features<'a>(
     display_features: &[DisplayFeature<'a>],
     width: usize,
@@ -358,7 +223,7 @@ fn placed_features<'a>(
     let mut stack_offset = 0;
 
     for display_feature in display_features {
-        let Some(span) = feature_drawn_span(display_feature, width, total_columns) else {
+        let Some(span) = feature_span(display_feature, width, total_columns) else {
             continue;
         };
 
@@ -384,167 +249,161 @@ fn placed_features<'a>(
     res
 }
 
-fn feature_drawn_span(
+fn feature_span(
     display_feature: &DisplayFeature<'_>,
     width: usize,
     total_columns: usize,
 ) -> Option<Range<usize>> {
-    let screen_span = feature_screen_span(display_feature, width, total_columns)?;
-    let drawn_width = screen_span.len().saturating_sub(1).max(1);
-    Some(screen_span.start..screen_span.start + drawn_width)
-}
-
-fn feature_screen_span(
-    display_feature: &DisplayFeature<'_>,
-    width: usize,
-    total_columns: usize,
-) -> Option<Range<usize>> {
-    if width == 0 || total_columns == 0 {
+    if width == 0 {
         return None;
     }
 
-    let x_start = display_feature
-        .relative_col_range
-        .start
-        .saturating_mul(width)
-        / total_columns;
-    let x_end = display_feature
-        .relative_col_range
+    let start = display_feature.columns.start.saturating_mul(width) / total_columns;
+    let end = display_feature
+        .columns
         .end
         .saturating_mul(width)
         .div_ceil(total_columns)
-        .max(x_start + 1)
         .min(width);
-    Some(x_start..x_end)
-}
-
-fn scroll_bar_span(
-    width: usize,
-    viewport_col_range: &Range<usize>,
-    total_columns: usize,
-) -> Option<Range<usize>> {
-    if total_columns == 0 || width == 0 {
-        return None;
-    }
-
-    let viewport_span = viewport_col_range
-        .end
-        .saturating_sub(viewport_col_range.start);
-    let thumb_width = viewport_span
-        .saturating_mul(width)
-        .div_ceil(total_columns)
-        .max(1)
-        .min(width);
-    let thumb_start =
-        (viewport_col_range.start.saturating_mul(width) / total_columns).min(width - thumb_width);
-
-    Some(thumb_start..thumb_start + thumb_width)
-}
-
-fn generate_scroll_line(
-    width: usize,
-    viewport_col_range: &Range<usize>,
-    total_columns: usize,
-    theme: &ThemeState,
-) -> Line<'static> {
-    let thumb_span = scroll_bar_span(width, viewport_col_range, total_columns);
-    let spans: Vec<Span<'static>> = (0..width)
-        .map(|x| {
-            if thumb_span.as_ref().is_some_and(|span| span.contains(&x)) {
-                Span::styled("▁", theme.styles.accent)
-            } else {
-                Span::styled(" ", theme.styles.base_block)
-            }
-        })
-        .collect();
-    Line::from(spans)
-}
-
-fn position_from_mouse(mouse_x: u16, area: Rect, total_columns: usize) -> usize {
-    let offset = usize::from(mouse_x.saturating_sub(area.x));
-    let width = usize::from(area.width);
-    let column = offset.saturating_mul(total_columns) / width;
-    column.min(total_columns.saturating_sub(1))
+    Some(start..start + (end - start).saturating_sub(1).max(1))
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+    use crate::{
+        core::gff::{FeatureType, Strand},
+        test_utils::{buffer_text, session},
+    };
 
-    fn feature(start: usize, end: usize) -> Feature {
-        feature_with_name("gene", start, end)
-    }
-
-    fn feature_with_name(name: &str, start: usize, end: usize) -> Feature {
+    fn feature(name: &str, range: Range<usize>, strand: Strand) -> Feature {
         Feature {
             name: name.to_string(),
-            kind: crate::core::gff::FeatureType::Gene,
-            range: start..end + 1,
-            strand: Strand::Forward,
+            kind: FeatureType::Gene,
+            range,
+            strand,
         }
     }
 
-    fn raw(sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
-            id: "seq".to_string(),
-            sequence: sequence.to_vec(),
+    fn genes(ranges: &[Range<usize>]) -> Gff {
+        Gff {
+            features: ranges
+                .iter()
+                .enumerate()
+                .map(|(i, range)| feature(&format!("gene{i}"), range.clone(), Strand::Forward))
+                .collect(),
         }
     }
 
-    fn model_with_sequence(sequence: &[u8]) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![raw(sequence)]).unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn display(gff: &Gff) -> Vec<DisplayFeature<'_>> {
+        gff.features
+            .iter()
+            .enumerate()
+            .map(|(colour_idx, feature)| DisplayFeature {
+                feature,
+                columns: feature.range.clone(),
+                colour_idx,
+            })
+            .collect()
     }
 
-    fn model_with_len(len: usize) -> AlignmentModel {
-        model_with_sequence(&vec![b'A'; len])
+    #[rstest]
+    #[case::same_scale_leaves_gap(2..5, 10, 10, 2..4)]
+    #[case::one_column(3..4, 10, 10, 3..4)]
+    #[case::scaled_down(0..50, 10, 100, 0..4)]
+    #[case::short_feature_keeps_one_cell(50..51, 10, 100, 5..6)]
+    #[case::at_end(95..100, 10, 100, 9..10)]
+    fn feature_span_works(
+        #[case] columns: Range<usize>,
+        #[case] width: usize,
+        #[case] total_columns: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        let gff = genes(&[columns]);
+
+        assert_eq!(
+            feature_span(&display(&gff)[0], width, total_columns),
+            Some(expected)
+        );
     }
 
     #[test]
-    fn placed_features_alternate_rows() {
-        let gff = Gff {
-            features: vec![feature(0, 1), feature(2, 3), feature(4, 5)],
-        };
-        let model = model_with_len(6);
-        let display_features = display_features(&gff, &model);
-        let rows: Vec<usize> = placed_features(&display_features, 6, model.view().column_count())
+    fn feature_span_rejects_zero_width() {
+        let gff = genes(&[0..5]);
+
+        assert_eq!(feature_span(&display(&gff)[0], 0, 10), None);
+    }
+
+    #[rstest]
+    #[case::alternating(&[0..3, 4..7, 8..11], &[0, 1, 0])]
+    #[case::same_span_stacks(&[0..3, 0..3, 0..3, 5..8], &[0, 1, 2, 1])]
+    #[case::stacks_below_second_row(&[0..3, 5..8, 5..8], &[0, 1, 2])]
+    fn placed_features_works(#[case] ranges: &[Range<usize>], #[case] expected: &[usize]) {
+        let gff = genes(ranges);
+
+        let rows: Vec<usize> = placed_features(&display(&gff), 20, 20)
             .into_iter()
-            .map(|placed_feature| placed_feature.row)
+            .map(|placed| placed.row)
             .collect();
 
-        assert_eq!(rows, vec![0, 1, 0]);
-        assert_eq!(feature_row_count(&gff, &model, 6), 2);
+        assert_eq!(rows, expected);
+    }
+
+    #[rstest]
+    #[case::no_features_shown(&[30..40], 0)]
+    #[case::alternating(&[0..3, 4..7, 8..11], 2)]
+    fn feature_row_count_works(#[case] ranges: &[Range<usize>], #[case] expected: usize) {
+        let session = session(&[&[b'A'; 20]]);
+
+        assert_eq!(feature_row_count(&genes(ranges), &session, 20), expected);
+    }
+
+    #[rstest]
+    #[case::first_row(10, 5, Some(0))]
+    #[case::stacked_row(10, 6, Some(1))]
+    #[case::empty_cell(12, 5, None)]
+    #[case::navigation_row(10, 7, None)]
+    #[case::left_of_area(9, 5, None)]
+    fn tooltip_at_works(#[case] x: u16, #[case] y: u16, #[case] expected: Option<usize>) {
+        let session = session(&[&[b'A'; 100]]);
+        let gff = genes(&[0..1, 1..2, 2..3]);
+
+        assert_eq!(
+            tooltip_at(&gff, &session, Rect::new(10, 5, 4, 3), x, y),
+            expected.map(|i| format_tooltip(&gff.features[i]))
+        );
     }
 
     #[test]
-    fn tooltip_uses_stacked_feature_rows() {
+    fn pane() {
+        let session = session(&[&[b'A'; 40]]);
         let gff = Gff {
             features: vec![
-                feature_with_name("gene1", 0, 0),
-                feature_with_name("gene2", 1, 1),
+                feature("alpha", 0..12, Strand::Forward),
+                feature("beta", 14..30, Strand::Reverse),
+                feature("gamma", 32..40, Strand::Unknown),
+                feature("delta", 32..40, Strand::Forward),
             ],
         };
-        let model = model_with_len(100);
-        let rows = Rect::new(10, 5, 1, 3);
+        let window = Window {
+            columns: 0..10,
+            ..Window::default()
+        };
+        let theme = ThemeState::default();
+        let area = Rect::new(0, 0, 42, 6);
+        let mut buf = Buffer::empty(area);
 
-        let tooltip = tooltip_at(&gff, &model, rows, 10, 6).unwrap();
+        GffPane {
+            gff: &gff,
+            session: &session,
+            window: &window,
+            theme: &theme,
+        }
+        .render(area, &mut buf);
 
-        assert!(tooltip.starts_with("gene2 "));
-    }
-
-    #[test]
-    fn content_area_shrinks_to_visible_columns() {
-        let area = Rect::new(10, 5, 100, 3);
-
-        assert_eq!(gff_content_area(area, 12), Rect::new(10, 5, 12, 3));
-        assert_eq!(gff_content_area(area, 120), area);
-    }
-
-    #[test]
-    fn viewport_thumb_scales_with_visible_coordinate_span() {
-        let nucleotide = scroll_bar_span(12, &(0..4), 12).unwrap();
-        let protein = scroll_bar_span(12, &(0..4), 6).unwrap();
-
-        assert!(nucleotide.len() < protein.len());
+        insta::assert_snapshot!(buffer_text(&buf, area));
     }
 }

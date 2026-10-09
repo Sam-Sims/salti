@@ -1,15 +1,17 @@
 # libmsa
 
-`libmsa` is the alignment library that powers `salti`. At the moment it is an internal crate.
+`libmsa` is the alignment library that powers `salti`.
 
-The lib works on alignments that are already in memory. You pass in a set of `RawSequence` values and it builds a
-validated `Alignment`. That alignment can:
+The lib works on alignments that are already in memory. Generally you pass in a `Vec<Sequence>` and it builds a validated
+`Alignment` which:
 
-- expose rows and columns while keeping track of visible and absolute positions
-- detect whether data might be DNA, protein, or generic, with overrides
-- filter rows by index or name pattern, and hide columns by gap fraction
-- calculate consensus, conservation, and gap fraction for visible columns
-- translate DNA alignments in any of the three forward reading frames
+- detects whether the data is DNA, protein, or generic
+- reads cells through a `Grid`, either as stored or translated in any of the three forward reading frames
+
+and can:
+
+- calculate consensus and conservation over any set of rows and columns
+- finds the columns that pass a gap or constant-column filter
 
 Although this crate is not designed to be a general-purpose MSA library, it is intended to be flexible enough to support
 a variety of MSA operations.
@@ -17,7 +19,6 @@ a variety of MSA operations.
 There are some current limits (some obvious, maybe some not so much):
 
 - All sequences must already be aligned to the same length.
-- Translation only works for DNA alignments, and only when the column view has not been filtered.
+- Translation only makes sense for DNA alignments.
 - Conservation is only defined for DNA and protein alignments.
 - Consensus ties go to the lowest ASCII byte.
-

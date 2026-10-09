@@ -9,9 +9,8 @@ use ratatui::{
 };
 
 use crate::{
-    core::model::AlignmentModel,
+    core::session::{Session, ViewMode},
     ui::{
-        selection::selection_row_bounds,
         ui_state::{LoadingState, UiState},
         utils::truncate_label,
     },
@@ -20,125 +19,84 @@ use crate::{
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
 const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
 
-fn format_percent(fraction: f32) -> String {
-    let mut text = format!("{:.2}", fraction * 100.0);
-    while text.ends_with('0') {
-        text.pop();
-    }
-    if text.ends_with('.') {
-        text.pop();
-    }
-    text
+fn format_percent(fraction: f64) -> String {
+    ((fraction * 10_000.0).round() / 100.0).to_string()
 }
 
-fn build_bottom_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec<Span<'static>> {
+fn range_label(start: usize, end: usize) -> String {
+    if start == end {
+        start.to_string()
+    } else {
+        format!("{start}-{end}")
+    }
+}
+
+fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
+    let Some(session) = session else {
+        return Vec::new();
+    };
     let theme = &ui.theme.styles;
+    let (state, layout) = (session.state(), session.layout());
+    let filter = state.mode().filter();
     let mut parts = Vec::new();
 
-    if let Some(alignment) = alignment {
-        if alignment.filter().is_active() {
-            let visible_rows = alignment.view().row_count();
-            let mut filter_text = String::from("Filters:");
-            let mut counts = format!(" ({visible_rows} rows)");
-            if let Some(pattern) = alignment.filter().pattern() {
-                let _ = write!(filter_text, " [rows: {pattern}]");
-            }
-            if let Some(max_gap_fraction) = alignment.filter().max_gap_fraction() {
-                let _ = write!(
-                    filter_text,
-                    " [gaps: <= {}%]",
-                    format_percent(max_gap_fraction)
-                );
-            }
-            if let Some(min_constant_fraction) = alignment.filter().min_constant_fraction() {
-                let _ = write!(
-                    filter_text,
-                    " [constant: >= {}%]",
-                    format_percent(min_constant_fraction)
-                );
-            }
-            if alignment.filter().has_column_filter() {
-                let visible_cols = alignment.view().column_count();
-                let _ = write!(counts, " ({visible_cols} cols)");
-            }
-            parts.push(format!("{filter_text}{counts}").set_style(theme.warning));
+    if state.row_regex_filter.is_some() || filter.is_active() {
+        let mut text = String::from("Filters:");
+        if let Some(regex) = &state.row_regex_filter {
+            let _ = write!(text, " [rows: {regex}]");
         }
-
-        let translation_active =
-            alignment.translation().is_some() || alignment.is_reloaded_as_protein();
-        if translation_active {
-            if !parts.is_empty() {
-                parts.push(Span::raw(" | "));
-            }
-            parts.push(
-                format!("Translation frame: {}", alignment.translation_frame())
-                    .set_style(theme.text),
-            );
+        if let Some(fraction) = filter.max_gap_fraction {
+            let _ = write!(text, " [gaps: <= {}%]", format_percent(fraction));
         }
+        if let Some(fraction) = filter.min_const_fraction {
+            let _ = write!(text, " [constant: >= {}%]", format_percent(fraction));
+        }
+        let _ = write!(text, " ({} rows)", layout.rows().len());
+        if filter.is_active() {
+            let _ = write!(text, " ({} cols)", layout.columns().len());
+        }
+        parts.push(text.set_style(theme.warning));
     }
 
-    // optional selection info building
+    if !matches!(state.mode(), ViewMode::Plain { .. }) {
+        parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
+    }
+
     if let Some(selection) = ui.selection {
-        let (row_min, row_max) = selection_row_bounds(selection);
-        let selected_sequence_count = row_max - row_min + 1;
-        let col_start = selection.column.min(selection.end_column) + 1;
-        let col_end = selection.column.max(selection.end_column) + 1;
+        let count = selection.rows.last - selection.rows.start + 1;
+        let first = layout.columns()[selection.columns.start];
+        let last = layout.columns()[selection.columns.last];
+        let columns = range_label(first + 1, last + 1);
 
-        if !parts.is_empty() {
-            parts.push(Span::raw(" | "));
-        }
-
-        if selected_sequence_count == 1 {
-            let position_label = alignment
-                .and_then(|alignment| alignment.translation_overlay())
-                .and_then(|overlay| {
-                    let start_col = selection.column.min(selection.end_column);
-                    let end_col = selection.column.max(selection.end_column);
-                    match (overlay.codon_span(start_col), overlay.codon_span(end_col)) {
-                        (Some(start_span), Some(end_span)) => {
-                            let start = (start_span.start - overlay.frame.offset()) / 3 + 1;
-                            let end = (end_span.start - overlay.frame.offset()) / 3 + 1;
-                            if start == end {
-                                Some(start.to_string())
-                            } else {
-                                Some(format!("{start}-{end}"))
-                            }
-                        }
-                        _ => None,
-                    }
-                })
-                .unwrap_or_else(|| {
-                    if col_start == col_end {
-                        col_start.to_string()
-                    } else {
-                        format!("{col_start}-{col_end}")
-                    }
-                });
-            let sequence_name = if let Some(alignment) = alignment {
-                if let Some(sequence) = alignment.base().project_absolute_row(selection.sequence_id)
-                {
-                    truncate_label(sequence.id(), STATUS_BAR_SELECTED_NAME_MAX_CHARS)
+        let text = if count == 1 {
+            let protein = session.protein_columns(first..last + 1);
+            let position =
+                if matches!(state.mode(), ViewMode::TranslationOverlay) && !protein.is_empty() {
+                    range_label(protein.start + 1, protein.end)
                 } else {
-                    "Unknown".to_string()
-                }
-            } else {
-                "Unknown".to_string()
-            };
-            parts.push(
-                format!("Selected: {sequence_name} @ {position_label}").set_style(theme.text),
-            );
+                    columns
+                };
+            let name = session
+                .base_alignment()
+                .id(layout.rows()[selection.rows.start]);
+            format!(
+                "Selected: {} @ {position}",
+                truncate_label(name, STATUS_BAR_SELECTED_NAME_MAX_CHARS)
+            )
         } else {
-            parts.push(
-                format!("{selected_sequence_count} sequence(s) selected @ {col_start}-{col_end}")
-                    .set_style(theme.text),
-            );
-        }
+            format!("{count} sequence(s) selected @ {columns}")
+        };
+        parts.push(text.set_style(theme.text));
     }
 
     parts
+        .into_iter()
+        .flat_map(|part| [Span::raw(" | "), part])
+        .skip(1)
+        .collect()
 }
 
-fn build_top_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec<Span<'static>> {
+fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
     let file_name = ui
         .meta
@@ -160,29 +118,16 @@ fn build_top_status_bar(alignment: Option<&AlignmentModel>, ui: &UiState) -> Vec
         LoadingState::Failed(_) => Span::styled("Status: Failed", theme.error),
     };
 
-    let alignment_count = alignment
-        .map(|alignment| alignment.view().row_count())
-        .unwrap_or(0);
-    let alignment_length = alignment
-        .map(|alignment| alignment.base().column_count())
-        .unwrap_or(0);
-    let position_range = alignment.map_or_else(
-        || "Positions: 0-0".to_string(),
-        |alignment| {
-            let window = ui.viewport.window();
-            match (
-                alignment.view().absolute_column_id(window.col_range.start),
-                window
-                    .col_range
-                    .end
-                    .checked_sub(1)
-                    .and_then(|end| alignment.view().absolute_column_id(end)),
-            ) {
-                (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
-                _ => "Positions: 0-0".to_string(),
-            }
-        },
-    );
+    let layout = session.map(Session::layout);
+    let alignment_count = layout.map_or(0, |layout| layout.rows().len());
+    let alignment_length = session.map_or(0, |session| session.grid().width());
+    let shown = layout
+        .map(|layout| &layout.columns()[ui.window.columns.clone()])
+        .unwrap_or_default();
+    let position_range = match (shown.first(), shown.last()) {
+        (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
+        _ => "Positions: 0-0".to_string(),
+    };
 
     vec![
         format!("File: {file_name}").set_style(theme.text_dim),
@@ -201,12 +146,12 @@ pub fn render_frame(
     f: &mut Frame,
     top_status_area: Rect,
     bottom_status_area: Rect,
-    alignment: Option<&AlignmentModel>,
+    session: Option<&Session>,
     ui: &UiState,
 ) {
     let theme = &ui.theme.styles;
-    let top_status_bar = build_top_status_bar(alignment, ui);
-    let bottom_status_bar = build_bottom_status_bar(alignment, ui);
+    let top_status_bar = build_top_status_bar(session, ui);
+    let bottom_status_bar = build_bottom_status_bar(session, ui);
 
     if top_status_area.height > 0 {
         let top_line = Line::from(top_status_bar).right_aligned();
@@ -227,189 +172,149 @@ pub fn render_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{cli::StartupState, ui::ui_state::MouseSelection};
+    use std::ops;
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::RawSequence {
-        libmsa::RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
+    use super::*;
+    use crate::{
+        core::session::{Position, ViewState},
+        test_utils::{full_window, session_with_ids, ui_state},
+        ui::{layout::Window, selection::Selection},
+    };
 
     fn status_text(spans: &[Span<'_>]) -> String {
         spans.iter().map(|span| span.content.as_ref()).collect()
     }
 
-    fn alignment_model(sequences: Vec<libmsa::RawSequence>) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(sequences).unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn seqs(sequences: &[&[u8]]) -> Session {
+        let ids: Vec<String> = (1..=sequences.len()).map(|i| format!("seq{i}")).collect();
+        let sequences: Vec<(&str, &[u8])> = ids
+            .iter()
+            .map(String::as_str)
+            .zip(sequences.iter().copied())
+            .collect();
+        session_with_ids(&sequences)
     }
 
-    fn ui_state() -> UiState {
-        let mut ui = UiState::new(StartupState::default());
-        ui.meta.loading_state = LoadingState::Loaded;
-        ui
+    fn changed(
+        sequences: &[&[u8]],
+        change: impl FnOnce(&mut ViewState) -> anyhow::Result<()>,
+    ) -> Session {
+        let mut session = seqs(sequences);
+        session.update(Position::default(), change).unwrap();
+        session
+    }
+
+    fn bottom_with_selection(
+        session: &Session,
+        rows: ops::RangeInclusive<usize>,
+        columns: ops::RangeInclusive<usize>,
+    ) -> String {
+        let mut ui = ui_state();
+        ui.selection = Some(Selection {
+            rows: rows.into(),
+            columns: columns.into(),
+        });
+        status_text(&build_bottom_status_bar(Some(session), &ui))
     }
 
     #[test]
-    fn top_status_loaded_alignment() {
-        let alignment = alignment_model(vec![
-            raw("seq1", b"ACGTACGT"),
-            raw("seq2", b"ACGTAC-T"),
-            raw("seq3", b"ACGTACGA"),
-        ]);
+    fn top_loaded() {
+        let session = seqs(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
         let mut ui = ui_state();
         ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
-        ui.viewport.update_dimensions(5, 3, 0);
-        ui.viewport.set_bounds(
-            alignment.view().row_count(),
-            alignment.view().column_count(),
-            alignment.base().max_id_len(),
-        );
+        ui.meta.loading_state = LoadingState::Loaded;
+        ui.window = Window {
+            columns: 0..5,
+            ..full_window(&session)
+        };
 
-        assert_eq!(
-            status_text(&build_top_status_bar(Some(&alignment), &ui)),
-            "File: iamnotreal.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5"
-        );
+        insta::assert_snapshot!(status_text(&build_top_status_bar(Some(&session), &ui)));
     }
 
     #[test]
-    fn top_status_failed_load() {
-        let mut ui = UiState::new(StartupState::default());
+    fn top_failed() {
+        let mut ui = ui_state();
         ui.meta.loading_state = LoadingState::Failed("boom".to_string());
 
-        assert_eq!(
-            status_text(&build_top_status_bar(None, &ui)),
-            "File: Unknown | Status: Failed | 0 alignments | Length: 0 | Positions: 0-0"
-        );
+        insta::assert_snapshot!(status_text(&build_top_status_bar(None, &ui)));
     }
 
     #[test]
-    fn bottom_status_filters_translation() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"ATGAAATTT"),
-            raw("seq2", b"ATG---TTT"),
-            raw("seq3", b"ATGAAGTTT"),
-        ]);
-        alignment.set_filter("seq1|seq2".to_string()).unwrap();
-        alignment.set_gap_filter(Some(0.5)).unwrap();
-        alignment
-            .set_translation(Some(libmsa::ReadingFrame::Frame2))
-            .unwrap();
-
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui_state())),
-            "Filters: [rows: seq1|seq2] [gaps: <= 50%] (2 rows) (9 cols) | Translation frame: 2"
-        );
-    }
-
-    #[test]
-    fn bottom_status_constant_filter() {
-        let mut alignment = alignment_model(vec![
-            raw("seq1", b"CATCATCATCAT"),
-            raw("seq2", b"CATCATCATCAT"),
-            raw("seq3", b"CATCATCATCAT"),
-        ]);
-        alignment.set_constant_filter(Some(1.0)).unwrap();
-
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui_state())),
-            "Filters: [constant: >= 100%] (3 rows) (0 cols)"
-        );
-    }
-
-    #[test]
-    fn bottom_status_single_selection() {
-        let alignment = alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 5,
-            end_sequence_id: 0,
-            end_column: 5,
+    fn bottom_protein_filters() {
+        let session = changed(&[b"ATGAAATTT", b"ATG---TTT", b"ATGAAGTTT"], |state| {
+            state.row_regex_filter = Some(regex::Regex::new("seq1|seq2").unwrap());
+            state.frame = libmsa::ReadingFrame::Frame2;
+            state.toggle_protein_view()?;
+            state.set_gap_filter(Some(0.5))
         });
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Selected: seq1 @ 6"
-        );
+        insta::assert_snapshot!(status_text(&build_bottom_status_bar(
+            Some(&session),
+            &ui_state()
+        )));
     }
 
     #[test]
-    fn bottom_status_single_range_selection() {
-        let alignment = alignment_model(vec![raw("seq1", b"ACGTACGT"), raw("seq2", b"ACGTACGT")]);
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 2,
-            end_sequence_id: 0,
-            end_column: 8,
+    fn bottom_constant_filter() {
+        let cat: &[u8] = b"CATCATCATCAT";
+        let session = changed(&[cat, cat, cat], |state| {
+            state.set_constant_filter(Some(1.0))
         });
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Selected: seq1 @ 3-9"
-        );
+        insta::assert_snapshot!(status_text(&build_bottom_status_bar(
+            Some(&session),
+            &ui_state()
+        )));
     }
 
     #[test]
-    fn bottom_status_translated_codon_selection() {
-        let mut alignment =
-            alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        alignment
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .unwrap();
-        alignment.toggle_translation_view().unwrap();
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 0,
-            end_sequence_id: 0,
-            end_column: 2,
-        });
+    fn bottom_cell() {
+        let session = seqs(&[b"ACGTACGT", b"ACGTACGT"]);
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Translation frame: 1 | Selected: seq1 @ 1"
-        );
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 5..=5));
     }
 
     #[test]
-    fn bottom_status_translated_range_selection() {
-        let mut alignment =
-            alignment_model(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        alignment
-            .set_translation_frame(libmsa::ReadingFrame::Frame1)
-            .unwrap();
-        alignment.toggle_translation_view().unwrap();
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 0,
-            end_sequence_id: 0,
-            end_column: 8,
-        });
+    fn bottom_range() {
+        let session = seqs(&[b"ACGTACGTAC", b"ACGTACGTAC"]);
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(Some(&alignment), &ui)),
-            "Translation frame: 1 | Selected: seq1 @ 1-3"
-        );
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 2..=8));
     }
 
     #[test]
-    fn bottom_status_multi_selection() {
-        let mut ui = ui_state();
-        ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 1,
-            end_sequence_id: 2,
-            end_column: 4,
+    fn bottom_codon() {
+        let session = changed(
+            &[b"ATGAAATTT", b"ATGAAATTT"],
+            ViewState::toggle_translation_overlay,
+        );
+
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 0..=2));
+    }
+
+    #[test]
+    fn bottom_translated_range() {
+        let session = changed(
+            &[b"ATGAAATTT", b"ATGAAATTT"],
+            ViewState::toggle_translation_overlay,
+        );
+
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 0..=8));
+    }
+
+    #[test]
+    fn bottom_rows() {
+        let session = seqs(&[b"ACGTACGT", b"ACGTACGT", b"ACGTACGT"]);
+
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=2, 1..=4));
+    }
+
+    #[test]
+    fn bottom_rows_filtered() {
+        let session = changed(&[b"ACGTACGT", b"ACGTACGT", b"ACGTACGT"], |state| {
+            state.row_regex_filter = Some(regex::Regex::new("seq[13]").unwrap());
+            Ok(())
         });
 
-        assert_eq!(
-            status_text(&build_bottom_status_bar(None, &ui)),
-            "3 sequence(s) selected @ 2-5"
-        );
+        insta::assert_snapshot!(bottom_with_selection(&session, 0..=1, 1..=4));
     }
 }

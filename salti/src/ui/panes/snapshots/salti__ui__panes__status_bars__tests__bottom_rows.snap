@@ -1,0 +1,5 @@
+---
+source: salti/src/ui/panes/status_bars.rs
+expression: "bottom_with_selection(&session, 0..=2, 1..=4)"
+---
+3 sequence(s) selected @ 2-5

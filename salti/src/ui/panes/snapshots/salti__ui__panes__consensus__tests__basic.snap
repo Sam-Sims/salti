@@ -1,0 +1,9 @@
+---
+source: salti/src/ui/panes/consensus.rs
+expression: "consensus_text(&[CAT, CAT], |state| { state.set_reference(Some(0)); Ok(()) })"
+---
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│Reference Sequence│CATCATCATCATCATCAT                                                             │
+│Consensus Sequence│CATCATCATCATCATCAT                                                             │
+│Conservation:     │██████████████████                                                             │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

@@ -1,3 +1,5 @@
 .idea
 target
 *.fasta
+test-data
+mutants.out

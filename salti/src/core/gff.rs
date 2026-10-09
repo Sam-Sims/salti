@@ -22,12 +22,6 @@ pub enum FeatureType {
 }
 
 impl FeatureType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Gene => "gene",
-        }
-    }
-
     fn parse(feature_type: &[u8]) -> Option<Self> {
         if feature_type.eq_ignore_ascii_case(b"gene") {
             return Some(Self::Gene);
@@ -39,7 +33,9 @@ impl FeatureType {
 
 impl fmt::Display for FeatureType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(match self {
+            Self::Gene => "gene",
+        })
     }
 }
 
@@ -50,19 +46,13 @@ pub enum Strand {
     Unknown,
 }
 
-impl Strand {
-    pub fn as_str(self) -> &'static str {
-        match self {
+impl fmt::Display for Strand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
             Self::Forward => "Forward →",
             Self::Reverse => "Reverse ←",
             Self::Unknown => "Unknown strand",
-        }
-    }
-}
-
-impl fmt::Display for Strand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        })
     }
 }
 
@@ -87,13 +77,15 @@ pub fn parse_gff(path: &Path) -> Result<Gff> {
             let Some(kind) = FeatureType::parse(record.ty().as_ref()) else {
                 return Ok(None);
             };
-            let start = usize::from(record.start())
-                .checked_sub(1)
-                .ok_or_else(|| format_err!("gff feature start must be one-based"))?;
+            let start = usize::from(record.start()) - 1;
             let end = usize::from(record.end());
+            let name = extract_name(&record);
+            if end <= start {
+                return Err(format_err!("GFF feature {name} ends before it starts"));
+            }
 
             Ok(Some(Feature {
-                name: extract_name(&record),
+                name,
                 kind,
                 range: start..end,
                 strand: record.strand().into(),
@@ -128,65 +120,96 @@ fn extract_name(record: &gff::feature::RecordBuf) -> String {
 mod tests {
     use std::io::Write;
 
+    use rstest::rstest;
+
     use super::*;
 
-    fn write_gff(content: &str) -> tempfile::NamedTempFile {
+    fn write_gff(lines: &[&str]) -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
+        writeln!(file, "##gff-version 3").unwrap();
+        for line in lines {
+            writeln!(file, "{}", line.replace(' ', "\t")).unwrap();
+        }
         file
     }
 
-    #[test]
-    fn parse_gff_extracts_supported_features_only() {
-        let gff = write_gff(
-            "##gff-version 3\n\
-            chr1\t.\tgene\t1\t100\t.\t+\t.\tID=gene1;Name=gene1\n\
-            chr1\t.\tCDS\t20\t80\t.\t+\t.\tID=cds1;Name=CDS1\n",
-        );
-        let model = parse_gff(gff.path()).unwrap();
+    fn gene(name: &str, range: Range<usize>, strand: Strand) -> Feature {
+        Feature {
+            name: name.to_string(),
+            kind: FeatureType::Gene,
+            range,
+            strand,
+        }
+    }
 
-        assert_eq!(model.features.len(), 1);
-        assert_eq!(model.features[0].name, "gene1");
-        assert_eq!(model.features[0].kind, FeatureType::Gene);
-        assert_eq!(model.features[0].range, 0..100);
-        assert_eq!(model.features[0].strand, Strand::Forward);
+    #[rstest]
+    #[case::forward("chr1 . gene 1 100 . + . Name=a", gene("a", 0..100, Strand::Forward))]
+    #[case::reverse_single_base("chr1 . gene 5 5 . - . Name=a", gene("a", 4..5, Strand::Reverse))]
+    #[case::unknown_strand("chr1 . gene 1 3 . ? . Name=a", gene("a", 0..3, Strand::Unknown))]
+    #[case::type_ignores_case("chr1 . GENE 1 3 . + . Name=a", gene("a", 0..3, Strand::Forward))]
+    fn parse_gff_works(#[case] line: &str, #[case] expected: Feature) {
+        let file = write_gff(&[line]);
+
+        assert_eq!(parse_gff(file.path()).unwrap().features, [expected]);
     }
 
     #[test]
-    fn parse_gff_sorts_features_by_start() {
-        let gff = write_gff(
-            "##gff-version 3\n\
-            chr1\t.\tgene\t50\t150\t.\t+\t.\tID=g2;Name=gene2\n\
-            chr1\t.\tgene\t1\t100\t.\t+\t.\tID=g1;Name=gene1\n",
-        );
-        let model = parse_gff(gff.path()).unwrap();
-
-        assert_eq!(model.features[0].name, "gene1");
-        assert_eq!(model.features[1].name, "gene2");
-    }
-
-    #[test]
-    fn parse_gff_falls_back_to_id_when_no_name() {
-        let gff = write_gff(
-            "##gff-version 3\n\
-            chr1\t.\tgene\t1\t10\t.\t+\t.\tID=id1\n",
-        );
-        let model = parse_gff(gff.path()).unwrap();
-
-        assert_eq!(model.features[0].name, "id1");
-    }
-
-    #[test]
-    fn parse_gff_no_supported_features_returns_error() {
-        let gff = write_gff(
-            "##gff-version 3\n\
-            chr1\t.\tCDS\t1\t10\t.\t+\t.\tID=cds1\n",
-        );
-        let result = parse_gff(gff.path());
+    fn parse_gff_skips_unsupported_features() {
+        let file = write_gff(&[
+            "chr1 . CDS 1 3 . + . Name=cds",
+            "chr1 . gene 1 3 . + . Name=a",
+        ]);
 
         assert_eq!(
-            result.unwrap_err().to_string(),
-            "no supported features found in gff file"
+            parse_gff(file.path()).unwrap().features,
+            [gene("a", 0..3, Strand::Forward)]
         );
+    }
+
+    #[test]
+    fn parse_gff_sorts_by_start_then_longest_first() {
+        let file = write_gff(&[
+            "chr1 . gene 5 9 . + . Name=late",
+            "chr1 . gene 1 3 . + . Name=short",
+            "chr1 . gene 1 9 . + . Name=long",
+        ]);
+
+        let names: Vec<String> = parse_gff(file.path())
+            .unwrap()
+            .features
+            .into_iter()
+            .map(|feature| feature.name)
+            .collect();
+
+        assert_eq!(names, ["long", "short", "late"]);
+    }
+
+    #[rstest]
+    #[case::name_first("product=p;gene_name=g;ID=i;Name=n", "n")]
+    #[case::then_id("product=p;gene_name=g;ID=i", "i")]
+    #[case::then_gene_name("product=p;gene_name=g", "g")]
+    #[case::then_product("product=p", "p")]
+    #[case::skips_empty("Name=;ID=i", "i")]
+    #[case::falls_back_to_type(".", "gene")]
+    fn parse_gff_name_works(#[case] attributes: &str, #[case] expected: &str) {
+        let file = write_gff(&[&format!("chr1 . gene 1 3 . + . {attributes}")]);
+
+        assert_eq!(parse_gff(file.path()).unwrap().features[0].name, expected);
+    }
+
+    #[rstest]
+    #[case::ends_before_start(&["chr1 . gene 5 4 . + . Name=a"])]
+    #[case::no_supported_features(&["chr1 . CDS 1 3 . + . Name=a"])]
+    #[case::no_features(&[])]
+    #[case::invalid_record(&["chr1 . gene x 3 . + . Name=a"])]
+    fn parse_gff_rejects(#[case] lines: &[&str]) {
+        let file = write_gff(lines);
+
+        assert!(parse_gff(file.path()).is_err());
+    }
+
+    #[test]
+    fn parse_gff_rejects_missing_file() {
+        assert!(parse_gff(Path::new("missing.gff")).is_err());
     }
 }

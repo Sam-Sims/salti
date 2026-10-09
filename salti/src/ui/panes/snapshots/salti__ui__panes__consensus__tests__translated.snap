@@ -1,0 +1,9 @@
+---
+source: salti/src/ui/panes/consensus.rs
+expression: "consensus_text(&[CAT, CAT], |state|\n{ state.set_reference(Some(0)); state.toggle_translation_overlay() })"
+---
+┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│Reference Sequence│ H  H  H  H  H  H                                                              │
+│Consensus Sequence│ H  H  H  H  H  H                                                              │
+│Conservation:     │██████████████████                                                             │
+└──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

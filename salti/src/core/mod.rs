@@ -1,9 +1,6 @@
-pub(crate) mod codon;
+pub mod columns;
 pub(crate) mod gff;
-pub mod model;
+pub mod layout;
 pub mod parser;
 pub mod search;
-pub mod stats;
-pub mod viewport;
-
-pub use viewport::Viewport;
+pub mod session;

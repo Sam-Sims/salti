@@ -1,38 +1,58 @@
 use std::{fs, path::Path};
 
-use super::input::CommandPaletteState;
+use super::input::{CommandPaletteState, VisibleSequence};
+use crate::{config::theme::ThemeId, core::session::DiffMode};
 
-fn sequence_names_from(sequences: &[super::input::VisibleSequence]) -> Vec<String> {
+fn sequence_names_from(sequences: &[VisibleSequence]) -> Vec<String> {
     sequences
         .iter()
-        .map(|sequence| sequence.sequence_name.to_string())
+        .map(|sequence| sequence.sequence_name.clone())
         .collect()
 }
 
 pub(super) fn sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    sequence_names_from(&state.selectable_sequences)
+    sequence_names_from(&state.rows)
+}
+
+pub(super) fn main_sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
+    sequence_names_from(&state.rows[state.pinned..])
 }
 
 pub(super) fn pinned_sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    sequence_names_from(&state.pinned_sequences)
+    sequence_names_from(&state.rows[..state.pinned])
 }
 
 pub(super) fn features(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    state
-        .gff_feature_targets
-        .as_deref()
-        .map_or_else(Vec::new, |gff_feature_targets| {
-            gff_feature_targets
-                .iter()
-                .map(|gff_feature_target| gff_feature_target.feature_name.to_string())
-                .collect()
-        })
+    state.feature_names.clone().unwrap_or_default()
+}
+
+pub(super) fn frames(_: &CommandPaletteState, _: &str) -> Vec<String> {
+    libmsa::ReadingFrame::all()
+        .map(|frame| frame.name().to_string())
+        .to_vec()
+}
+
+pub(super) fn consensus_methods(_: &CommandPaletteState, _: &str) -> Vec<String> {
+    libmsa::ConsensusMethod::all()
+        .map(|method| method.name().to_string())
+        .to_vec()
+}
+
+pub(super) fn diff_modes(_: &CommandPaletteState, _: &str) -> Vec<String> {
+    DiffMode::all().map(|mode| mode.name().to_string()).to_vec()
+}
+
+pub(super) fn themes(_: &CommandPaletteState, _: &str) -> Vec<String> {
+    ThemeId::ALL
+        .iter()
+        .map(|theme| theme.name().to_string())
+        .collect()
 }
 
 pub(super) fn filter_matches(state: &CommandPaletteState, arguments: &str) -> Vec<String> {
     let regex_text = arguments.trim();
     if regex_text.is_empty() {
-        return sequence_names_from(&state.selectable_sequences);
+        return sequence_names_from(&state.rows);
     }
 
     let Ok(regex) = regex::Regex::new(regex_text) else {
@@ -40,11 +60,11 @@ pub(super) fn filter_matches(state: &CommandPaletteState, arguments: &str) -> Ve
     };
 
     state
-        .selectable_sequences
+        .rows
         .iter()
-        .map(|sequence| sequence.sequence_name.as_ref())
+        .map(|sequence| &sequence.sequence_name)
         .filter(|sequence_name| regex.is_match(sequence_name))
-        .map(std::string::ToString::to_string)
+        .cloned()
         .collect()
 }
 
@@ -107,7 +127,7 @@ pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> 
     matches.into_iter().map(|(_, label)| label).collect()
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};

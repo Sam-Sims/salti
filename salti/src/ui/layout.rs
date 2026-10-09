@@ -1,13 +1,17 @@
+use std::ops::Range;
+
 use ratatui::{
     layout::{Rect, Spacing},
     macros::{horizontal, vertical},
 };
 
+use crate::core::layout::Layout;
+
 /// fixed height (rows) for the bottom consensus pane.
 /// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
 /// fixed height (rows) for the alignment ruler above sequence rows.
-pub const RULER_HEIGHT_ROWS: u16 = 2;
+const RULER_HEIGHT_ROWS: u16 = 2;
 /// width percentage for the left sequence ID pane (used in alignment and consensus panes).
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
@@ -38,32 +42,29 @@ impl AlignmentHeaderLayout {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PinnedSectionLayout {
-    pub pinned_rendered: usize,
-    pub divider_height: usize,
-    pub scrollable_height: usize,
+pub fn screen_rows(
+    layout: &Layout,
+    window: &Window,
+) -> impl Iterator<Item = Option<usize>> + use<> {
+    let offset = layout.pinned();
+    let divider = (!window.pinned.is_empty()).then_some(None);
+    let main = window.rows.clone().map(move |i| Some(offset + i));
+    window.pinned.clone().map(Some).chain(divider).chain(main)
 }
 
-pub fn pinned_section_layout(pinned_count: usize, available_height: usize) -> PinnedSectionLayout {
-    if available_height == 0 {
-        return PinnedSectionLayout {
-            pinned_rendered: 0,
-            divider_height: 0,
-            scrollable_height: 0,
-        };
-    }
-
-    let pinned_rendered = pinned_count.min(available_height.saturating_sub(1));
-    let divider_height = usize::from(pinned_rendered > 0);
-    let scrollable_height = available_height.saturating_sub(pinned_rendered + divider_height);
-
-    PinnedSectionLayout {
-        pinned_rendered,
-        divider_height,
-        scrollable_height,
-    }
+#[derive(Debug, Clone, Default)]
+pub struct Window {
+    pub pinned: Range<usize>,
+    pub rows: Range<usize>,
+    pub columns: Range<usize>,
+    pub names: Range<usize>,
 }
+
+pub fn fit(offset: &mut usize, visible: usize, total: usize) -> Range<usize> {
+    *offset = (*offset).min(total.saturating_sub(visible));
+    *offset..(*offset + visible).min(total)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct FrameLayout {
     pub top_status_area: Rect,
@@ -133,11 +134,7 @@ impl AppLayout {
         let [gff_info_pane_area, gff_pane_area] = gff_area.layout(
             &horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)),
         );
-        let gff_pane_rows = if gff_pane_area.width > 2 && gff_pane_area.height > 2 {
-            ratatui::widgets::Block::bordered().inner(gff_pane_area)
-        } else {
-            Rect::default()
-        };
+        let gff_pane_rows = ratatui::widgets::Block::bordered().inner(gff_pane_area);
 
         Self {
             sequence_id_pane: sequence_id_pane_area,
@@ -159,4 +156,69 @@ pub fn gff_pane_height(feature_row_count: usize) -> u16 {
     }
     let inner = u16::try_from(feature_row_count).unwrap_or(u16::MAX.saturating_sub(3));
     inner.saturating_add(3)
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::test_utils::pinned_session;
+
+    #[rstest]
+    #[case::no_pins(&[], 0..0, 1..3, &[Some(1), Some(2)])]
+    #[case::pinned_then_divider_then_main(&[5, 4], 0..2, 0..2, &[Some(0), Some(1), None, Some(2), Some(3)])]
+    #[case::scrolled(&[5, 4], 1..2, 1..3, &[Some(1), None, Some(3), Some(4)])]
+    #[case::no_pinned_space_no_divider(&[5, 4], 0..0, 0..2, &[Some(2), Some(3)])]
+    fn screen_rows_works(
+        #[case] pinned: &[usize],
+        #[case] window_pinned: Range<usize>,
+        #[case] window_rows: Range<usize>,
+        #[case] expected: &[Option<usize>],
+    ) {
+        let session = pinned_session(6, pinned);
+        let window = Window {
+            pinned: window_pinned,
+            rows: window_rows,
+            ..Window::default()
+        };
+
+        assert_eq!(
+            screen_rows(session.layout(), &window).collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::from_start(0, 5, 10, 0..5)]
+    #[case::scrolled(3, 5, 10, 3..8)]
+    #[case::clamped_to_last_page(8, 5, 10, 5..10)]
+    #[case::fewer_than_visible(2, 5, 3, 0..3)]
+    fn fit_works(
+        #[case] offset: usize,
+        #[case] visible: usize,
+        #[case] total: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        let mut offset = offset;
+
+        assert_eq!(fit(&mut offset, visible, total), expected);
+        assert_eq!(offset, expected.start);
+    }
+
+    #[rstest]
+    #[case::no_items(4, 5, 0)]
+    #[case::no_space(4, 0, 10)]
+    fn fit_is_empty(#[case] offset: usize, #[case] visible: usize, #[case] total: usize) {
+        let mut offset = offset;
+
+        assert!(fit(&mut offset, visible, total).is_empty());
+    }
+
+    #[rstest]
+    #[case::no_features(0, 0)]
+    #[case::adds_borders_and_navigation_row(2, 5)]
+    fn gff_pane_height_works(#[case] feature_rows: usize, #[case] expected: u16) {
+        assert_eq!(gff_pane_height(feature_rows), expected);
+    }
 }

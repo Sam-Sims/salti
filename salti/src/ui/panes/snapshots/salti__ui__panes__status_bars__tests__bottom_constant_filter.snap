@@ -1,0 +1,5 @@
+---
+source: salti/src/ui/panes/status_bars.rs
+expression: "status_text(&build_bottom_status_bar(Some(&session), &ui_state()))"
+---
+Filters: [constant: >= 100%] (3 rows) (0 cols)

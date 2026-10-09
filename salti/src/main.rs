@@ -5,6 +5,8 @@ mod config;
 mod core;
 mod input;
 mod logging;
+#[cfg(test)]
+mod test_utils;
 mod ui;
 mod update;
 

@@ -1,0 +1,10 @@
+---
+source: salti/src/ui/panes/gff.rs
+expression: "buffer_text(&buf, area)"
+---
+┌────────────────────────────────────────┐
+│  alpha   →                      gamma  │
+│              ←     beta        delta → │
+│                                        │
+│▁▁▁▁▁▁▁▁▁▁                              │
+└────────────────────────────────────────┘

@@ -1,0 +1,5 @@
+---
+source: salti/src/ui/panes/status_bars.rs
+expression: "bottom_with_selection(&session, 0..=0, 0..=2)"
+---
+Translation frame: 1 | Selected: seq1 @ 1

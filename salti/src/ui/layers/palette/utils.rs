@@ -1,3 +1,5 @@
+use ratatui::buffer::CellWidth;
+
 use crate::ui::utils::truncate_label;
 
 pub(super) fn parse_argument(input: &str) -> Option<String> {
@@ -30,7 +32,7 @@ pub(super) fn parse_argument(input: &str) -> Option<String> {
 
 pub(super) fn pad_label(label: &str, width: usize) -> (String, String) {
     let text = truncate_label(label, width);
-    let padding = width.saturating_sub(text.chars().count());
+    let padding = width.saturating_sub(usize::from(text.cell_width()));
     (text, " ".repeat(padding))
 }
 

@@ -1,0 +1,5 @@
+[files]
+extend-exclude = ["*.snap"]
+
+[default.extend-words]
+ratatui = "ratatui"

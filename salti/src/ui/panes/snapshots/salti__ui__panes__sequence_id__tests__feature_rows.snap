@@ -1,0 +1,12 @@
+---
+source: salti/src/ui/panes/sequence_id.rs
+expression: "render_text(&session, &full_window(&session),\nAlignmentHeaderLayout::with_features(2))"
+---
+┌────────────────────────────┐
+│                            │
+│                            │
+│                            │
+│                            │
+│1 seq1                      │
+│2 seq2                      │
+└────────────────────────────┘

@@ -1,1025 +1,163 @@
-use std::{ops::Range, sync::Arc};
-
-use rand::{SeedableRng, rngs::StdRng};
-
 use crate::{
-    alignment_type::AlignmentType,
-    data::{AlignmentData, RawSequence},
-    detection::{DetectionOptions, detect_alignment_type},
+    alignment_type::{AlignmentType, detect_alignment_type},
     error::AlignmentError,
-    filter::FilterBuilder,
-    projection::Projection,
-    translation::{ReadingFrame, TranslatedAlignment, TranslationTable},
 };
 
-const DETECTION_SEED: u64 = u64::from_be_bytes(*b"REDRIGHT");
+/// One row of an [`Alignment`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sequence {
+    pub id: String,
+    pub residues: Vec<u8>,
+}
 
-/// A multiple sequence alignment.
-///
-/// `Alignment` stores a set of equal-length sequences together with
-/// the current view over that data. The view can expose all rows and columns or
-/// a filtered projection, while still preserving absolute row and column
-/// coordinates into the underlying alignment.
-#[derive(Debug, Clone)]
+/// A multiple sequence alignment
+#[derive(Debug)]
 pub struct Alignment {
-    pub(crate) data: Arc<AlignmentData>,
+    sequences: Vec<Sequence>,
+    width: usize,
     detected_type: AlignmentType,
-    active_type: AlignmentType,
-    pub(crate) rows: Projection,
-    pub(crate) columns: Projection,
 }
 
 impl Alignment {
-    /// Creates an alignment from raw sequences and detects its kind using the default detection options.
-    ///
-    /// The returned alignment starts with all rows and columns visible. The detected kind becomes both the
-    /// detected kind and the active kind for the new alignment.
+    /// Creates an alignment from `sequences` and detects its type
     ///
     /// # Errors
     ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
+    /// Checks row by row and returns the first error found:
     ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    pub fn new(seqs: impl IntoIterator<Item = RawSequence>) -> Result<Self, AlignmentError> {
-        Self::new_with_detection_options(seqs, DetectionOptions::default())
-    }
-
-    /// Creates an alignment from raw sequences and detects its kind using the supplied detection options.
-    ///
-    /// The returned alignment starts with all rows and columns visible. The detected kind becomes both the
-    /// detected kind and the active kind for the new alignment.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
-    ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    pub fn new_with_detection_options(
-        seqs: impl IntoIterator<Item = RawSequence>,
-        options: DetectionOptions,
-    ) -> Result<Self, AlignmentError> {
-        let data = data_from_raw_sequences(seqs)?;
-        let mut rng = StdRng::seed_from_u64(DETECTION_SEED);
-        let detected = detect_alignment_type(&data, options, &mut rng);
-        Ok(Self::from_data(data, detected))
-    }
-
-    /// Creates an alignment from raw sequences with an explicit type.
-    ///
-    /// This constructor skips type detection. The returned alignment starts with all rows and columns
-    /// visible, and the supplied `kind` is recorded as both the detected kind and the active kind.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::Empty`] if `seqs` is empty.
-    ///
-    /// [`AlignmentError::EmptySequence`] if any sequence in `seqs` has an empty sequence.
-    ///
-    /// [`AlignmentError::NonAsciiSequence`] if any sequence in `seqs` contains a byte outside ASCII.
-    ///
-    /// [`AlignmentError::LengthMismatch`] if the sequences in `seqs` do not all have the same length.
-    pub(crate) fn new_with_type(
-        seqs: impl IntoIterator<Item = RawSequence>,
-        kind: AlignmentType,
-    ) -> Result<Self, AlignmentError> {
-        let data = data_from_raw_sequences(seqs)?;
-        Ok(Self::from_data(data, kind))
-    }
-
-    pub(crate) fn from_data(data: AlignmentData, alignment_type: AlignmentType) -> Self {
-        let rows = Projection::Full {
-            len: data.sequences.len(),
-        };
-        let columns = Projection::Full { len: data.length };
-        Self {
-            data: Arc::new(data),
-            detected_type: alignment_type,
-            active_type: alignment_type,
-            rows,
-            columns,
-        }
-    }
-
-    pub(crate) fn with_projections(&self, rows: Projection, columns: Projection) -> Self {
-        Self {
-            data: Arc::clone(&self.data),
-            detected_type: self.detected_type,
-            active_type: self.active_type,
-            rows,
-            columns,
-        }
-    }
-
-    /// Returns the number of visible sequences.
-    ///
-    /// This is the length of the alignment's current row projection. For a filtered alignment, it
-    /// returns the number of rows that remain visible after filtering.
-    pub fn row_count(&self) -> usize {
-        self.rows.len()
-    }
-
-    /// Returns the number of visible columns.
-    ///
-    /// This is the length of the alignment's current column projection. For a filtered alignment, it
-    /// returns only the columns that remain visible after filtering.
-    pub fn column_count(&self) -> usize {
-        self.columns.len()
-    }
-
-    /// Returns the length in characters of the longest visible sequence identifier, or `0` if no sequences are visible.
-    pub fn max_id_len(&self) -> usize {
-        self.rows
-            .iter()
-            .map(|abs_row| {
-                self.data
-                    .sequences
-                    .get(abs_row)
-                    .expect("selected row must exist")
-                    .id
-                    .chars()
-                    .count()
-            })
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Returns a [`RowView`] for the visible sequence at `relative_row`.
-    ///
-    /// The row index is relative to this alignment's current row projection, so `0` refers to the first
-    /// visible sequence rather than the first sequence in the underlying data. The returned
-    /// [`RowView`] also uses this alignment's current column projection and active kind.
-    ///
-    /// Returns `None` if `relative_row` does not refer to a visible row.
-    pub fn sequence(&self, relative_row: usize) -> Option<RowView<'_>> {
-        let abs_row = self.rows.absolute(relative_row)?;
-        let seq = self.data.sequences.get(abs_row)?;
-        Some(RowView {
-            absolute_row_id: abs_row,
-            id: &seq.id,
-            data: &seq.sequence,
-            columns: &self.columns,
-        })
-    }
-
-    /// Returns a [`RowView`] for the visible sequence at `absolute_row`.
-    ///
-    /// The row index refers to the underlying alignment data rather than this alignment's current row
-    /// projection. The returned [`RowView`] is produced only if that absolute row is still visible
-    /// in this alignment, and it uses this alignment's current column projection and active kind.
-    ///
-    /// Returns `None` if `absolute_row` is out of bounds or refers to a row that is not visible.
-    pub(crate) fn sequence_by_absolute(&self, absolute_row: usize) -> Option<RowView<'_>> {
-        self.rows.relative(absolute_row)?;
-        let seq = self.data.sequences.get(absolute_row)?;
-        Some(RowView {
-            absolute_row_id: absolute_row,
-            id: &seq.id,
-            data: &seq.sequence,
-            columns: &self.columns,
-        })
-    }
-
-    /// Returns a [`RowView`] for the absolute row but projected
-    /// through this alignment's current column projection.
-    ///
-    /// Unlike [`sequence_by_absolute`], this method does not require `abs_row`
-    /// to be visible in the current row projection.
-    ///
-    /// Returns `None` only when `abs_row` is out of bounds for the underlying
-    /// alignment data.
-    pub fn project_absolute_row(&self, abs_row: usize) -> Option<RowView<'_>> {
-        let seq = self.data.sequences.get(abs_row)?;
-        Some(RowView {
-            absolute_row_id: abs_row,
-            id: &seq.id,
-            data: &seq.sequence,
-            columns: &self.columns,
-        })
-    }
-
-    /// Returns the absolute row index for `relative`, or `None` if `relative` is not visible.
-    pub fn absolute_row_id(&self, relative: usize) -> Option<usize> {
-        self.rows.absolute(relative)
-    }
-
-    /// Returns the absolute column index for `relative`, or `None` if `relative` is not visible.
-    pub fn absolute_column_id(&self, relative: usize) -> Option<usize> {
-        self.columns.absolute(relative)
-    }
-
-    /// Returns an iterator over the visible rows absolute index.
-    #[cfg(test)]
-    pub(crate) fn absolute_row_ids(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
-        self.rows.iter()
-    }
-
-    /// Returns an iterator over the visible columns absolute index.
-    pub fn absolute_column_ids(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
-        self.columns.iter()
-    }
-
-    /// Returns the relative row index for `absolute`, or `None` if that row is not visible.
-    pub fn relative_row_id(&self, absolute: usize) -> Option<usize> {
-        self.rows.relative(absolute)
-    }
-
-    /// Returns the relative column index for `absolute`, or `None` if that column is not visible.
-    pub fn relative_column_id(&self, absolute: usize) -> Option<usize> {
-        self.columns.relative(absolute)
-    }
-
-    /// Returns the visible relative column range covered by `absolute_range`.
-    ///
-    /// The returned range uses this view's visible column indices and includes every visible
-    /// column whose absolute ID is inside `absolute_range`.
-    ///
-    /// Returns `None` when none of the columns in `absolute_range` are visible.
-    pub fn relative_column_range_intersecting(
-        &self,
-        absolute_range: Range<usize>,
-    ) -> Option<Range<usize>> {
-        self.columns.relative_range_intersecting(absolute_range)
-    }
-
-    /// Returns the type currently used to interpret this alignment.
-    pub fn active_type(&self) -> AlignmentType {
-        self.active_type
-    }
-
-    /// Sets the active type override to `alignment_type`.
-    pub fn set_override_type(&mut self, alignment_type: AlignmentType) {
-        self.active_type = alignment_type;
-    }
-
-    /// Creates a lazy translated view over this alignment with a specific translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if the active kind does not support translation.
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if this alignment has a filtered column
-    /// projection.
-    ///
-    /// [`AlignmentError::TranslationEmpty`] if the chosen reading frame produces no translated
-    /// residues.
-    pub fn translated_with(
-        &self,
-        frame: ReadingFrame,
-        table: TranslationTable,
-    ) -> Result<TranslatedAlignment<'_>, AlignmentError> {
-        TranslatedAlignment::new(self, frame, table)
-    }
-
-    /// Creates a lazy translated view over this alignment with the standard translation table.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if the active kind does not support translation.
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if this alignment has a filtered column
-    /// projection.
-    ///
-    /// [`AlignmentError::TranslationEmpty`] if the chosen reading frame produces no translated
-    /// residues.
-    pub fn translated(
-        &self,
-        frame: ReadingFrame,
-    ) -> Result<TranslatedAlignment<'_>, AlignmentError> {
-        self.translated_with(frame, TranslationTable::STANDARD)
-    }
-
-    /// Returns a [`FilterBuilder`] for creating a filtered view of this alignment.
-    ///
-    /// Filtered views can only be started from an unfiltered alignment.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::UnsupportedOperation`] if this alignment is already filtered.
-    pub fn filter(&self) -> Result<FilterBuilder<'_>, AlignmentError> {
-        if self.is_filtered() {
-            return Err(AlignmentError::UnsupportedOperation {
-                operation: "filter (already filtered)",
-                kind: self.active_type,
+    /// - [`AlignmentError::Empty`] if there are no sequences
+    /// - [`AlignmentError::EmptySequence`] if the first sequence has no residues
+    /// - [`AlignmentError::NonAsciiSequence`] if a sequence has a byte outside ASCII
+    /// - [`AlignmentError::LengthMismatch`] if a sequence's length differs from the first
+    ///   sequence's, which includes a later empty sequence
+    pub fn new(sequences: Vec<Sequence>) -> Result<Self, AlignmentError> {
+        let first = sequences.first().ok_or(AlignmentError::Empty)?;
+        let width = first.residues.len();
+        if width == 0 {
+            return Err(AlignmentError::EmptySequence {
+                id: first.id.clone(),
             });
         }
-
-        Ok(FilterBuilder::new(self))
-    }
-
-    /// Returns `true` if this alignment has been filtered.
-    pub fn is_filtered(&self) -> bool {
-        !self.rows.is_full() || !self.columns.is_full()
-    }
-
-    /// Returns a view of the given rows and columns.
-    ///
-    /// `rows` and `columns` are relative ids into this view the returned view keeps
-    /// each selected id once
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::EmptyRowSubset`] if `rows` is empty.
-    ///
-    /// [`AlignmentError::EmptyRange`] if `columns` is empty.
-    ///
-    /// [`AlignmentError::RowOutOfBounds`] or [`AlignmentError::ColumnOutOfBounds`] if an id is out of range.
-    pub fn select(&self, rows: &[usize], columns: &[usize]) -> Result<Alignment, AlignmentError> {
-        if rows.is_empty() {
-            return Err(AlignmentError::EmptyRowSubset);
-        }
-        if columns.is_empty() {
-            return Err(AlignmentError::EmptyRange);
-        }
-
-        let rows = select_ids(&self.rows, rows, |index| AlignmentError::RowOutOfBounds {
-            index,
-            row_count: self.rows.len(),
-        })?;
-        let columns = select_ids(&self.columns, columns, |index| {
-            AlignmentError::ColumnOutOfBounds {
-                index,
-                length: self.columns.len(),
+        for seq in &sequences {
+            if !seq.residues.is_ascii() {
+                return Err(AlignmentError::NonAsciiSequence { id: seq.id.clone() });
             }
-        })?;
-        Ok(self.with_projections(rows, columns))
-    }
-}
-
-fn select_ids(
-    projection: &Projection,
-    ids: &[usize],
-    out_of_bounds: impl Fn(usize) -> AlignmentError,
-) -> Result<Projection, AlignmentError> {
-    let mut absolute = ids
-        .iter()
-        .map(|&id| projection.absolute(id).ok_or_else(|| out_of_bounds(id)))
-        .collect::<Result<Vec<_>, _>>()?;
-    absolute.sort_unstable();
-    absolute.dedup();
-    Ok(Projection::Filtered(absolute.into()))
-}
-
-/// A borrowed view of one sequence row within an [`Alignment`].
-///
-/// `RowView` does not own sequence data. Instead, it exposes a single row
-/// from an alignment together with that alignment's current column projection
-/// and active kind. This means its column-based accessors operate on the
-/// visible columns of the parent alignment rather than the full
-/// underlying sequence.
-#[derive(Debug, Clone, Copy)]
-pub struct RowView<'a> {
-    absolute_row_id: usize,
-    id: &'a str,
-    data: &'a [u8],
-    columns: &'a Projection,
-}
-
-impl<'a> RowView<'a> {
-    /// Returns the absolute row index of this sequence.
-    pub fn absolute_row_id(&self) -> usize {
-        self.absolute_row_id
+            if seq.residues.len() != width {
+                return Err(AlignmentError::LengthMismatch {
+                    expected: width,
+                    actual: seq.residues.len(),
+                    id: seq.id.clone(),
+                });
+            }
+        }
+        let detected_type = detect_alignment_type(&sequences);
+        Ok(Self {
+            sequences,
+            width,
+            detected_type,
+        })
     }
 
-    /// Returns the sequence identifier.
-    pub fn id(&self) -> &str {
-        self.id
+    /// Returns the number of columns
+    pub fn width(&self) -> usize {
+        self.width
     }
 
-    /// Returns the number of visible columns in this sequence view.
+    /// Returns the identifier of `row`
     ///
-    /// This reflects the column projection of the alignment that produced this view,
-    /// not the full length of the underlying sequence data.
-    pub fn len(&self) -> usize {
-        self.columns.len()
-    }
-
-    /// Returns true if this sequence view has no visible columns.
-    pub fn is_empty(&self) -> bool {
-        self.columns.len() == 0
-    }
-
-    /// Returns the byte at `relative_col`, or `None` if the column is out of bounds.
+    /// # Panics
     ///
-    /// The column index is relative to this view's column projection.
-    pub fn byte_at(&self, relative_col: usize) -> Option<u8> {
-        let abs_col = self.columns.absolute(relative_col)?;
-        Some(self.data[abs_col])
+    /// If `row` is not below [`row_count`](Self::row_count)
+    pub fn id(&self, row: usize) -> &str {
+        &self.row(row).id
     }
 
-    /// Returns an iterator over `(absolute_column, byte)` pairs for the given relative column range.
-    ///
-    /// The range is relative to this view's column projection. Each yielded pair carries the
-    /// absolute column index, which identifies the position in the underlying sequence data.
-    ///
-    /// # Errors
-    ///
-    /// [`AlignmentError::EmptyRange`] if `range` is empty.
-    ///
-    /// [`AlignmentError::ColumnOutOfBounds`] if `range.end` exceeds the number of visible columns.
-    pub fn indexed_bytes_range(
-        &self,
-        range: Range<usize>,
-    ) -> Result<impl Iterator<Item = (usize, u8)> + '_, AlignmentError> {
-        validate_column_range(&range, self.columns.len())?;
-
-        let columns = self.columns;
-        let data = self.data;
-        Ok(range.map(move |rel_col| {
-            let abs_col = columns.absolute(rel_col).expect("validated range");
-            (abs_col, data[abs_col])
-        }))
-    }
-}
-
-pub(crate) fn validate_column_range(
-    range: &Range<usize>,
-    length: usize,
-) -> Result<(), AlignmentError> {
-    if range.is_empty() {
-        return Err(AlignmentError::EmptyRange);
+    /// Returns the number of rows
+    pub fn row_count(&self) -> usize {
+        self.sequences.len()
     }
 
-    if range.end > length {
-        return Err(AlignmentError::ColumnOutOfBounds {
-            index: range.end - 1,
-            length,
-        });
-    }
-
-    Ok(())
-}
-
-fn data_from_raw_sequences(
-    sequences: impl IntoIterator<Item = RawSequence>,
-) -> Result<AlignmentData, AlignmentError> {
-    let sequences = sequences
-        .into_iter()
-        .map(TryInto::try_into)
-        .collect::<Result<Vec<_>, _>>()?;
-    AlignmentData::new(sequences)
-}
-
-#[cfg(test)]
-mod alignment_construction_tests {
-    use super::*;
-    use crate::alignment_type::AlignmentType;
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    #[test]
-    fn constructs_valid_alignment() {
-        let alignment = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")]).unwrap();
-        assert_eq!(alignment.column_count(), 4);
-        assert_eq!(alignment.row_count(), 2);
-        assert_eq!(alignment.active_type(), AlignmentType::Dna);
-    }
-
-    #[test]
-    fn new_with_kind_skips_detection() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")],
-            AlignmentType::Protein,
-        )
-        .unwrap();
-        assert_eq!(alignment.active_type(), AlignmentType::Protein);
-    }
-
-    #[test]
-    fn rejects_empty_alignment() {
-        let result = Alignment::new(vec![]);
-        assert!(matches!(result, Err(AlignmentError::Empty)));
-    }
-
-    #[test]
-    fn rejects_mismatched_lengths() {
-        let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"ACG")]);
-        assert!(matches!(result, Err(AlignmentError::LengthMismatch { .. })));
-    }
-
-    #[test]
-    fn rejects_non_ascii_bytes_with_sequence_id() {
-        for byte in [0x80, 0xc3, 0xff] {
-            let result = Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", &[b'A', byte])]);
-            assert_eq!(
-                result.unwrap_err(),
-                AlignmentError::NonAsciiSequence {
-                    id: "seq-2".to_string()
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_every_ascii_byte() {
-        let every_ascii: Vec<u8> = (0..=0x7f).collect();
-        let alignment =
-            Alignment::new(vec![raw("seq-1", &every_ascii), raw("seq-2", &every_ascii)]).unwrap();
-        assert_eq!(alignment.column_count(), 128);
-    }
-
-    #[test]
-    fn override_type_method_updates_active_type() {
-        let mut alignment =
-            Alignment::new(vec![raw("seq-1", b"ACGT"), raw("seq-2", b"TGCA")]).unwrap();
-
-        alignment.set_override_type(AlignmentType::Protein);
-        assert_eq!(alignment.active_type(), AlignmentType::Protein);
-    }
-
-    #[test]
-    fn translated_rejects_non_dna() {
-        let alignment = Alignment::new_with_type(
-            vec![raw("seq-1", b"MFPQ"), raw("seq-2", b"WLYH")],
-            AlignmentType::Protein,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            alignment.translated(ReadingFrame::Frame1),
-            Err(AlignmentError::UnsupportedOperation {
-                operation: "translate",
-                kind: AlignmentType::Protein,
-            })
-        ));
-    }
-
-    #[test]
-    fn is_filtered_false_on_new_alignment() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC")]).unwrap();
-        assert!(!alignment.is_filtered());
-    }
-}
-
-#[cfg(test)]
-mod alignment_access_tests {
-    use super::*;
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    #[test]
-    fn getters_work() {
-        let alignment = Alignment::new(vec![
-            raw("seq-1", b"AAAA"),
-            raw("seq-2", b"CCCC"),
-            raw("seq-3", b"GGGG"),
-        ])
-        .unwrap();
-
-        let second = alignment.sequence(1).unwrap();
-        assert_eq!(second.id(), "seq-2");
-        assert_eq!(second.len(), 4);
-        assert!(alignment.sequence(99).is_none());
-        assert_eq!(alignment.sequence(0).unwrap().id(), "seq-1");
-        assert_eq!(alignment.sequence(2).unwrap().id(), "seq-3");
-    }
-
-    #[test]
-    fn sequence_view_byte_at() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        let sv = alignment.sequence(0).unwrap();
-
-        assert_eq!(sv.byte_at(0), Some(b'A'));
-        assert_eq!(sv.byte_at(3), Some(b'T'));
-        assert_eq!(sv.byte_at(4), None);
-    }
-
-    #[test]
-    #[should_panic(expected = "selected row must exist")]
-    fn max_id_len_panics_for_invalid_row_projection() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC")]).unwrap();
-        let filtered = alignment.with_projections(
-            Projection::Filtered(Arc::from(vec![1usize])),
-            Projection::Full {
-                len: alignment.column_count(),
-            },
-        );
-
-        filtered.max_id_len();
-    }
-
-    #[test]
-    fn sequence_by_absolute_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC"), raw("s2", b"TG")]).unwrap();
-        let sv = alignment.sequence_by_absolute(1).unwrap();
-        assert_eq!(sv.id, "s2");
-        assert!(alignment.sequence_by_absolute(2).is_none());
-    }
-
-    #[test]
-    fn sequence_by_absolute_filtered() {
-        let alignment =
-            Alignment::new(vec![raw("s1", b"AC"), raw("s2", b"TG"), raw("s3", b"AA")]).unwrap();
-        let filtered = alignment
-            .filter()
-            .unwrap()
-            .without_rows([1])
-            .apply()
-            .unwrap();
-
-        assert_eq!(filtered.sequence_by_absolute(0).unwrap().id(), "s1");
-        assert_eq!(filtered.sequence_by_absolute(2).unwrap().id(), "s3");
-        assert!(filtered.sequence_by_absolute(1).is_none());
-        assert!(filtered.sequence_by_absolute(99).is_none());
-    }
-
-    #[test]
-    fn indexed_bytes_range_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        let sv = alignment.sequence(0).unwrap();
-        let pairs: Vec<_> = sv.indexed_bytes_range(1..3).unwrap().collect();
-        assert_eq!(pairs, vec![(1, b'C'), (2, b'G')]);
-    }
-
-    #[test]
-    fn indexed_bytes_range_filtered() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        let filtered = alignment.with_projections(
-            Projection::Full {
-                len: alignment.row_count(),
-            },
-            Projection::Filtered(Arc::from(vec![0, 2, 3])),
-        );
-        let sv = filtered.sequence(0).unwrap();
-        let pairs: Vec<_> = sv.indexed_bytes_range(0..2).unwrap().collect();
-        assert_eq!(pairs, vec![(0, b'A'), (2, b'G')]);
-    }
-
-    #[test]
-    fn indexed_bytes_range_empty_error() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        let sv = alignment.sequence(0).unwrap();
-        assert!(matches!(
-            sv.indexed_bytes_range(2..2),
-            Err(AlignmentError::EmptyRange)
-        ));
-    }
-
-    #[test]
-    fn indexed_bytes_range_out_of_bounds() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        let sv = alignment.sequence(0).unwrap();
-        assert!(matches!(
-            sv.indexed_bytes_range(2..5),
-            Err(AlignmentError::ColumnOutOfBounds {
-                index: 4,
-                length: 4
-            })
-        ));
-    }
-}
-
-#[cfg(test)]
-mod alignment_projection_tests {
-    use super::*;
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    fn filtered_alignment() -> (Alignment, Alignment) {
-        let base = Alignment::new(vec![
-            raw("s1", b"ACGT"),
-            raw("s2", b"TTTT"),
-            raw("s3", b"GGGG"),
-        ])
-        .unwrap();
-        let filtered = base.filter().unwrap().without_rows([1]).apply().unwrap();
-        (base, filtered)
-    }
-
-    fn indexed_bytes(view: RowView<'_>) -> Vec<(usize, u8)> {
-        view.indexed_bytes_range(0..view.len()).unwrap().collect()
-    }
-
-    #[test]
-    fn relative_row_id_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC"), raw("s2", b"TG")]).unwrap();
-        assert_eq!(alignment.relative_row_id(0), Some(0));
-        assert_eq!(alignment.relative_row_id(1), Some(1));
-        assert_eq!(alignment.relative_row_id(2), None);
-    }
-
-    #[test]
-    fn relative_column_id_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-        assert_eq!(alignment.relative_column_id(0), Some(0));
-        assert_eq!(alignment.relative_column_id(3), Some(3));
-        assert_eq!(alignment.relative_column_id(4), None);
-    }
-
-    #[test]
-    fn relative_absolute_ids_filtered() {
-        let alignment = Alignment::new(vec![
-            raw("s1", b"ACGT"),
-            raw("s2", b"TGCA"),
-            raw("s3", b"AAAA"),
-        ])
-        .unwrap();
-        let filtered = alignment.with_projections(
-            Projection::Filtered(Arc::from(vec![0, 2])),
-            Projection::Filtered(Arc::from(vec![1, 3])),
-        );
-
-        assert_eq!(filtered.relative_row_id(0), Some(0));
-        assert_eq!(filtered.relative_row_id(2), Some(1));
-        assert_eq!(filtered.relative_row_id(1), None);
-
-        assert_eq!(filtered.relative_column_id(1), Some(0));
-        assert_eq!(filtered.relative_column_id(3), Some(1));
-        assert_eq!(filtered.relative_column_id(0), None);
-
-        assert_eq!(filtered.absolute_row_id(0), Some(0));
-        assert_eq!(filtered.absolute_row_id(1), Some(2));
-        assert_eq!(filtered.absolute_row_id(2), None);
-
-        assert_eq!(filtered.absolute_column_id(0), Some(1));
-        assert_eq!(filtered.absolute_column_id(1), Some(3));
-        assert_eq!(filtered.absolute_column_id(2), None);
-    }
-
-    #[test]
-    fn relative_column_range_intersecting_full() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT")]).unwrap();
-
-        assert_eq!(
-            alignment.relative_column_range_intersecting(1..3),
-            Some(1..3)
-        );
-        assert_eq!(
-            alignment.relative_column_range_intersecting(2..99),
-            Some(2..4)
-        );
-        assert_eq!(alignment.relative_column_range_intersecting(4..8), None);
-    }
-
-    #[test]
-    fn relative_column_range_intersecting_filtered() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGTACGT")]).unwrap();
-        let filtered = alignment.with_projections(
-            Projection::Full {
-                len: alignment.row_count(),
-            },
-            Projection::Filtered(Arc::from(vec![1usize, 3, 4, 7])),
-        );
-
-        assert_eq!(
-            filtered.relative_column_range_intersecting(2..6),
-            Some(1..3)
-        );
-        assert_eq!(filtered.relative_column_range_intersecting(5..6), None);
-    }
-
-    #[test]
-    fn unfiltered_matches_sequence() {
-        let alignment = Alignment::new(vec![raw("s1", b"ACGT"), raw("s2", b"TGCA")]).unwrap();
-
-        for relative in 0..alignment.row_count() {
-            let via_sequence = alignment.sequence(relative).unwrap();
-            let via_project = alignment
-                .project_absolute_row(alignment.absolute_row_id(relative).unwrap())
-                .unwrap();
-
-            assert_eq!(
-                via_sequence.absolute_row_id(),
-                via_project.absolute_row_id()
-            );
-            assert_eq!(via_sequence.id(), via_project.id());
-            assert_eq!(via_sequence.len(), via_project.len());
-            assert_eq!(indexed_bytes(via_sequence), indexed_bytes(via_project));
-        }
-    }
-
-    #[test]
-    fn returns_excluded_row() {
-        let (_, filtered) = filtered_alignment();
-
-        assert!(filtered.sequence_by_absolute(1).is_none());
-
-        let sv = filtered.project_absolute_row(1).unwrap();
-        assert_eq!(sv.id, "s2");
-        assert_eq!(sv.absolute_row_id(), 1);
-    }
-
-    #[test]
-    fn visible_rows_match_sequence_by_absolute() {
-        let (_, filtered) = filtered_alignment();
-
-        for abs in [0usize, 2] {
-            let via_sba = filtered.sequence_by_absolute(abs).unwrap();
-            let via_proj = filtered.project_absolute_row(abs).unwrap();
-
-            assert_eq!(via_sba.id, via_proj.id);
-            assert_eq!(via_sba.absolute_row_id(), via_proj.absolute_row_id());
-            assert_eq!(via_sba.len(), via_proj.len());
-            assert_eq!(indexed_bytes(via_sba), indexed_bytes(via_proj));
-        }
-    }
-
-    #[test]
-    fn column_projection_applied_to_excluded_row() {
-        let base = Alignment::new(vec![raw("visible", b"ACGT"), raw("excluded", b"TTCA")]).unwrap();
-        let col_filtered = base.with_projections(
-            Projection::Filtered(Arc::from(vec![0usize])),
-            Projection::Filtered(Arc::from(vec![0usize, 2])),
-        );
-
-        let sv = col_filtered.project_absolute_row(1).unwrap();
-        let pairs = indexed_bytes(sv);
-
-        assert_eq!(sv.len(), 2);
-        assert_eq!(sv.byte_at(0), Some(b'T'));
-        assert_eq!(sv.byte_at(1), Some(b'C'));
-        assert_eq!(pairs, vec![(0, b'T'), (2, b'C')]);
-        assert_eq!(
-            pairs.iter().map(|(column, _)| *column).collect::<Vec<_>>(),
-            col_filtered.absolute_column_ids().collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn out_of_bounds_returns_none() {
-        let alignment = Alignment::new(vec![raw("s1", b"AC"), raw("s2", b"TG")]).unwrap();
-        let (_, filtered) = filtered_alignment();
-
-        assert!(alignment.project_absolute_row(2).is_none());
-        assert!(alignment.project_absolute_row(99).is_none());
-        assert!(filtered.project_absolute_row(3).is_none());
-        assert!(filtered.project_absolute_row(99).is_none());
-    }
-}
-
-#[cfg(test)]
-mod alignment_select_tests {
-    use super::*;
-    use crate::metrics::ConsensusMethod;
-
-    fn raw(id: &str, sequence: &[u8]) -> RawSequence {
-        RawSequence {
-            id: id.to_string(),
-            sequence: sequence.to_vec(),
-        }
-    }
-
-    fn base() -> Alignment {
-        Alignment::new_with_type(
-            vec![
-                raw("r0", b"AAAAAA"),
-                raw("r1", b"CCCCCC"),
-                raw("r2", b"AAGGTT"),
-                raw("r3", b"AAGGTT"),
-                raw("r4", b"ACGTAC"),
-                raw("r5", b"AAGGTT"),
-            ],
-            AlignmentType::Dna,
-        )
-        .unwrap()
-    }
-
-    fn assert_matches_source(source: &Alignment, rows: &[usize], columns: &[usize]) {
-        let selected = source.select(rows, columns).unwrap();
-        assert_eq!(selected.row_count(), rows.len());
-        assert_eq!(selected.column_count(), columns.len());
-
-        let expected_rows: Vec<RawSequence> = rows
+    /// Returns the length in characters of the longest identifier
+    pub fn max_id_len(&self) -> usize {
+        self.sequences
             .iter()
-            .map(|&row| {
-                let view = source.sequence(row).unwrap();
-                let bytes: Vec<u8> = columns.iter().map(|&c| view.byte_at(c).unwrap()).collect();
-                raw(view.id(), &bytes)
-            })
-            .collect();
+            .map(|seq| seq.id.chars().count())
+            .max()
+            .unwrap_or_default()
+    }
 
-        for (selected_row, &source_row) in rows.iter().enumerate() {
-            assert_eq!(
-                selected.absolute_row_id(selected_row),
-                source.absolute_row_id(source_row)
-            );
-            let view = selected.sequence(selected_row).unwrap();
-            assert_eq!(view.byte_at(columns.len()), None);
-            for (selected_column, &byte) in expected_rows[selected_row].sequence.iter().enumerate()
-            {
-                assert_eq!(view.byte_at(selected_column), Some(byte));
-            }
-        }
+    /// Returns the type detected by [`new`](Self::new)
+    pub fn detected_type(&self) -> AlignmentType {
+        self.detected_type
+    }
 
-        let expected = Alignment::new_with_type(expected_rows, source.active_type()).unwrap();
-        for method in ConsensusMethod::all() {
-            assert_eq!(
-                selected
-                    .column_summaries_range(0..columns.len(), method)
-                    .unwrap(),
-                expected
-                    .column_summaries_range(0..columns.len(), method)
-                    .unwrap()
-            );
+    pub(crate) fn row(&self, row: usize) -> &Sequence {
+        self.sequences
+            .get(row)
+            .expect("row id should be below the row count")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn seq(id: &str, residues: &[u8]) -> Sequence {
+        Sequence {
+            id: id.to_string(),
+            residues: residues.to_vec(),
         }
     }
 
-    #[test]
-    fn selects_from_full_alignment() {
-        assert_matches_source(&base(), &[0, 2, 3], &[0, 2, 5]);
+    #[rstest]
+    #[case::dna(vec![seq("s0", b"ACGT"), seq("s1", b"TGCA")], 4, AlignmentType::Dna)]
+    #[case::every_ascii_byte(
+        vec![seq("s0", &(0..=0x7f).collect::<Vec<u8>>())],
+        128,
+        AlignmentType::Generic
+    )]
+    fn new_works(
+        #[case] sequences: Vec<Sequence>,
+        #[case] width: usize,
+        #[case] detected_type: AlignmentType,
+    ) {
+        let row_count = sequences.len();
+        let alignment = Alignment::new(sequences).unwrap();
+        assert_eq!(alignment.width(), width);
+        assert_eq!(alignment.row_count(), row_count);
+        assert_eq!(alignment.detected_type(), detected_type);
     }
 
-    #[test]
-    fn selects_from_row_filtered_view() {
-        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
-        assert_matches_source(&source, &[1, 3, 4], &[1, 3, 4]);
+    #[rstest]
+    #[case::empty(vec![], AlignmentError::Empty)]
+    #[case::empty_sequence(
+        vec![seq("s0", b"")],
+        AlignmentError::EmptySequence { id: "s0".to_string() }
+    )]
+    #[case::non_ascii(
+        vec![seq("s0", b"ACGT"), seq("s1", &[b'A', b'C', b'G', 0x80])],
+        AlignmentError::NonAsciiSequence { id: "s1".to_string() }
+    )]
+    #[case::length_mismatch(
+        vec![seq("s0", b"ACGT"), seq("s1", b"ACG")],
+        AlignmentError::LengthMismatch { expected: 4, actual: 3, id: "s1".to_string() }
+    )]
+    #[case::first_bad_row_wins(
+        vec![seq("s0", b"ACGT"), seq("s1", &[b'A', b'C', b'G', 0xff]), seq("s2", b"AC")],
+        AlignmentError::NonAsciiSequence { id: "s1".to_string() }
+    )]
+    fn new_rejects(#[case] sequences: Vec<Sequence>, #[case] expected: AlignmentError) {
+        assert_eq!(Alignment::new(sequences).unwrap_err(), expected);
     }
 
-    #[test]
-    fn selects_from_column_filtered_view() {
-        let base = base();
-        let source = base.with_projections(
-            Projection::Full {
-                len: base.row_count(),
-            },
-            Projection::Filtered(Arc::from(vec![0, 1, 3, 5])),
-        );
-        assert_matches_source(&source, &[0, 2, 3], &[1, 2, 3]);
-    }
-
-    #[test]
-    fn selects_from_row_and_column_filtered_view() {
-        let source = base().with_projections(
-            Projection::Filtered(Arc::from(vec![0, 2, 3, 4, 5])),
-            Projection::Filtered(Arc::from(vec![1, 2, 4, 5])),
-        );
-        assert_matches_source(&source, &[1, 3, 4], &[0, 2, 3]);
-    }
-
-    #[test]
-    fn rejects_empty_rows() {
-        assert_eq!(
-            base().select(&[], &[0]).unwrap_err(),
-            AlignmentError::EmptyRowSubset
-        );
-    }
-
-    #[test]
-    fn rejects_empty_columns() {
-        assert_eq!(
-            base().select(&[0], &[]).unwrap_err(),
-            AlignmentError::EmptyRange
-        );
-    }
-
-    #[test]
-    fn rejects_out_of_range_row() {
-        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
-        assert_eq!(
-            source.select(&[0, 5], &[0]).unwrap_err(),
-            AlignmentError::RowOutOfBounds {
-                index: 5,
-                row_count: 5
-            }
-        );
-    }
-
-    #[test]
-    fn rejects_out_of_range_column() {
-        assert_eq!(
-            base().select(&[0], &[2, 6]).unwrap_err(),
-            AlignmentError::ColumnOutOfBounds {
-                index: 6,
-                length: 6
-            }
-        );
-    }
-
-    #[test]
-    fn unsorted_and_duplicate_ids_match_sorted_selection() {
-        let source = base().filter().unwrap().without_rows([1]).apply().unwrap();
-        let messy = source.select(&[3, 1, 3], &[4, 1, 1, 3]).unwrap();
-        let sorted = source.select(&[1, 3], &[1, 3, 4]).unwrap();
-
-        assert_eq!(messy.row_count(), sorted.row_count());
-        for row in 0..sorted.row_count() {
-            assert_eq!(messy.absolute_row_id(row), sorted.absolute_row_id(row));
-        }
-        assert_eq!(
-            messy.absolute_column_ids().collect::<Vec<_>>(),
-            sorted.absolute_column_ids().collect::<Vec<_>>()
-        );
+    #[rstest]
+    #[case::single(&["seq-1"], 5)]
+    #[case::longest_not_first(&["a", "longest", "mid"], 7)]
+    #[case::counts_chars_not_bytes(&["αβγ", "ab"], 3)]
+    fn max_id_len_works(#[case] ids: &[&str], #[case] expected: usize) {
+        let alignment = Alignment::new(ids.iter().map(|id| seq(id, b"A")).collect()).unwrap();
+        assert_eq!(alignment.max_id_len(), expected);
     }
 }

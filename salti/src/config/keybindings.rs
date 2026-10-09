@@ -2,12 +2,12 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::command::Command;
 
-pub struct Binding {
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
-    pub action: Command,
+struct Binding {
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    action: Command,
     #[allow(dead_code)]
-    pub help: &'static str,
+    help: &'static str,
 }
 
 const KEY_BINDINGS: &[Binding] = &[
@@ -26,14 +26,14 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Char('t'),
         modifiers: KeyModifiers::NONE,
-        action: Command::ToggleTranslationView,
-        help: "Toggle NT to AA translation view",
+        action: Command::ToggleTranslationOverlay,
+        help: "Toggle the translation overlay",
     },
     Binding {
         code: KeyCode::Char('T'),
         modifiers: KeyModifiers::SHIFT,
-        action: Command::ReloadAsProtein { frame: None },
-        help: "Reload alignment as protein",
+        action: Command::ToggleProteinView,
+        help: "Toggle the protein view",
     },
     Binding {
         code: KeyCode::Char('1'),
@@ -122,7 +122,7 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Home,
         modifiers: KeyModifiers::NONE,
-        action: Command::JumpToStart,
+        action: Command::JumpToIndex(0),
         help: "Jump to start of alignment",
     },
     Binding {

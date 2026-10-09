@@ -4,44 +4,22 @@ use nucleo_matcher::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FilterMode {
-    Fuzzy,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
     Forward,
     Backward,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SearchableList {
     items: Vec<String>,
     filtered_indices: Vec<usize>,
     selection: Option<usize>,
-    leading_item: Option<String>,
-    filter_mode: FilterMode,
     query: String,
-    pub(crate) filter_error: bool,
     fuzzy_matcher: nucleo_matcher::Matcher,
     utf32_buf: Vec<char>,
 }
 
 impl SearchableList {
-    pub fn new(filter_mode: FilterMode, leading_item: Option<String>) -> Self {
-        Self {
-            items: Vec::new(),
-            filtered_indices: Vec::new(),
-            selection: None,
-            leading_item,
-            filter_mode,
-            query: String::new(),
-            filter_error: false,
-            fuzzy_matcher: nucleo_matcher::Matcher::default(),
-            utf32_buf: Vec::new(),
-        }
-    }
-
     fn clamp_selection(&mut self) {
         let total = self.visible_len();
         if total == 0 {
@@ -52,40 +30,34 @@ impl SearchableList {
     }
 
     fn apply_filter(&mut self) {
-        self.filter_error = false;
-
         if self.query.is_empty() {
             self.filtered_indices = (0..self.items.len()).collect();
             self.clamp_selection();
             return;
         }
 
-        match self.filter_mode {
-            FilterMode::Fuzzy => {
-                let pattern = Pattern::new(
-                    &self.query,
-                    CaseMatching::Ignore,
-                    Normalization::Smart,
-                    AtomKind::Fuzzy,
-                );
-                let fuzzy_matcher = &mut self.fuzzy_matcher;
-                let utf32_buf = &mut self.utf32_buf;
-                let mut scored: Vec<(u32, usize)> = self
-                    .items
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, name)| {
-                        pattern
-                            .score(Utf32Str::new(name, utf32_buf), fuzzy_matcher)
-                            .map(|score| (score, index))
-                    })
-                    .collect();
-                scored.sort_unstable_by(|(score_a, idx_a), (score_b, idx_b)| {
-                    score_b.cmp(score_a).then_with(|| idx_a.cmp(idx_b))
-                });
-                self.filtered_indices = scored.into_iter().map(|(_, index)| index).collect();
-            }
-        }
+        let pattern = Pattern::new(
+            &self.query,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+        let fuzzy_matcher = &mut self.fuzzy_matcher;
+        let utf32_buf = &mut self.utf32_buf;
+        let mut scored: Vec<(u32, usize)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                pattern
+                    .score(Utf32Str::new(name, utf32_buf), fuzzy_matcher)
+                    .map(|score| (score, index))
+            })
+            .collect();
+        scored.sort_unstable_by(|(score_a, idx_a), (score_b, idx_b)| {
+            score_b.cmp(score_a).then_with(|| idx_a.cmp(idx_b))
+        });
+        self.filtered_indices = scored.into_iter().map(|(_, index)| index).collect();
 
         self.clamp_selection();
     }
@@ -141,23 +113,94 @@ impl SearchableList {
     }
 
     pub fn visible_len(&self) -> usize {
-        self.filtered_indices.len() + usize::from(self.leading_item.is_some())
+        self.filtered_indices.len()
     }
 
     pub fn visible_item_at(&self, display_index: usize) -> Option<&str> {
-        match (self.leading_item.as_deref(), display_index) {
-            (Some(label), 0) => Some(label),
-            (Some(_), _) => self.filtered_item_at(display_index - 1),
-            (None, _) => self.filtered_item_at(display_index),
-        }
-    }
-
-    fn filtered_item_at(&self, filtered_index: usize) -> Option<&str> {
-        let item_index = *self.filtered_indices.get(filtered_index)?;
+        let item_index = *self.filtered_indices.get(display_index)?;
         self.items.get(item_index).map(String::as_str)
     }
 
     pub fn has_visible_items(&self) -> bool {
         self.visible_len() > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn list(items: &[&str]) -> SearchableList {
+        let mut list = SearchableList::default();
+        list.set_items(items.iter().map(ToString::to_string).collect());
+        list
+    }
+
+    fn visible(list: &SearchableList) -> Vec<&str> {
+        (0..list.visible_len())
+            .map(|index| list.visible_item_at(index).unwrap())
+            .collect()
+    }
+
+    #[rstest]
+    #[case::empty_query_keeps_order("", &["xaxbxc", "abc", "pin-b", "pin-a"])]
+    #[case::best_match_first("abc", &["abc", "xaxbxc"])]
+    #[case::ties_keep_item_order("pin", &["pin-b", "pin-a"])]
+    #[case::ignores_case("ABC", &["abc", "xaxbxc"])]
+    fn update_query_works(#[case] query: &str, #[case] expected: &[&str]) {
+        let mut list = list(&["xaxbxc", "abc", "pin-b", "pin-a"]);
+
+        list.update_query(query);
+
+        assert_eq!(visible(&list), expected);
+    }
+
+    #[test]
+    fn update_query_is_empty_without_match() {
+        let mut list = list(&["abc"]);
+
+        list.update_query("zzz");
+
+        assert_eq!(visible(&list), [""; 0]);
+    }
+
+    #[rstest]
+    #[case::first_forward(&[Direction::Forward], "a")]
+    #[case::first_backward_is_last(&[Direction::Backward], "c")]
+    #[case::next(&[Direction::Forward, Direction::Forward], "b")]
+    #[case::previous(&[Direction::Backward, Direction::Backward], "b")]
+    #[case::wraps_forward(&[Direction::Backward, Direction::Forward], "a")]
+    #[case::wraps_backward(&[Direction::Forward, Direction::Backward], "c")]
+    fn move_selection_wrapped_works(#[case] moves: &[Direction], #[case] expected: &str) {
+        let mut list = list(&["a", "b", "c"]);
+
+        for &direction in moves {
+            list.move_selection_wrapped(direction);
+        }
+
+        assert_eq!(list.selected_label(), Some(expected));
+    }
+
+    #[test]
+    fn move_selection_wrapped_rejects_empty_list() {
+        let mut list = list(&[]);
+
+        list.move_selection_wrapped(Direction::Forward);
+
+        assert_eq!(list.selected_display_index(), None);
+    }
+
+    #[rstest]
+    #[case::clamped_to_last("ab", Some("abc"))]
+    #[case::cleared_without_match("zzz", None)]
+    fn set_items_and_query_clamps_selection(#[case] query: &str, #[case] expected: Option<&str>) {
+        let mut list = list(&["abc", "xyz", "abdc"]);
+        list.move_selection_wrapped(Direction::Backward);
+
+        list.set_items_and_query(vec!["abc".to_string(), "xyz".to_string()], query);
+
+        assert_eq!(list.selected_label(), expected);
     }
 }

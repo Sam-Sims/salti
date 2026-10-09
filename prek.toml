@@ -1,0 +1,34 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "end-of-file-fixer" },
+  { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.50.3"
+hooks = [{ id = "typos", args = ["--force-exclude"] }]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt --all -- --check"
+types = ["rust"]
+pass_filenames = false
+
+# [[repos.hooks]]
+# id = "cargo-clippy"
+# name = "cargo clippy"
+# language = "system"
+# entry = "cargo clippy --workspace --all-targets -- -D warnings"
+# types = ["rust"]
+# pass_filenames = false
