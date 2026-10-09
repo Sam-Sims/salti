@@ -227,6 +227,7 @@ pub struct Position {
 #[derive(Debug)]
 pub struct Session {
     base_alignment: libmsa::Alignment,
+    source: String,
     state: ViewState,
     layout: Layout,
     pub diff_mode: DiffMode,
@@ -234,7 +235,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(base_alignment: libmsa::Alignment) -> Self {
+    pub fn new(base_alignment: libmsa::Alignment, source: String) -> Self {
         let state = ViewState {
             frame: libmsa::ReadingFrame::Frame1,
             row_regex_filter: None,
@@ -249,11 +250,16 @@ impl Session {
 
         Self {
             base_alignment,
+            source,
             state,
             layout,
             diff_mode: DiffMode::default(),
             consensus_method: libmsa::ConsensusMethod::default(),
         }
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     pub fn update(

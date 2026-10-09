@@ -1,48 +1,15 @@
 use crate::{
-    cli::StartupState,
     config::theme::{SequenceStyles, Theme, ThemeId, ThemeStyles},
     core::session::Position,
     ui::{
-        layers::{notification::Notification, state::LayerState},
+        layers::{
+            notification::{Notification, NotificationLevel},
+            state::LayerState,
+        },
         panes::gff::GffPaneState,
         selection::Selection,
     },
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum LoadingState {
-    #[default]
-    Idle,
-    Loading,
-    Loaded,
-    Failed(String),
-}
-
-impl std::fmt::Display for LoadingState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Idle => write!(f, "Status: Idle"),
-            Self::Loading => write!(f, "Status: Loading"),
-            Self::Loaded => write!(f, "Status: Loaded"),
-            Self::Failed(_) => write!(f, "Status: Failed"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetaState {
-    pub loading_state: LoadingState,
-    pub input_path: Option<String>,
-}
-
-impl From<StartupState> for MetaState {
-    fn from(startup: StartupState) -> Self {
-        Self {
-            loading_state: LoadingState::Idle,
-            input_path: startup.file_path,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ThemeState {
@@ -70,30 +37,35 @@ impl Default for ThemeState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct UiState {
     pub(crate) layers: LayerState,
     pub(crate) gff_pane: GffPaneState,
-    pub notification: Option<Notification>,
+    notification: Option<Notification>,
     pub selection: Option<Selection>,
     pub theme: ThemeState,
     pub position: Position,
-    pub meta: MetaState,
+    pub loading: Option<String>,
     pub gff_tooltip: Option<String>,
 }
 
 impl UiState {
-    pub fn new(startup: StartupState) -> Self {
-        Self {
-            layers: LayerState::default(),
-            gff_pane: GffPaneState::default(),
-            notification: None,
-            selection: None,
-            theme: ThemeState::default(),
-            position: Position::default(),
-            meta: MetaState::from(startup),
-            gff_tooltip: None,
+    pub fn notification(&self) -> Option<&Notification> {
+        self.notification.as_ref()
+    }
+
+    pub fn notify(&mut self, notification: Notification) {
+        let error_shown = self
+            .notification
+            .as_ref()
+            .is_some_and(|shown| shown.level == NotificationLevel::Error);
+        if notification.level == NotificationLevel::Error || !error_shown {
+            self.notification = Some(notification);
         }
+    }
+
+    pub fn clear_notification(&mut self) {
+        self.notification = None;
     }
 
     pub fn set_theme(&mut self, theme_id: ThemeId) {
@@ -107,5 +79,51 @@ impl UiState {
         self.layers.close_active();
         self.notification = None;
         self.gff_tooltip = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn notification(level: NotificationLevel) -> Notification {
+        Notification {
+            level,
+            message: String::new(),
+        }
+    }
+
+    #[rstest]
+    #[case::first(None, NotificationLevel::Info, NotificationLevel::Info)]
+    #[case::info_replaces_info(
+        Some(NotificationLevel::Info),
+        NotificationLevel::Info,
+        NotificationLevel::Info
+    )]
+    #[case::error_replaces_info(
+        Some(NotificationLevel::Info),
+        NotificationLevel::Error,
+        NotificationLevel::Error
+    )]
+    #[case::info_keeps_error(
+        Some(NotificationLevel::Error),
+        NotificationLevel::Info,
+        NotificationLevel::Error
+    )]
+    fn notify_works(
+        #[case] shown: Option<NotificationLevel>,
+        #[case] level: NotificationLevel,
+        #[case] expected: NotificationLevel,
+    ) {
+        let mut ui = UiState::default();
+        if let Some(shown) = shown {
+            ui.notify(notification(shown));
+        }
+
+        ui.notify(notification(level));
+
+        assert_eq!(ui.notification().map(|shown| shown.level), Some(expected));
     }
 }

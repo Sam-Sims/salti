@@ -4,7 +4,6 @@ use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
-    cli::StartupState,
     core::{
         gff::{Feature, FeatureType, Gff, Strand},
         session::{Position, Session},
@@ -28,6 +27,7 @@ pub(crate) fn session(sequences: &[&[u8]]) -> Session {
                 .collect(),
         )
         .unwrap(),
+        "test.fasta".to_string(),
     )
 }
 
@@ -43,6 +43,7 @@ pub(crate) fn session_with_ids(sequences: &[(&str, &[u8])]) -> Session {
                 .collect(),
         )
         .unwrap(),
+        "test.fasta".to_string(),
     )
 }
 
@@ -99,7 +100,7 @@ pub(crate) fn genes(ranges: &[Range<usize>]) -> Gff {
 }
 
 pub(crate) fn ui_state() -> UiState {
-    UiState::new(StartupState::default())
+    UiState::default()
 }
 
 pub(crate) fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {

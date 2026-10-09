@@ -1,5 +1,0 @@
----
-source: salti/src/ui/panes/status_bars.rs
-expression: "status_text(&build_top_status_bar(None, &ui))"
----
-File: Unknown | Status: Failed | 0 alignments | Length: 0 | Positions: 0-0

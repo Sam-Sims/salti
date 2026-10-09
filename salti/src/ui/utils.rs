@@ -9,6 +9,13 @@ use ratatui::{
 
 use crate::config::theme::ThemeStyles;
 
+pub fn input_name(input: &str) -> &str {
+    std::path::Path::new(input)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(input)
+}
+
 pub fn render_pane(
     styles: &ThemeStyles,
     title: Option<Line<'_>>,

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, format_err};
+use anyhow::{Result, ensure, format_err};
 use libmsa::{Alignment, Sequence};
 use paraseq::fasta;
 use tokio_util::sync::CancellationToken;
@@ -17,11 +17,8 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Align
         .fill(&mut reader)
         .map_err(|error| format_err!("Error reading records: {error}"))?
     {
+        ensure!(!cancel.is_cancelled(), "Cancelled fasta parse");
         for record in record_set.iter() {
-            if cancel.is_cancelled() {
-                return Err(format_err!("Cancelled fasta parse"));
-            }
-
             let record = record.map_err(|error| format_err!("Error reading record: {error}"))?;
             let id = std::str::from_utf8(record.id())
                 .map_err(|error| format_err!("Invalid sequence ID: {error}"))?
@@ -39,6 +36,7 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Align
         "Completed fasta parse"
     );
 
+    ensure!(!cancel.is_cancelled(), "Cancelled fasta parse");
     Ok(Alignment::new(sequences)?)
 }
 

@@ -11,8 +11,8 @@ use crate::{
     core::session::{Session, ViewMode},
     ui::{
         layout::{ScreenLayout, Window},
-        ui_state::{LoadingState, UiState},
-        utils::truncate_label,
+        ui_state::UiState,
+        utils::{input_name, truncate_label},
     },
 };
 
@@ -102,19 +102,11 @@ fn build_top_status_bar(
     ui: &UiState,
 ) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
-    let file_name = ui.meta.input_path.as_deref().map_or("Unknown", |input| {
-        // for local paths, show just the file name for URLs makes more sense to show the full input.
-        std::path::Path::new(input)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(input)
-    });
-
-    let loading_status = match &ui.meta.loading_state {
-        LoadingState::Idle => Span::styled("Status: Idle", theme.text_dim),
-        LoadingState::Loading => Span::styled("Status: Loading", theme.text_dim),
-        LoadingState::Loaded => Span::styled("Status: Loaded", theme.success),
-        LoadingState::Failed(_) => Span::styled("Status: Failed", theme.error),
+    let file_name = session.map_or("Unknown", |session| input_name(session.source()));
+    let loading_status = match (&ui.loading, session) {
+        (Some(input), _) => format!("Loading {}", input_name(input)).set_style(theme.text_dim),
+        (None, Some(_)) => Span::styled("Status: Loaded", theme.success),
+        (None, None) => Span::styled("Status: Idle", theme.text_dim),
     };
 
     let layout = session.map(Session::layout);
@@ -217,9 +209,7 @@ mod tests {
     #[test]
     fn top_loaded() {
         let session = seqs(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
-        let mut ui = ui_state();
-        ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
-        ui.meta.loading_state = LoadingState::Loaded;
+        let ui = ui_state();
         let window = Window {
             columns: 0..5,
             ..full_window(&session)
@@ -233,13 +223,14 @@ mod tests {
     }
 
     #[test]
-    fn top_failed() {
+    fn top_loading_another() {
+        let session = seqs(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
         let mut ui = ui_state();
-        ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+        ui.loading = Some("/data/next.fasta".to_string());
 
         insta::assert_snapshot!(status_text(&build_top_status_bar(
-            None,
-            &Window::default(),
+            Some(&session),
+            &full_window(&session),
             &ui
         )));
     }

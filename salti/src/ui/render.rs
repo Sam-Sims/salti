@@ -18,18 +18,18 @@ use crate::{
             status_bars::render_frame,
         },
         selection::render_mouse_selection,
-        ui_state::{LoadingState, UiState},
-        utils::render_centred_lines,
+        ui_state::UiState,
+        utils::{input_name, render_centred_lines},
     },
 };
 
 fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
     let theme = &ui.theme;
-    let lines = match &ui.meta.loading_state {
-        LoadingState::Failed(error) => vec![Line::from(
-            format!("Failed to load alignment: {error}").set_style(theme.styles.error),
+    let lines = match &ui.loading {
+        Some(input) => vec![Line::from(
+            format!("Loading {}", input_name(input)).set_style(theme.styles.text),
         )],
-        LoadingState::Idle => vec![
+        None => vec![
             Line::from(
                 "salti: A modern MSA browser for the terminal."
                     .fg(theme.theme.text)
@@ -45,7 +45,6 @@ fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
                     .italic(),
             ),
         ],
-        LoadingState::Loading | LoadingState::Loaded => return,
     };
     render_centred_lines(lines, theme.styles.base_block, area, f.buffer_mut());
 }
@@ -159,12 +158,6 @@ mod tests {
         session_with_ids(&sequences)
     }
 
-    fn loaded_ui() -> UiState {
-        let mut ui = ui_state();
-        ui.meta.loading_state = LoadingState::Loaded;
-        ui
-    }
-
     fn render_text(session: Option<&Session>, ui: &UiState) -> String {
         let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
         let screen = ScreenLayout::new(AREA, session, None, &mut Position::default());
@@ -192,9 +185,9 @@ mod tests {
     }
 
     #[test]
-    fn failed() {
+    fn loading() {
         let mut ui = ui_state();
-        ui.meta.loading_state = LoadingState::Failed("boom".to_string());
+        ui.loading = Some("/data/alignment.fasta".to_string());
 
         insta::assert_snapshot!(render_text(None, &ui));
     }
@@ -208,7 +201,7 @@ mod tests {
             b"CATCATCATCATCATCAT",
         ]);
 
-        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui()));
+        insta::assert_snapshot!(render_text(Some(&session), &ui_state()));
     }
 
     #[test]
@@ -219,7 +212,7 @@ mod tests {
             b"CATCATCATCATGATCAT",
             b"CATCATCATCATCATCAT",
         ]);
-        let mut ui = loaded_ui();
+        let mut ui = ui_state();
         ui.selection = Some(selection(1..=2, 2..=8));
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));
@@ -240,14 +233,14 @@ mod tests {
             .unwrap();
         session.diff_mode = DiffMode::Reference;
 
-        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui()));
+        insta::assert_snapshot!(render_text(Some(&session), &ui_state()));
     }
 
     #[test]
     fn notification() {
         let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
-        let mut ui = loaded_ui();
-        ui.notification = Some(Notification {
+        let mut ui = ui_state();
+        ui.notify(Notification {
             level: NotificationLevel::Info,
             message: "Loaded alignment".to_string(),
         });
@@ -258,7 +251,7 @@ mod tests {
     #[test]
     fn palette() {
         let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
-        let mut ui = loaded_ui();
+        let mut ui = ui_state();
         ui.layers.open_palette(CommandPaletteState::empty());
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));

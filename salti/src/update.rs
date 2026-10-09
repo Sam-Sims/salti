@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use anyhow::Result;
 use semver::Version;
 use serde::Deserialize;
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
-const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,26 +25,25 @@ struct CrateData {
     max_stable_version: String,
 }
 
-pub async fn check_for_update() -> Option<UpdateResult> {
-    let installed = Version::parse(CRATE_VERSION).ok()?;
+pub async fn check_for_update() -> Result<UpdateResult> {
+    let installed = Version::parse(CRATE_VERSION)?;
     let client = reqwest::Client::builder()
         .timeout(CHECK_TIMEOUT)
         .user_agent(format!("{CRATE_NAME}/{CRATE_VERSION}"))
-        .build()
-        .ok()?;
+        .build()?;
 
     let response = client
         .get(format!("https://crates.io/api/v1/crates/{CRATE_NAME}"))
         .send()
-        .await
-        .ok()?;
+        .await?
+        .error_for_status()?;
 
-    let payload = response.json::<Response>().await.ok()?;
-    let latest = Version::parse(payload.crate_data.max_stable_version.as_str()).ok()?;
+    let payload = response.json::<Response>().await?;
+    let latest = Version::parse(payload.crate_data.max_stable_version.as_str())?;
 
     if latest > installed {
-        Some(UpdateResult::UpdateAvailable(latest.to_string()))
+        Ok(UpdateResult::UpdateAvailable(latest.to_string()))
     } else {
-        Some(UpdateResult::UpToDate)
+        Ok(UpdateResult::UpToDate)
     }
 }

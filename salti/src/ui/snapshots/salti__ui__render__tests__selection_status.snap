@@ -2,7 +2,7 @@
 source: salti/src/ui/render.rs
 expression: "render_text(Some(&session), &ui)"
 ---
-                        File: Unknown | Status: Loaded | 4 alignments | Length: 18 | Positions: 1-18
+                     File: test.fasta | Status: Loaded | 4 alignments | Length: 18 | Positions: 1-18
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
 │                  │1       10                                                                     │
 │                  │.   .    |    .                                                                │

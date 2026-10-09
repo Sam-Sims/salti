@@ -1,25 +1,19 @@
-use std::{env, path::Path, time::Duration};
+use std::path::Path;
 
 use anyhow::{Context, Result};
-use crossterm::event::{Event as TermEvent, EventStream, KeyEvent, MouseEvent};
-use ratatui::{DefaultTerminal, layout::Rect};
-use tokio::{
-    sync::mpsc::{UnboundedSender, unbounded_channel},
-    task::JoinHandle,
-};
-use tokio_stream::StreamExt;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use crossterm::event::{KeyEvent, MouseEvent};
+use ratatui::{Frame, layout::Rect};
+use tracing::debug;
 
 use crate::{
     cli::StartupState,
     command::Command,
     core::{
         gff::{self, Gff},
-        parser,
         session::{Position, Session, ViewState},
     },
     input::{self, MouseTracker},
+    jobs::{JobEvent, Jobs},
     ui::{
         layers::{
             notification::{Notification, NotificationLevel},
@@ -28,27 +22,11 @@ use crate::{
         layout::ScreenLayout,
         panes::gff::GffPaneState,
         render::render,
-        ui_state::{LoadingState, UiState},
+        ui_state::UiState,
+        utils::input_name,
     },
-    update::UpdateResult,
+    update::{CRATE_VERSION, UpdateResult},
 };
-
-const RENDER_FPS: f32 = 120.0;
-
-const INSTALLED_VERSION: &str = env!("CARGO_PKG_VERSION");
-const UPDATE_CHECK_ENV_VAR: &str = "SALTI_SKIP_UPDATE_CHECK";
-
-#[derive(Debug)]
-enum AppEvent {
-    UpdateAvailable { latest: String },
-    UpToDate,
-}
-
-#[derive(Debug)]
-struct AsyncJob<T> {
-    handle: JoinHandle<T>,
-    cancel: CancellationToken,
-}
 
 #[derive(Debug)]
 pub(crate) struct App {
@@ -56,157 +34,75 @@ pub(crate) struct App {
     gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
-    load_job: Option<AsyncJob<Result<libmsa::Alignment, String>>>,
-    event_tx: Option<UnboundedSender<AppEvent>>,
+    jobs: Jobs,
     should_quit: bool,
     screen: ScreenLayout,
 }
 
 impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
-        let mut ui = UiState::new(startup);
+        let mut ui = UiState::default();
         let screen = ScreenLayout::new(Rect::default(), None, None, &mut ui.position);
-        Self {
+        let mut app = Self {
             session: None,
             gff: None,
             ui,
             mouse_tracker: MouseTracker::default(),
-            load_job: None,
-            event_tx: None,
+            jobs: Jobs::new(),
             should_quit: false,
             screen,
-        }
-    }
-
-    #[expect(clippy::too_many_lines)]
-    pub(crate) async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        info!(target_fps = RENDER_FPS, "Starting runtime");
-
-        self.try_file_load();
-
-        match terminal.size() {
-            Ok(area) => {
-                debug!(
-                    width = area.width,
-                    height = area.height,
-                    "Captured initial terminal size"
-                );
-                self.rebuild_layout(area.into());
-            }
-            Err(error) => {
-                warn!(error = ?error, "Failed to capture initial terminal size");
-            }
-        }
-
-        let period = Duration::from_secs_f32(1.0 / RENDER_FPS);
-        let mut interval = tokio::time::interval(period);
-        let mut events = EventStream::new();
-        let (event_tx, mut event_rx) = unbounded_channel::<AppEvent>();
-        self.event_tx = Some(event_tx);
-        let mut needs_redraw = true;
-        if Self::startup_update_check_enabled() {
-            self.execute_commands([Command::CheckForUpdate]);
-        } else {
-            debug!(
-                env_var = UPDATE_CHECK_ENV_VAR,
-                "Startup update check disabled via environment variable"
-            );
-        }
-
-        while !self.should_quit {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if needs_redraw {
-                        if let Err(error) = terminal.draw(|frame| {
-                            let area = frame.area();
-                            if area != self.screen.area {
-                                self.rebuild_layout(area);
-                            }
-                            render(
-                                frame,
-                                &self.screen,
-                                self.session.as_ref(),
-                                self.gff.as_ref(),
-                                &self.ui,
-                            );
-                        }) {
-                            error!(error = ?error, "terminal draw failed");
-                            return Err(error.into());
-                        }
-                        needs_redraw = false;
-                    }
-                }
-                Some(Ok(event)) = events.next() => {
-                    match event {
-                        TermEvent::Resize(width, height) => {
-                            self.rebuild_layout(Rect::new(0, 0, width, height));
-                        }
-                        TermEvent::Key(key) => {
-                            self.handle_key_event(key);
-                        }
-                        TermEvent::Mouse(mouse) => {
-                            self.handle_mouse_event(mouse);
-                        }
-                        _ => (),
-                    }
-
-                    needs_redraw = true;
-                }
-                Some(event) = event_rx.recv() => {
-                    self.handle_app_event(event);
-                    needs_redraw = true;
-                }
-                Some(join_result) = async {
-                    match self.load_job.as_mut() {
-                        Some(job) => Some((&mut job.handle).await),
-                        None => None,
-                    }
-                } => {
-                    self.load_job = None;
-                    match join_result {
-                        Ok(Ok(alignment)) => {
-                            self.session = Some(Session::new(alignment));
-                            self.ui.meta.loading_state = LoadingState::Loaded;
-                            self.ui.clear_transient_state();
-                            self.mouse_tracker.clear_anchors();
-                            self.ui.position = Position::default();
-                            self.rebuild_layout(self.screen.area);
-                        }
-                        Ok(Err(error)) => {
-                            self.ui.meta.loading_state = LoadingState::Failed(error);
-                        }
-                        Err(join_error) => {
-                            if !join_error.is_cancelled() {
-                                error!(error = ?join_error, "Alignment load task panicked");
-                            }
-                        }
-                    }
-                    needs_redraw = true;
-                }
-            }
-        }
-
-        info!("Quit requested, cancelling background tasks");
-        if let Some(job) = self.load_job.take() {
-            job.cancel.cancel();
-            job.handle.abort();
-        }
-        Ok(())
-    }
-
-    fn startup_update_check_enabled() -> bool {
-        !matches!(env::var(UPDATE_CHECK_ENV_VAR), Ok(value) if value.eq_ignore_ascii_case("true"))
-    }
-
-    fn try_file_load(&mut self) {
-        let Some(input) = self.ui.meta.input_path.clone() else {
-            info!("No startup file provided; entering idle loading state");
-            self.ui.meta.loading_state = LoadingState::Idle;
-            return;
         };
+        if let Some(input) = startup.file_path {
+            app.load(input);
+        }
+        if startup.update_check {
+            app.jobs.check_for_update(false);
+        }
+        app
+    }
 
-        debug!(input = %input, "Loading startup alignment");
-        self.start_load_job(input);
+    pub(crate) fn handle(&mut self, event: Event) {
+        match event {
+            Event::Key(key) => {
+                self.ui.clear_notification();
+                let commands = input::handle_key_event(&mut self.ui, key);
+                self.execute_commands(commands);
+            }
+            Event::Mouse(mouse) => {
+                let commands = input::handle_mouse_event(
+                    &mut self.mouse_tracker,
+                    self.session.as_ref(),
+                    self.gff.as_ref(),
+                    &mut self.ui,
+                    &self.screen,
+                    mouse,
+                );
+                self.execute_commands(commands);
+            }
+            Event::Resize(area) => self.rebuild_layout(area),
+            Event::Job(JobEvent::Loaded { input, result }) => self.finish_load(input, result),
+            Event::Job(JobEvent::UpdateChecked { result, requested }) => {
+                self.finish_update_check(result, requested);
+            }
+        }
+    }
+
+    pub(crate) async fn next_job_event(&mut self) -> JobEvent {
+        self.jobs.next().await
+    }
+
+    pub(crate) fn draw(&self, frame: &mut Frame) {
+        render(
+            frame,
+            &self.screen,
+            self.session.as_ref(),
+            self.gff.as_ref(),
+            &self.ui,
+        );
+    }
+
+    pub(crate) fn should_quit(&self) -> bool {
+        self.should_quit
     }
 
     fn rebuild_layout(&mut self, area: Rect) {
@@ -218,48 +114,44 @@ impl App {
         );
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) {
-        self.ui.notification = None;
-        let commands = input::handle_key_event(&mut self.ui, key);
-        self.execute_commands(commands);
+    fn finish_load(&mut self, input: String, result: Result<libmsa::Alignment, String>) {
+        self.ui.loading = None;
+        match result {
+            Ok(alignment) => {
+                self.session = Some(Session::new(alignment, input));
+                self.ui.clear_transient_state();
+                self.mouse_tracker.clear_anchors();
+                self.ui.position = Position::default();
+                self.rebuild_layout(self.screen.area);
+            }
+            Err(error) => self.ui.notify(Notification {
+                level: NotificationLevel::Error,
+                message: format!("Failed to load {}: {error}", input_name(&input)),
+            }),
+        }
     }
 
-    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
-        let commands = input::handle_mouse_event(
-            &mut self.mouse_tracker,
-            self.session.as_ref(),
-            self.gff.as_ref(),
-            &mut self.ui,
-            &self.screen,
-            mouse,
-        );
-        self.execute_commands(commands);
-    }
-
-    fn handle_app_event(&mut self, event: AppEvent) {
-        let notification = match event {
-            AppEvent::UpdateAvailable { latest } => Notification {
-                level: NotificationLevel::Info,
-                message: format!(
-                    "A new version of salti is available: {latest} (installed: {INSTALLED_VERSION})"
-                ),
-            },
-            AppEvent::UpToDate => Notification {
-                level: NotificationLevel::Info,
-                message: "salti is up to date".to_string(),
-            },
+    fn finish_update_check(&mut self, result: Option<UpdateResult>, requested: bool) {
+        let message = match result {
+            Some(UpdateResult::UpdateAvailable(latest)) => {
+                format!(
+                    "A new version of salti is available: {latest} (installed: {CRATE_VERSION})"
+                )
+            }
+            Some(UpdateResult::UpToDate) if requested => "salti is up to date".to_string(),
+            Some(UpdateResult::UpToDate) | None => return,
         };
-        self.execute_commands([Command::ShowNotification(notification)]);
+        self.show_info(message);
     }
 
-    fn execute_commands<I>(&mut self, commands: I)
-    where
-        I: IntoIterator<Item = Command>,
-    {
+    fn execute_commands(&mut self, commands: Vec<Command>) {
+        if commands.is_empty() {
+            return;
+        }
         for command in commands {
             if let Err(error) = self.execute_command(command) {
                 debug!(error = ?error, "Command failed");
-                self.ui.notification = Some(Notification {
+                self.ui.notify(Notification {
                     level: NotificationLevel::Error,
                     message: error.to_string(),
                 });
@@ -276,18 +168,17 @@ impl App {
             Command::CloseOverlay => self.ui.layers.close_active(),
             Command::ToggleMinimap => self.ui.layers.toggle_minimap(),
             Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
-            Command::ShowNotification(notification) => self.ui.notification = Some(notification),
-            Command::LoadFile { input } => {
+            Command::ShowNotification(notification) => self.ui.notify(notification),
+            Command::LoadAlignment(input) => {
                 self.clear_mouse_selection();
-                self.start_load_job(input);
+                self.load(input);
             }
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse_gff(Path::new(&path))?);
                 self.ui.gff_pane = GffPaneState::default();
                 self.show_info(format!("Loaded GFF file: {path}"));
             }
-            Command::CheckForUpdate => self.spawn_update_check(false),
-            Command::CheckForUpdateAndNotify => self.spawn_update_check(true),
+            Command::CheckForUpdate => self.jobs.check_for_update(true),
 
             Command::ScrollDown { amount } => self.ui.position.row += amount,
             Command::ScrollUp { amount } => {
@@ -405,7 +296,7 @@ impl App {
     }
 
     fn show_info(&mut self, message: String) {
-        self.ui.notification = Some(Notification {
+        self.ui.notify(Notification {
             level: NotificationLevel::Info,
             message,
         });
@@ -430,247 +321,186 @@ impl App {
         Ok(())
     }
 
-    fn start_load_job(&mut self, input: String) {
-        if let Some(previous) = self.load_job.take() {
-            debug!("Previous load job found, cancelling");
-            previous.cancel.cancel();
-            previous.handle.abort();
-        }
-
-        self.ui.meta.input_path = Some(input.clone());
-        self.ui.meta.loading_state = LoadingState::Loading;
-
-        let cancel = CancellationToken::new();
-        debug!(input = %input, "Spawning new load job for input");
-        let handle = tokio::task::spawn_blocking({
-            let cancel = cancel.clone();
-            move || parser::parse_fasta_file(&input, &cancel).map_err(|error| error.to_string())
-        });
-
-        self.load_job = Some(AsyncJob { handle, cancel });
-    }
-
-    fn spawn_update_check(&self, show_up_to_date: bool) {
-        let Some(event_tx) = self.event_tx.clone() else {
-            return;
-        };
-
-        tokio::spawn(async move {
-            let Some(result) = crate::update::check_for_update().await else {
-                return;
-            };
-            match result {
-                UpdateResult::UpdateAvailable(latest) => {
-                    let _ = event_tx.send(AppEvent::UpdateAvailable { latest });
-                }
-                UpdateResult::UpToDate => {
-                    if show_up_to_date {
-                        let _ = event_tx.send(AppEvent::UpToDate);
-                    }
-                }
-            }
-        });
+    fn load(&mut self, input: String) {
+        self.ui.loading = Some(input.clone());
+        self.jobs.load(input);
     }
 }
 
-#[cfg(any())]
+#[derive(Debug)]
+pub(crate) enum Event {
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize(Rect),
+    Job(JobEvent),
+}
+
+#[cfg(test)]
 mod tests {
+    use std::ops;
+
+    use rstest::rstest;
+
     use super::*;
-    use crate::ui::ui_state::MouseSelection;
+    use crate::{test_utils::session, ui::selection::Selection};
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
-        }
-    }
+    const AREA: Rect = Rect::new(0, 0, 80, 24);
+    const DNA: &[&[u8]] = &[b"ATGAAATTTCCC", b"ATG---TTTCCC", b"ATGAAGTTTCCC"];
 
-    fn app_with_alignment(sequences: Vec<libmsa::Sequence>) -> App {
-        let startup = StartupState {
+    fn app(sequences: &[&[u8]]) -> App {
+        let mut app = App::new(StartupState {
             file_path: None,
-            initial_position: 0,
-        };
-        let mut app = App::new(startup);
-        let alignment = libmsa::Alignment::new(sequences).unwrap();
-        let model = AlignmentModel::new(alignment).unwrap();
-        app.session = Some(model);
-        app.ui.meta.loading_state = LoadingState::Loaded;
-        app.refresh_viewport_bounds();
-        app.rebuild_layout(Rect::new(0, 0, 40, 12));
+            update_check: false,
+        });
+        app.session = Some(session(sequences));
+        app.handle(Event::Resize(AREA));
         app
     }
 
-    fn gff_with_overlapping_features() -> Gff {
-        Gff {
-            features: vec![
-                gff::Feature {
-                    name: "gene1".to_string(),
-                    kind: gff::FeatureType::Gene,
-                    range: 0..10,
-                    strand: gff::Strand::Forward,
-                },
-                gff::Feature {
-                    name: "gene2".to_string(),
-                    kind: gff::FeatureType::Gene,
-                    range: 0..10,
-                    strand: gff::Strand::Forward,
-                },
-            ],
+    fn selection(
+        rows: ops::RangeInclusive<usize>,
+        columns: ops::RangeInclusive<usize>,
+    ) -> Selection {
+        Selection {
+            rows: rows.into(),
+            columns: columns.into(),
         }
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn horizontal_scroll_updates_layout_local_feature_stacked() {
-        let sequence = vec![b'A'; 120];
-        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
-        app.gff = Some(gff_with_overlapping_features());
-        app.rebuild_layout(app.layout_area);
-        assert_eq!(app.layout.alignment_header.local_feature_rows, 2);
-
-        app.execute_commands([Command::ScrollRight { amount: 50 }]);
-
-        assert_eq!(app.ui.viewport.offsets.cols, 50);
-        assert_eq!(app.layout.alignment_header.local_feature_rows, 1);
+    fn alignment(sequences: &[&[u8]]) -> libmsa::Alignment {
+        libmsa::Alignment::new(
+            sequences
+                .iter()
+                .map(|residues| libmsa::Sequence {
+                    id: "new".to_string(),
+                    residues: residues.to_vec(),
+                })
+                .collect(),
+        )
+        .unwrap()
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn jump_to_position_updates_layout_local_feature_stacked() {
-        let sequence = vec![b'A'; 120];
-        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
-        app.gff = Some(gff_with_overlapping_features());
-        app.rebuild_layout(app.layout_area);
-        assert_eq!(app.layout.alignment_header.local_feature_rows, 2);
-
-        app.execute_commands([Command::JumpToPosition(50)]);
-
-        assert_eq!(app.ui.viewport.offsets.cols, 50);
-        assert_eq!(app.layout.alignment_header.local_feature_rows, 1);
+    fn notification_level(app: &App) -> Option<NotificationLevel> {
+        app.ui.notification().map(|notification| notification.level)
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn translation_toggle_keeps_selection() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 4,
-            end_sequence_id: 0,
-            end_column: 4,
-        };
-        app.ui.selection = Some(selection);
+    #[test]
+    fn execute_commands_clamps_once_after_batch() {
+        let gapped: Vec<u8> = (0..200)
+            .map(|i| if i % 2 == 0 { b'A' } else { b'-' })
+            .collect();
+        let mut app = app(&[&[b'A'; 200], &gapped]);
 
-        app.execute_commands([Command::ToggleTranslationOverlay]);
-        assert_eq!(app.ui.selection, Some(selection));
+        app.execute_commands(vec![
+            Command::ScrollRight { amount: 1000 },
+            Command::SetGapFilter(Some(0.25)),
+        ]);
 
-        app.execute_commands([Command::ToggleTranslationOverlay]);
-        assert_eq!(app.ui.selection, Some(selection));
+        let window = &app.screen.window;
+        assert_eq!(window.columns.end, 100);
+        assert_eq!(app.ui.position.column, window.columns.start);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn reload_as_protein_clears_selection() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.ui.selection = Some(MouseSelection {
-            sequence_id: 0,
-            column: 0,
-            end_sequence_id: 0,
-            end_column: 2,
-        });
+    #[test]
+    fn execute_commands_runs_commands_after_failure() {
+        let mut app = app(&[&[b'A'; 200]]);
 
-        app.execute_commands([Command::ToggleProteinView]);
+        app.execute_commands(vec![
+            Command::SetRowFilter(Some("(".to_string())),
+            Command::ScrollRight { amount: 3 },
+        ]);
 
-        assert!(app.session.as_ref().unwrap().is_reloaded_as_protein());
-        assert_eq!(
-            app.session.as_ref().unwrap().base().active_type(),
-            libmsa::AlignmentType::Protein
-        );
+        assert_eq!(app.ui.position.column, 3);
+        assert_eq!(notification_level(&app), Some(NotificationLevel::Error));
+    }
+
+    #[rstest]
+    #[case::pin(Command::PinSequence(1))]
+    #[case::reference(Command::SetReference(Some(1)))]
+    #[case::row_filter(Command::SetRowFilter(Some("s0".to_string())))]
+    #[case::gap_filter(Command::SetGapFilter(Some(0.5)))]
+    #[case::clear_filters(Command::ClearAllFilters)]
+    #[case::protein_view(Command::ToggleProteinView)]
+    #[case::frame(Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2))]
+    fn execute_commands_view_change_clears_selection(#[case] command: Command) {
+        let mut app = app(DNA);
+        app.ui.selection = Some(selection(0..=1, 4..=4));
+
+        app.execute_commands(vec![command]);
+
         assert_eq!(app.ui.selection, None);
-
-        app.execute_commands([Command::ToggleProteinView]);
-
-        assert!(!app.session.as_ref().unwrap().is_reloaded_as_protein());
-        assert_eq!(
-            app.session.as_ref().unwrap().base().active_type(),
-            libmsa::AlignmentType::Dna
-        );
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn reload_as_protein_keeps_locus_from_nt() {
-        let sequence = vec![b'C'; 360];
-        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
-        app.ui.viewport.jump_to_position(200);
+    #[test]
+    fn execute_commands_translation_overlay_widens_selection() {
+        let mut app = app(DNA);
+        app.ui.selection = Some(selection(0..=1, 4..=4));
 
-        app.execute_commands([Command::ToggleProteinView]);
+        app.execute_commands(vec![Command::ToggleTranslationOverlay]);
 
-        assert_eq!(app.ui.viewport.window().col_range.start, 66);
+        assert_eq!(app.ui.selection, Some(selection(0..=1, 3..=5)));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn reload_as_dna_keeps_locus_from_aa() {
-        let sequence = vec![b'C'; 360];
-        let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
-        app.ui.viewport.jump_to_position(200);
+    #[test]
+    fn execute_commands_quit_sets_should_quit() {
+        let mut app = app(DNA);
 
-        app.execute_commands([Command::ToggleProteinView]);
-        app.ui.viewport.jump_to_position(70);
+        app.execute_commands(vec![Command::Quit]);
 
-        app.execute_commands([Command::ToggleProteinView]);
-
-        assert_eq!(app.ui.viewport.window().col_range.start, 212);
+        assert!(app.should_quit());
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn gap_filter_blocked_during_translation() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationOverlay]);
-        app.execute_commands([Command::SetGapFilter(Some(0.25))]);
+    #[test]
+    fn finish_load_works() {
+        let mut app = app(DNA);
+        app.execute_commands(vec![Command::ScrollRight { amount: 2 }]);
+        app.ui.selection = Some(selection(0..=0, 0..=0));
+        app.ui.loading = Some("next.fasta".to_string());
 
-        let notification = app.ui.notification.as_ref().unwrap();
-        assert_eq!(
-            notification.message,
-            "filter-gaps is unavailable while translation is active"
-        );
+        app.finish_load("next.fasta".to_string(), Ok(alignment(&[b"ACGT"])));
+
+        let session = app.session.as_ref().unwrap();
+        assert_eq!(session.source(), "next.fasta");
+        assert_eq!(session.base_alignment().width(), 4);
+        assert_eq!(app.ui.position.column, 0);
+        assert_eq!(app.ui.selection, None);
+        assert_eq!(app.ui.loading, None);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn constant_filter_blocked_during_translation() {
-        let mut app =
-            app_with_alignment(vec![raw("seq1", b"ATGAAATTT"), raw("seq2", b"ATGAAATTT")]);
-        app.execute_commands([Command::ToggleTranslationOverlay]);
-        app.execute_commands([Command::SetConstantFilter(Some(0.9))]);
+    #[test]
+    fn finish_load_rejects_keeps_open_alignment() {
+        let mut app = app(DNA);
+        app.ui.loading = Some("bad.fasta".to_string());
 
-        let notification = app.ui.notification.as_ref().unwrap();
-        assert_eq!(
-            notification.message,
-            "filter-constant is unavailable while translation is active"
-        );
+        app.finish_load("bad.fasta".to_string(), Err("not fasta".to_string()));
+
+        assert_eq!(app.session.as_ref().unwrap().source(), "test.fasta");
+        assert_eq!(app.ui.loading, None);
+        assert_eq!(notification_level(&app), Some(NotificationLevel::Error));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn translation_blocked_by_gap_filter() {
-        let mut app = app_with_alignment(vec![raw("seq1", b"ATG---"), raw("seq2", b"ATG---")]);
-        app.execute_commands([Command::SetGapFilter(Some(0.0))]);
-        app.execute_commands([Command::ToggleTranslationOverlay]);
+    #[rstest]
+    #[case::available_at_startup(Some(UpdateResult::UpdateAvailable("99.0.0".to_string())), false)]
+    #[case::up_to_date_requested(Some(UpdateResult::UpToDate), true)]
+    fn finish_update_check_notifies(#[case] result: Option<UpdateResult>, #[case] requested: bool) {
+        let mut app = app(DNA);
 
-        let notification = app.ui.notification.as_ref().unwrap();
-        assert_eq!(
-            notification.message,
-            "translation is unavailable while a column filter is active"
-        );
+        app.finish_update_check(result, requested);
+
+        assert_eq!(notification_level(&app), Some(NotificationLevel::Info));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn translation_blocked_by_constant_filter() {
-        let mut app = app_with_alignment(vec![raw("seq1", b"ATGAAA"), raw("seq2", b"ATGAAA")]);
-        app.execute_commands([Command::SetConstantFilter(Some(1.0))]);
-        app.execute_commands([Command::ToggleTranslationOverlay]);
+    #[rstest]
+    #[case::up_to_date_at_startup(Some(UpdateResult::UpToDate), false)]
+    #[case::failed(None, true)]
+    fn finish_update_check_is_silent(
+        #[case] result: Option<UpdateResult>,
+        #[case] requested: bool,
+    ) {
+        let mut app = app(DNA);
 
-        let notification = app.ui.notification.as_ref().unwrap();
-        assert_eq!(
-            notification.message,
-            "translation is unavailable while a column filter is active"
-        );
+        app.finish_update_check(result, requested);
+
+        assert_eq!(notification_level(&app), None);
     }
 }

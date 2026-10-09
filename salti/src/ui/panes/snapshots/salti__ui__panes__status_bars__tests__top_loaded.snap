@@ -1,5 +1,5 @@
 ---
 source: salti/src/ui/panes/status_bars.rs
-expression: "status_text(&build_top_status_bar(Some(&session), &ui))"
+expression: "status_text(&build_top_status_bar(Some(&session), &window, &ui))"
 ---
-File: iamnotreal.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5
+File: test.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5

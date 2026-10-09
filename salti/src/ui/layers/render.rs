@@ -29,7 +29,7 @@ pub fn render_overlays(
     }
 
     if ui.layers.active.is_none() {
-        match ui.notification.as_ref() {
+        match ui.notification() {
             Some(notification) => {
                 render_notification(f, input_area, notification, &ui.theme.styles);
             }

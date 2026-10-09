@@ -211,7 +211,7 @@ pub(super) fn run_load_alignment(
     run_command("load-alignment", arguments, || {
         let path = require_argument(arguments)?;
 
-        Ok(Command::LoadFile { input: path })
+        Ok(Command::LoadAlignment(path))
     })
 }
 
@@ -281,7 +281,7 @@ pub(super) fn run_check_update(
 ) -> anyhow::Result<Command> {
     run_command("check-update", arguments, || {
         ensure_no_argument(arguments)?;
-        Ok(Command::CheckForUpdateAndNotify)
+        Ok(Command::CheckForUpdate)
     })
 }
 
