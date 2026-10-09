@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use anyhow::{Result, format_err};
-use libmsa::Sequence;
+use libmsa::{Alignment, Sequence};
 use paraseq::fasta;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
-pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<Sequence>> {
+pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
     info!(input = %input, "Starting fasta parse");
     let mut reader =
         open_fasta_reader(input).map_err(|error| format_err!("Failed to open input: {error}"))?;
@@ -33,17 +33,13 @@ pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Vec<S
         }
     }
 
-    if sequences.is_empty() {
-        return Err(format_err!("No valid FASTA records found in input"));
-    }
-
     debug!(
         input = %input,
         sequence_count = sequences.len(),
         "Completed fasta parse"
     );
 
-    Ok(sequences)
+    Ok(Alignment::new(sequences)?)
 }
 
 fn is_http_url(input: &str) -> bool {
@@ -77,7 +73,7 @@ mod tests {
         file
     }
 
-    fn parse(file: &NamedTempFile, cancel: &CancellationToken) -> Result<Vec<Sequence>> {
+    fn parse(file: &NamedTempFile, cancel: &CancellationToken) -> Result<Alignment> {
         parse_fasta_file(file.path().to_str().unwrap(), cancel)
     }
 
@@ -85,19 +81,10 @@ mod tests {
     fn parse_fasta_file_works() {
         let file = fasta_file(b">seq1\nA-CG\n>seq2\nTGCA\n");
 
-        assert_eq!(
-            parse(&file, &CancellationToken::new()).unwrap(),
-            [
-                Sequence {
-                    id: "seq1".to_string(),
-                    residues: b"A-CG".to_vec(),
-                },
-                Sequence {
-                    id: "seq2".to_string(),
-                    residues: b"TGCA".to_vec(),
-                },
-            ]
-        );
+        let alignment = parse(&file, &CancellationToken::new()).unwrap();
+
+        assert_eq!((alignment.row_count(), alignment.width()), (2, 4));
+        assert_eq!([alignment.id(0), alignment.id(1)], ["seq1", "seq2"]);
     }
 
     #[rstest]

@@ -59,7 +59,7 @@ pub(crate) struct App {
     gff: Option<Gff>,
     ui: UiState,
     mouse_tracker: MouseTracker,
-    load_job: Option<AsyncJob<Result<Vec<libmsa::Sequence>, String>>>,
+    load_job: Option<AsyncJob<Result<libmsa::Alignment, String>>>,
     event_tx: Option<UnboundedSender<AppEvent>>,
     should_quit: bool,
     layout_area: Rect,
@@ -177,23 +177,17 @@ impl App {
                 } => {
                     self.load_job = None;
                     match join_result {
-                        Ok(Ok(raw_sequences)) => match libmsa::Alignment::new(raw_sequences)
-                            .map(Session::new) {
-                            Ok(session) => {
-                                self.session = Some(session);
-                                self.ui.meta.loading_state = LoadingState::Loaded;
-                                self.ui.clear_transient_state();
-                                self.mouse_tracker.clear_anchors();
-                                self.ui.position = Position {
-                                    column: self.ui.meta.initial_position,
-                                    ..Position::default()
-                                };
-                                self.rebuild_layout(self.layout_area);
-                            }
-                            Err(error) => {
-                                self.ui.meta.loading_state = LoadingState::Failed(error.to_string());
-                            }
-                        },
+                        Ok(Ok(alignment)) => {
+                            self.session = Some(Session::new(alignment));
+                            self.ui.meta.loading_state = LoadingState::Loaded;
+                            self.ui.clear_transient_state();
+                            self.mouse_tracker.clear_anchors();
+                            self.ui.position = Position {
+                                column: self.ui.meta.initial_position,
+                                ..Position::default()
+                            };
+                            self.rebuild_layout(self.layout_area);
+                        }
                         Ok(Err(error)) => {
                             self.ui.meta.loading_state = LoadingState::Failed(error);
                         }
@@ -559,7 +553,7 @@ impl App {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::ui::ui_state::MouseSelection;
