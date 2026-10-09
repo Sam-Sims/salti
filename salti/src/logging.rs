@@ -23,7 +23,7 @@ fn create_log() -> Result<File> {
 
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => return Ok(file),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
     }

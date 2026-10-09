@@ -33,13 +33,13 @@ impl MouseTracker {
             return [None, None];
         };
 
-        let (dy_amount, scroll_up) = if row >= anchor_y {
+        let (row_delta, scroll_up) = if row >= anchor_y {
             (usize::from(row - anchor_y), true)
         } else {
             (usize::from(anchor_y - row), false)
         };
 
-        let (dx_amount, scroll_left) = if column >= anchor_x {
+        let (column_delta, scroll_left) = if column >= anchor_x {
             (usize::from(column - anchor_x), true)
         } else {
             (usize::from(anchor_x - column), false)
@@ -48,15 +48,19 @@ impl MouseTracker {
         self.pan_anchor = Some((column, row));
 
         [
-            (dy_amount > 0).then_some(if scroll_up {
-                Command::ScrollUp { amount: dy_amount }
+            (row_delta > 0).then_some(if scroll_up {
+                Command::ScrollUp { amount: row_delta }
             } else {
-                Command::ScrollDown { amount: dy_amount }
+                Command::ScrollDown { amount: row_delta }
             }),
-            (dx_amount > 0).then_some(if scroll_left {
-                Command::ScrollLeft { amount: dx_amount }
+            (column_delta > 0).then_some(if scroll_left {
+                Command::ScrollLeft {
+                    amount: column_delta,
+                }
             } else {
-                Command::ScrollRight { amount: dx_amount }
+                Command::ScrollRight {
+                    amount: column_delta,
+                }
             }),
         ]
     }
