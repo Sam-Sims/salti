@@ -34,7 +34,6 @@ impl std::fmt::Display for LoadingState {
 pub struct MetaState {
     pub loading_state: LoadingState,
     pub input_path: Option<String>,
-    pub initial_position: usize,
 }
 
 impl From<StartupState> for MetaState {
@@ -42,7 +41,6 @@ impl From<StartupState> for MetaState {
         Self {
             loading_state: LoadingState::Idle,
             input_path: startup.file_path,
-            initial_position: startup.initial_position,
         }
     }
 }

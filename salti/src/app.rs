@@ -183,10 +183,7 @@ impl App {
                             self.ui.meta.loading_state = LoadingState::Loaded;
                             self.ui.clear_transient_state();
                             self.mouse_tracker.clear_anchors();
-                            self.ui.position = Position {
-                                column: self.ui.meta.initial_position,
-                                ..Position::default()
-                            };
+                            self.ui.position = Position::default();
                             self.rebuild_layout(self.layout_area);
                         }
                         Ok(Err(error)) => {

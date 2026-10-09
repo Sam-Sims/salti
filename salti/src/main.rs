@@ -62,7 +62,6 @@ async fn main() -> Result<()> {
     let startup = cli.load_startup_sate();
     info!(
         has_input_file = startup.file_path.is_some(),
-        initial_position = startup.initial_position,
         "startup state: "
     );
 
