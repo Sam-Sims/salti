@@ -113,7 +113,7 @@ fn extract_name(record: &gff::feature::RecordBuf) -> String {
         .filter_map(|tag| record.attributes().get(tag))
         .filter_map(|value| value.as_string())
         .find(|name| !name.is_empty())
-        .map_or_else(|| record.ty().to_string(), |name| name.to_string())
+        .map_or_else(|| record.ty().to_string(), ToString::to_string)
 }
 
 #[cfg(test)]
