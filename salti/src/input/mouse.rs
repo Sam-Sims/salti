@@ -5,10 +5,7 @@ use ratatui::layout::Rect;
 
 use crate::{
     command::Command,
-    core::{
-        gff::Gff,
-        session::{Session, ViewMode},
-    },
+    core::{gff::Gff, session::Session},
     input::route::{MouseRoute, route_mouse},
     ui::{
         layers::{minimap::MinimapState, state::ActiveLayer},
@@ -227,10 +224,7 @@ fn anchor_at(
         .columns
         .clone()
         .nth(usize::from(mouse_x - sequence_rows_area.x))?;
-    let columns = match session.state().mode() {
-        ViewMode::TranslationOverlay => session.codon_columns((column..=column).into()),
-        ViewMode::Plain { .. } | ViewMode::ProteinView { .. } => (column..=column).into(),
-    };
+    let columns = session.selection_columns((column..=column).into());
 
     Some(Selection {
         rows: (row..=row).into(),

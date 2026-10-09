@@ -17,7 +17,7 @@ use crate::{
     core::{
         gff::{self, Gff},
         parser,
-        session::{Position, Session, ViewMode, ViewState},
+        session::{Position, Session, ViewState},
     },
     input::{self, MouseTracker},
     ui::{
@@ -447,10 +447,8 @@ impl App {
                 let mut selection = self.ui.selection;
                 self.apply(ViewState::toggle_translation_overlay)?;
                 let session = self.session()?;
-                if let Some(selection) = &mut selection
-                    && matches!(session.state().mode(), ViewMode::TranslationOverlay)
-                {
-                    selection.columns = session.codon_columns(selection.columns);
+                if let Some(selection) = &mut selection {
+                    selection.columns = session.selection_columns(selection.columns);
                 }
                 self.ui.selection = selection;
             }

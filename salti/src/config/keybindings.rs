@@ -2,12 +2,12 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::command::Command;
 
-pub struct Binding {
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
-    pub action: Command,
+struct Binding {
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    action: Command,
     #[allow(dead_code)]
-    pub help: &'static str,
+    help: &'static str,
 }
 
 const KEY_BINDINGS: &[Binding] = &[

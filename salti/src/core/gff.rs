@@ -22,12 +22,6 @@ pub enum FeatureType {
 }
 
 impl FeatureType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Gene => "gene",
-        }
-    }
-
     fn parse(feature_type: &[u8]) -> Option<Self> {
         if feature_type.eq_ignore_ascii_case(b"gene") {
             return Some(Self::Gene);
@@ -39,7 +33,9 @@ impl FeatureType {
 
 impl fmt::Display for FeatureType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(match self {
+            Self::Gene => "gene",
+        })
     }
 }
 
@@ -50,19 +46,13 @@ pub enum Strand {
     Unknown,
 }
 
-impl Strand {
-    pub fn as_str(self) -> &'static str {
-        match self {
+impl fmt::Display for Strand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
             Self::Forward => "Forward →",
             Self::Reverse => "Reverse ←",
             Self::Unknown => "Unknown strand",
-        }
-    }
-}
-
-impl fmt::Display for Strand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        })
     }
 }
 

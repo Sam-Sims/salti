@@ -6,7 +6,7 @@ pub struct WindowColumns<'a> {
     pub summaries: Vec<libmsa::ColumnSummary>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub index: usize,
     pub centre: bool,

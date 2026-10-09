@@ -76,7 +76,7 @@ impl ReadingFrame {
     /// Returns the number of protein columns for `nucleotide_length` nucleotide columns
     ///
     /// A trailing partial codon counts as one column, which reads as `X`
-    pub const fn translated_length(self, nucleotide_length: usize) -> usize {
+    pub(crate) const fn translated_length(self, nucleotide_length: usize) -> usize {
         let offset = self.offset();
         if nucleotide_length <= offset {
             return 0;

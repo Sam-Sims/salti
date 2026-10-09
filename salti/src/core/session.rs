@@ -363,7 +363,10 @@ impl Session {
         }
     }
 
-    pub fn codon_columns(&self, columns: RangeInclusive<usize>) -> RangeInclusive<usize> {
+    pub fn selection_columns(&self, columns: RangeInclusive<usize>) -> RangeInclusive<usize> {
+        if !matches!(self.state.mode, ViewMode::TranslationOverlay) {
+            return columns;
+        }
         let frame = self.state.frame;
         let last_column = self.base_alignment.width() - 1;
         let start = frame
@@ -569,7 +572,7 @@ mod tests {
     #[case::before_offset(libmsa::ReadingFrame::Frame3, 0..=1, 0..=1)]
     #[case::from_before_offset(libmsa::ReadingFrame::Frame3, 1..=3, 1..=4)]
     #[case::clipped_to_width(libmsa::ReadingFrame::Frame1, 9..=9, 9..=9)]
-    fn codon_columns_works(
+    fn selection_columns_widens_to_codons_in_overlay(
         #[case] frame: libmsa::ReadingFrame,
         #[case] columns: std::ops::RangeInclusive<usize>,
         #[case] expected: std::ops::RangeInclusive<usize>,
@@ -578,13 +581,23 @@ mod tests {
         session
             .update(Position::default(), |state| {
                 state.frame = frame;
-                Ok(())
+                state.toggle_translation_overlay()
             })
             .unwrap();
 
         assert_eq!(
-            session.codon_columns(columns.into()),
+            session.selection_columns(columns.into()),
             RangeInclusive::from(expected)
+        );
+    }
+
+    #[test]
+    fn selection_columns_unchanged_outside_overlay() {
+        let session = session(&[b"ATGATGATGA"]);
+
+        assert_eq!(
+            session.selection_columns((1..=4).into()),
+            RangeInclusive::from(1..=4)
         );
     }
 
