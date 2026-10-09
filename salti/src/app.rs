@@ -64,14 +64,14 @@ pub(crate) struct App {
     should_quit: bool,
     layout_area: Rect,
     frame_layout: FrameLayout,
-    app_layout: AppLayout,
+    layout: AppLayout,
 }
 
 impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
         let layout_area = Rect::default();
         let frame_layout = FrameLayout::new(layout_area);
-        let app_layout = AppLayout::new(
+        let layout = AppLayout::new(
             frame_layout.content_area,
             // TODO: remove magic number similar to AlignmentHeaderLayout - currently 0 at start since no GFF loaded
             0,
@@ -87,10 +87,11 @@ impl App {
             should_quit: false,
             layout_area,
             frame_layout,
-            app_layout,
+            layout,
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     pub(crate) async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         info!(target_fps = RENDER_FPS, "Starting runtime");
 
@@ -140,8 +141,8 @@ impl App {
                                 self.gff.as_ref(),
                                 &self.ui,
                                 &self.frame_layout,
-                                &self.app_layout,
-                            )
+                                &self.layout,
+                            );
                         }) {
                             error!(error = ?error, "terminal draw failed");
                             return Err(error.into());
@@ -255,14 +256,13 @@ impl App {
             (None, _) | (_, None) => (0, 0),
         };
 
-        self.app_layout = AppLayout::new(
+        self.layout = AppLayout::new(
             self.frame_layout.content_area,
             gff_height,
             AlignmentHeaderLayout::with_features(local_feature_rows),
         );
 
-        let available_sequence_rows =
-            usize::from(self.app_layout.alignment_pane_sequence_rows.height);
+        let available_sequence_rows = usize::from(self.layout.alignment_pane_sequence_rows.height);
         let pinned = session.map_or(0, |session| session.layout().pinned());
         let shown_pinned = pinned.min(available_sequence_rows.saturating_sub(1));
         let divider = usize::from(shown_pinned > 0);
@@ -272,9 +272,8 @@ impl App {
 
         let row_count = session.map_or(0, |session| session.base_alignment().row_count());
         let number_prefix_width = row_count.max(1).ilog10() as usize + 2;
-        let name_visible_width =
-            usize::from(self.app_layout.sequence_id_pane.width.saturating_sub(2))
-                .saturating_sub(number_prefix_width);
+        let name_visible_width = usize::from(self.layout.sequence_id_pane.width.saturating_sub(2))
+            .saturating_sub(number_prefix_width);
         let max_id_len = session.map_or(0, |session| session.base_alignment().max_id_len());
         let names = fit(&mut self.ui.position.name, name_visible_width, max_id_len);
 
@@ -309,7 +308,7 @@ impl App {
             self.gff.as_ref(),
             &mut self.ui,
             &self.frame_layout,
-            &self.app_layout,
+            &self.layout,
             mouse,
         );
         self.execute_commands(commands);
@@ -347,6 +346,7 @@ impl App {
         self.rebuild_layout(self.layout_area);
     }
 
+    #[expect(clippy::too_many_lines)]
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Quit => self.should_quit = true,
@@ -603,12 +603,12 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.gff = Some(gff_with_overlapping_features());
         app.rebuild_layout(app.layout_area);
-        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
+        assert_eq!(app.layout.alignment_header.local_feature_rows, 2);
 
         app.execute_commands([Command::ScrollRight { amount: 50 }]);
 
         assert_eq!(app.ui.viewport.offsets.cols, 50);
-        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
+        assert_eq!(app.layout.alignment_header.local_feature_rows, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -617,12 +617,12 @@ mod tests {
         let mut app = app_with_alignment(vec![raw("seq1", &sequence)]);
         app.gff = Some(gff_with_overlapping_features());
         app.rebuild_layout(app.layout_area);
-        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 2);
+        assert_eq!(app.layout.alignment_header.local_feature_rows, 2);
 
         app.execute_commands([Command::JumpToPosition(50)]);
 
         assert_eq!(app.ui.viewport.offsets.cols, 50);
-        assert_eq!(app.app_layout.alignment_header.local_feature_rows, 1);
+        assert_eq!(app.layout.alignment_header.local_feature_rows, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
