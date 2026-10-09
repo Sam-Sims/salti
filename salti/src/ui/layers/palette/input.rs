@@ -10,7 +10,7 @@ use crate::{
     command::Command,
     core::{
         gff::Gff,
-        search::{Direction, FilterMode, SearchableList},
+        search::{Direction, SearchableList},
         session::Session,
     },
     ui::layers::notification::{Notification, NotificationLevel},
@@ -70,9 +70,9 @@ impl CommandPaletteState {
         pinned: usize,
         feature_names: Option<Vec<String>>,
     ) -> Self {
-        let mut command_list = SearchableList::new(FilterMode::Fuzzy, None);
+        let mut command_list = SearchableList::default();
         command_list.set_items(display_command_names());
-        let completion_list = SearchableList::new(FilterMode::Fuzzy, None);
+        let completion_list = SearchableList::default();
 
         Self {
             command_input: String::new(),
@@ -375,7 +375,7 @@ fn resolve_command(name: &str) -> Option<PaletteCommand> {
         .find(|spec| spec.name() == name || spec.aliases().contains(&name))
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
 

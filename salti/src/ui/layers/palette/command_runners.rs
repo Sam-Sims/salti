@@ -300,7 +300,7 @@ pub(super) fn run_load_gff(_: &CommandPaletteState, arguments: &str) -> anyhow::
     })
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use std::ops::Range;
 

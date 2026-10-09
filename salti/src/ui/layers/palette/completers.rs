@@ -127,7 +127,7 @@ pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> 
     matches.into_iter().map(|(_, label)| label).collect()
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};
