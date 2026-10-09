@@ -4,7 +4,6 @@ use crate::{
     core::session::Position,
     ui::{
         layers::{notification::Notification, state::LayerState},
-        layout::Window,
         panes::gff::GffPaneState,
         selection::Selection,
     },
@@ -79,7 +78,6 @@ pub struct UiState {
     pub selection: Option<Selection>,
     pub theme: ThemeState,
     pub position: Position,
-    pub window: Window,
     pub meta: MetaState,
     pub gff_tooltip: Option<String>,
 }
@@ -93,7 +91,6 @@ impl UiState {
             selection: None,
             theme: ThemeState::default(),
             position: Position::default(),
-            window: Window::default(),
             meta: MetaState::from(startup),
             gff_tooltip: None,
         }

@@ -124,11 +124,10 @@ impl App {
                             }
                             render(
                                 frame,
+                                &self.screen,
                                 self.session.as_ref(),
                                 self.gff.as_ref(),
                                 &self.ui,
-                                &self.screen.frame,
-                                &self.screen.app,
                             );
                         }) {
                             error!(error = ?error, "terminal draw failed");
@@ -217,7 +216,6 @@ impl App {
             self.gff.as_ref(),
             &mut self.ui.position,
         );
-        self.ui.window = self.screen.window.clone();
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) {
@@ -232,8 +230,7 @@ impl App {
             self.session.as_ref(),
             self.gff.as_ref(),
             &mut self.ui,
-            &self.screen.frame,
-            &self.screen.app,
+            &self.screen,
             mouse,
         );
         self.execute_commands(commands);

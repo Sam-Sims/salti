@@ -2,7 +2,6 @@ use std::fmt::Write as _;
 
 use ratatui::{
     Frame,
-    layout::Rect,
     style::Styled,
     text::{Line, Span},
     widgets::Paragraph,
@@ -11,6 +10,7 @@ use ratatui::{
 use crate::{
     core::session::{Session, ViewMode},
     ui::{
+        layout::{ScreenLayout, Window},
         ui_state::{LoadingState, UiState},
         utils::truncate_label,
     },
@@ -96,7 +96,11 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
         .collect()
 }
 
-fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
+fn build_top_status_bar(
+    session: Option<&Session>,
+    window: &Window,
+    ui: &UiState,
+) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
     let file_name = ui.meta.input_path.as_deref().map_or("Unknown", |input| {
         // for local paths, show just the file name for URLs makes more sense to show the full input.
@@ -117,7 +121,7 @@ fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'st
     let alignment_count = layout.map_or(0, |layout| layout.rows().len());
     let alignment_length = session.map_or(0, |session| session.grid().width());
     let shown = layout
-        .map(|layout| &layout.columns()[ui.window.columns.clone()])
+        .map(|layout| &layout.columns()[window.columns.clone()])
         .unwrap_or_default();
     let position_range = match (shown.first(), shown.last()) {
         (Some(start), Some(end)) => format!("Positions: {}-{}", start + 1, end + 1),
@@ -137,15 +141,13 @@ fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'st
     ]
 }
 
-pub fn render_frame(
-    f: &mut Frame,
-    top_status_area: Rect,
-    bottom_status_area: Rect,
-    session: Option<&Session>,
-    ui: &UiState,
-) {
+pub fn render_frame(f: &mut Frame, screen: &ScreenLayout, session: Option<&Session>, ui: &UiState) {
     let theme = &ui.theme.styles;
-    let top_status_bar = build_top_status_bar(session, ui);
+    let (top_status_area, bottom_status_area) = (
+        screen.frame.top_status_area,
+        screen.frame.bottom_status_area,
+    );
+    let top_status_bar = build_top_status_bar(session, &screen.window, ui);
     let bottom_status_bar = build_bottom_status_bar(session, ui);
 
     if top_status_area.height > 0 {
@@ -173,7 +175,7 @@ mod tests {
     use crate::{
         core::session::{Position, ViewState},
         test_utils::{full_window, session_with_ids, ui_state},
-        ui::{layout::Window, selection::Selection},
+        ui::selection::Selection,
     };
 
     fn status_text(spans: &[Span<'_>]) -> String {
@@ -218,12 +220,16 @@ mod tests {
         let mut ui = ui_state();
         ui.meta.input_path = Some("/iamnotreal.fasta".to_string());
         ui.meta.loading_state = LoadingState::Loaded;
-        ui.window = Window {
+        let window = Window {
             columns: 0..5,
             ..full_window(&session)
         };
 
-        insta::assert_snapshot!(status_text(&build_top_status_bar(Some(&session), &ui)));
+        insta::assert_snapshot!(status_text(&build_top_status_bar(
+            Some(&session),
+            &window,
+            &ui
+        )));
     }
 
     #[test]
@@ -231,7 +237,11 @@ mod tests {
         let mut ui = ui_state();
         ui.meta.loading_state = LoadingState::Failed("boom".to_string());
 
-        insta::assert_snapshot!(status_text(&build_top_status_bar(None, &ui)));
+        insta::assert_snapshot!(status_text(&build_top_status_bar(
+            None,
+            &Window::default(),
+            &ui
+        )));
     }
 
     #[test]

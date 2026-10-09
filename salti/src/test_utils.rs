@@ -9,7 +9,10 @@ use crate::{
         gff::{Feature, FeatureType, Gff, Strand},
         session::{Position, Session},
     },
-    ui::{layout::Window, ui_state::UiState},
+    ui::{
+        layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, ScreenLayout, Window},
+        ui_state::UiState,
+    },
 };
 
 pub(crate) fn session(sequences: &[&[u8]]) -> Session {
@@ -50,6 +53,20 @@ pub(crate) fn full_window(session: &Session) -> Window {
         rows: 0..layout.main().len(),
         columns: 0..layout.columns().len(),
         names: 0..session.base_alignment().max_id_len(),
+    }
+}
+
+pub(crate) fn screen(area: Rect, gff_height: u16, window: Window) -> ScreenLayout {
+    let frame = FrameLayout::new(area);
+    ScreenLayout {
+        area,
+        frame,
+        app: AppLayout::new(
+            frame.content_area,
+            gff_height,
+            AlignmentHeaderLayout::new(0),
+        ),
+        window,
     }
 }
 

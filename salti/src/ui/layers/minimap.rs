@@ -13,7 +13,10 @@ use crate::{
     config::theme::Theme,
     core::session::Session,
     input::movement::HorizontalDrag,
-    ui::ui_state::{ThemeState, UiState},
+    ui::{
+        layout::ScreenLayout,
+        ui_state::{ThemeState, UiState},
+    },
 };
 
 /// maximum height of the minimap in rows
@@ -30,15 +33,15 @@ struct MinimapLayout {
 }
 
 pub struct Minimap<'a> {
-    input_area: Rect,
+    screen: &'a ScreenLayout,
     session: &'a Session,
     ui: &'a UiState,
 }
 
 impl<'a> Minimap<'a> {
-    pub fn new(input_area: Rect, session: &'a Session, ui: &'a UiState) -> Self {
+    pub fn new(screen: &'a ScreenLayout, session: &'a Session, ui: &'a UiState) -> Self {
         Self {
-            input_area,
+            screen,
             session,
             ui,
         }
@@ -66,7 +69,7 @@ impl Widget for Minimap<'_> {
             );
             if let Some(window_box) = highlight_box(
                 minimap_layout.track_area,
-                self.ui.window.columns.clone(),
+                self.screen.window.columns.clone(),
                 total_columns,
             ) {
                 shade_highlight_box(buffer, window_box, theme);
@@ -75,7 +78,7 @@ impl Widget for Minimap<'_> {
 
         Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
             .style(styles.base_block)
-            .render(self.input_area, buffer);
+            .render(self.screen.frame.input_area, buffer);
     }
 }
 

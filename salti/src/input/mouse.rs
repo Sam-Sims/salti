@@ -9,7 +9,7 @@ use crate::{
     input::route::{MouseRoute, route_mouse},
     ui::{
         layers::{minimap::MinimapState, state::ActiveLayer},
-        layout::{AppLayout, FrameLayout, Window, screen_rows},
+        layout::{FrameLayout, ScreenLayout, Window, screen_rows},
         panes::gff,
         selection::Selection,
         ui_state::UiState,
@@ -66,20 +66,18 @@ impl MouseTracker {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_mouse_event(
     tracker: &mut MouseTracker,
     session: Option<&Session>,
     gff: Option<&Gff>,
     ui: &mut UiState,
-    frame_layout: &FrameLayout,
-    app_layout: &AppLayout,
+    screen: &ScreenLayout,
     mouse: MouseEvent,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     ui.gff_tooltip = None;
 
-    match route_mouse(ui, frame_layout, app_layout, mouse, gff.is_some()) {
+    match route_mouse(ui, &screen.frame, &screen.app, mouse, gff.is_some()) {
         MouseRoute::Palette => (),
         MouseRoute::Minimap => {
             if let Some(session) = session
@@ -88,28 +86,21 @@ pub(crate) fn handle_mouse_event(
                 handle_minimap_mouse_event(
                     &mut commands,
                     session,
-                    &ui.window.columns,
+                    &screen.window.columns,
                     minimap_state,
-                    frame_layout,
+                    &screen.frame,
                     mouse,
                 );
             }
         }
         MouseRoute::GffPane => {
             if let (Some(gff), Some(session)) = (gff, session) {
-                handle_gff_mouse_event(&mut commands, gff, session, ui, app_layout, mouse);
+                handle_gff_mouse_event(&mut commands, gff, session, ui, screen, mouse);
             }
         }
         MouseRoute::Alignment => {
             if let Some(session) = session {
-                handle_alignment_mouse_event(
-                    &mut commands,
-                    tracker,
-                    session,
-                    ui,
-                    app_layout,
-                    mouse,
-                );
+                handle_alignment_mouse_event(&mut commands, tracker, session, ui, screen, mouse);
             }
         }
     }
@@ -139,15 +130,15 @@ fn handle_gff_mouse_event(
     gff: &Gff,
     session: &Session,
     ui: &mut UiState,
-    app_layout: &AppLayout,
+    screen: &ScreenLayout,
     mouse: MouseEvent,
 ) {
-    let gff_pane_rows = app_layout.gff_pane_rows;
+    let gff_pane_rows = screen.app.gff_pane_rows;
     let total_columns = session.layout().columns().len();
 
     if let Some(cmd) =
         ui.gff_pane
-            .handle_mouse(mouse, gff_pane_rows, &ui.window.columns, total_columns)
+            .handle_mouse(mouse, gff_pane_rows, &screen.window.columns, total_columns)
     {
         commands.push(cmd);
     }
@@ -160,13 +151,13 @@ fn handle_alignment_mouse_event(
     tracker: &mut MouseTracker,
     session: &Session,
     ui: &mut UiState,
-    app_layout: &AppLayout,
+    screen: &ScreenLayout,
     mouse: MouseEvent,
 ) {
     let resolved_anchor = anchor_at(
         session,
-        &ui.window,
-        app_layout.alignment_pane_sequence_rows,
+        &screen.window,
+        screen.app.alignment_pane_sequence_rows,
         mouse.column,
         mouse.row,
     );
@@ -258,8 +249,8 @@ mod tests {
             gff::{Feature, FeatureType, Strand},
             session::{Position, ViewState},
         },
-        test_utils::{mouse_event, pinned_session, session, ui_state},
-        ui::{layers::palette::CommandPaletteState, layout::AlignmentHeaderLayout},
+        test_utils::{mouse_event, pinned_session, screen, session, ui_state},
+        ui::layers::palette::CommandPaletteState,
     };
 
     const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);
@@ -279,34 +270,40 @@ mod tests {
         }
     }
 
-    fn layouts(gff_height: u16) -> (FrameLayout, AppLayout) {
-        let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            gff_height,
-            AlignmentHeaderLayout::new(0),
-        );
-        (frame_layout, app_layout)
+    const AREA: Rect = Rect::new(0, 0, 80, 24);
+
+    fn pinned_screen() -> ScreenLayout {
+        screen(
+            AREA,
+            0,
+            Window {
+                pinned: 0..1,
+                rows: 0..4,
+                columns: 0..20,
+                ..Window::default()
+            },
+        )
     }
 
-    fn pinned_window() -> Window {
-        Window {
-            pinned: 0..1,
-            rows: 0..4,
-            columns: 0..20,
-            ..Window::default()
-        }
+    fn gff_screen() -> ScreenLayout {
+        screen(
+            AREA,
+            4,
+            Window {
+                rows: 0..1,
+                columns: 0..60,
+                ..Window::default()
+            },
+        )
     }
 
     fn handle_all(
         session: &Session,
-        gff: Option<&Gff>,
         ui: &mut UiState,
-        gff_height: u16,
         events: &[(MouseEventKind, KeyModifiers, u16, u16)],
     ) -> Vec<Command> {
-        let (frame_layout, app_layout) = layouts(gff_height);
-        let area = app_layout.alignment_pane_sequence_rows;
+        let screen = pinned_screen();
+        let area = screen.app.alignment_pane_sequence_rows;
         let mut tracker = MouseTracker::default();
         events
             .iter()
@@ -315,15 +312,7 @@ mod tests {
                     modifiers,
                     ..mouse_event(kind, area.x + x, area.y + y)
                 };
-                handle_mouse_event(
-                    &mut tracker,
-                    Some(session),
-                    gff,
-                    ui,
-                    &frame_layout,
-                    &app_layout,
-                    mouse,
-                )
+                handle_mouse_event(&mut tracker, Some(session), None, ui, &screen, mouse)
             })
             .collect()
     }
@@ -448,9 +437,8 @@ mod tests {
     ) {
         let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
-        ui.window = pinned_window();
 
-        handle_all(&session, None, &mut ui, 0, events);
+        handle_all(&session, &mut ui, events);
 
         assert_eq!(ui.selection, expected);
     }
@@ -459,16 +447,9 @@ mod tests {
     fn handle_mouse_event_click_outside_rows_clears_selection() {
         let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
-        ui.window = pinned_window();
         ui.selection = Some(selection(0..=0, 0..=0));
 
-        handle_all(
-            &session,
-            None,
-            &mut ui,
-            0,
-            &[(LEFT_DOWN, KeyModifiers::NONE, 30, 1)],
-        );
+        handle_all(&session, &mut ui, &[(LEFT_DOWN, KeyModifiers::NONE, 30, 1)]);
 
         assert_eq!(ui.selection, None);
     }
@@ -477,14 +458,11 @@ mod tests {
     fn handle_mouse_event_palette_ignores_mouse() {
         let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
-        ui.window = pinned_window();
         ui.layers.open_palette(CommandPaletteState::empty());
 
         let commands = handle_all(
             &session,
-            None,
             &mut ui,
-            0,
             &[
                 (LEFT_DOWN, KeyModifiers::NONE, 0, 0),
                 (MIDDLE_DOWN, KeyModifiers::NONE, 0, 0),
@@ -505,9 +483,8 @@ mod tests {
     ) {
         let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
-        ui.window = pinned_window();
 
-        assert_eq!(handle_all(&session, None, &mut ui, 0, events), expected);
+        assert_eq!(handle_all(&session, &mut ui, events), expected);
     }
 
     #[test]
@@ -522,23 +499,17 @@ mod tests {
             }],
         };
         let mut ui = ui_state();
-        ui.window = Window {
-            rows: 0..1,
-            columns: 0..60,
-            ..Window::default()
-        };
-        let (frame_layout, app_layout) = layouts(4);
+        let screen = gff_screen();
         let mut tracker = MouseTracker::default();
-        let gff_rows = app_layout.gff_pane_rows;
-        let alignment_rows = app_layout.alignment_pane_sequence_rows;
+        let gff_rows = screen.app.gff_pane_rows;
+        let alignment_rows = screen.app.alignment_pane_sequence_rows;
         let mut handle = |x, y| {
             handle_mouse_event(
                 &mut tracker,
                 Some(&session),
                 Some(&gff),
                 &mut ui,
-                &frame_layout,
-                &app_layout,
+                &screen,
                 mouse_event(MouseEventKind::Moved, x, y),
             );
             ui.gff_tooltip.is_some()
@@ -560,22 +531,16 @@ mod tests {
             }],
         };
         let mut ui = ui_state();
-        ui.window = Window {
-            rows: 0..1,
-            columns: 0..60,
-            ..Window::default()
-        };
-        let (frame_layout, app_layout) = layouts(4);
+        let screen = gff_screen();
         let mut tracker = MouseTracker::default();
-        let area = app_layout.gff_pane_rows;
+        let area = screen.app.gff_pane_rows;
 
         let commands = handle_mouse_event(
             &mut tracker,
             Some(&session),
             Some(&gff),
             &mut ui,
-            &frame_layout,
-            &app_layout,
+            &screen,
             mouse_event(LEFT_DOWN, area.x + 1, area.y),
         );
 

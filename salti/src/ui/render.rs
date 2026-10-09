@@ -9,7 +9,7 @@ use crate::{
     core::{gff::Gff, session::Session},
     ui::{
         layers::render::render_overlays,
-        layout::{AppLayout, FrameLayout},
+        layout::ScreenLayout,
         panes::{
             alignment::AlignmentPane,
             consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
@@ -52,34 +52,22 @@ fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
 
 pub fn render(
     f: &mut Frame,
+    screen: &ScreenLayout,
     session: Option<&Session>,
     gff: Option<&Gff>,
     ui: &UiState,
-    frame_layout: &FrameLayout,
-    layout: &AppLayout,
 ) {
     if f.area().height == 0 {
         return;
     }
-    render_frame(
-        f,
-        frame_layout.top_status_area,
-        frame_layout.bottom_status_area,
-        session,
-        ui,
-    );
+    render_frame(f, screen, session, ui);
     let Some(session) = session else {
-        render_empty_state_with_ui(f, frame_layout.content_area, ui);
-        render_overlays(
-            f,
-            frame_layout.overlay_area,
-            frame_layout.input_area,
-            None,
-            ui,
-        );
+        render_empty_state_with_ui(f, screen.frame.content_area, ui);
+        render_overlays(f, screen, None, ui);
         return;
     };
-    let columns = session.window_columns(ui.window.columns.clone());
+    let (layout, window) = (&screen.app, &screen.window);
+    let columns = session.window_columns(window.columns.clone());
 
     if let Some(gff) = gff {
         f.render_widget(
@@ -93,7 +81,7 @@ pub fn render(
             GffPane {
                 gff,
                 session,
-                window: &ui.window,
+                window,
                 theme: &ui.theme,
             },
             layout.gff_pane,
@@ -103,7 +91,7 @@ pub fn render(
     f.render_widget(
         SequenceIdPane {
             session,
-            window: &ui.window,
+            window,
             header: layout.alignment_header,
             theme: &ui.theme,
         },
@@ -112,7 +100,7 @@ pub fn render(
     f.render_widget(
         AlignmentPane {
             session,
-            window: &ui.window,
+            window,
             columns: &columns,
             gff,
             header: layout.alignment_header,
@@ -135,15 +123,9 @@ pub fn render(
         },
         layout.consensus_alignment_pane,
     );
-    render_mouse_selection(f.buffer_mut(), layout, session, ui);
+    render_mouse_selection(f.buffer_mut(), screen, session, ui);
 
-    render_overlays(
-        f,
-        frame_layout.overlay_area,
-        frame_layout.input_area,
-        Some(session),
-        ui,
-    );
+    render_overlays(f, screen, Some(session), ui);
 }
 
 #[cfg(test)]
@@ -155,13 +137,12 @@ mod tests {
     use super::*;
     use crate::{
         core::session::{DiffMode, Position, ViewState},
-        test_utils::{buffer_text, full_window, session_with_ids, ui_state},
+        test_utils::{buffer_text, session_with_ids, ui_state},
         ui::{
             layers::{
                 notification::{Notification, NotificationLevel},
                 palette::CommandPaletteState,
             },
-            layout::AlignmentHeaderLayout,
             selection::Selection,
         },
     };
@@ -178,20 +159,18 @@ mod tests {
         session_with_ids(&sequences)
     }
 
-    fn loaded_ui(session: &Session) -> UiState {
+    fn loaded_ui() -> UiState {
         let mut ui = ui_state();
         ui.meta.loading_state = LoadingState::Loaded;
-        ui.window = full_window(session);
         ui
     }
 
     fn render_text(session: Option<&Session>, ui: &UiState) -> String {
         let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
-        let frame_layout = FrameLayout::new(AREA);
-        let layout = AppLayout::new(frame_layout.content_area, 0, AlignmentHeaderLayout::new(0));
+        let screen = ScreenLayout::new(AREA, session, None, &mut Position::default());
 
         terminal
-            .draw(|frame| render(frame, session, None, ui, &frame_layout, &layout))
+            .draw(|frame| render(frame, &screen, session, None, ui))
             .unwrap();
 
         buffer_text(terminal.backend().buffer(), AREA)
@@ -229,7 +208,7 @@ mod tests {
             b"CATCATCATCATCATCAT",
         ]);
 
-        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui(&session)));
+        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui()));
     }
 
     #[test]
@@ -240,7 +219,7 @@ mod tests {
             b"CATCATCATCATGATCAT",
             b"CATCATCATCATCATCAT",
         ]);
-        let mut ui = loaded_ui(&session);
+        let mut ui = loaded_ui();
         ui.selection = Some(selection(1..=2, 2..=8));
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));
@@ -261,13 +240,13 @@ mod tests {
             .unwrap();
         session.diff_mode = DiffMode::Reference;
 
-        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui(&session)));
+        insta::assert_snapshot!(render_text(Some(&session), &loaded_ui()));
     }
 
     #[test]
     fn notification() {
         let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
-        let mut ui = loaded_ui(&session);
+        let mut ui = loaded_ui();
         ui.notification = Some(Notification {
             level: NotificationLevel::Info,
             message: "Loaded alignment".to_string(),
@@ -279,7 +258,7 @@ mod tests {
     #[test]
     fn palette() {
         let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
-        let mut ui = loaded_ui(&session);
+        let mut ui = loaded_ui();
         ui.layers.open_palette(CommandPaletteState::empty());
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));

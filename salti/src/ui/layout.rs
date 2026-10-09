@@ -128,7 +128,7 @@ pub fn screen_rows(
     window.pinned.clone().map(Some).chain(divider).chain(main)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Window {
     pub pinned: Range<usize>,
     pub rows: Range<usize>,

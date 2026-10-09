@@ -10,7 +10,7 @@ use ratatui::{
 use crate::{
     core::session::Session,
     ui::{
-        layout::{AppLayout, screen_rows},
+        layout::{ScreenLayout, screen_rows},
         ui_state::UiState,
     },
 };
@@ -27,7 +27,7 @@ pub struct Selection {
 
 pub fn render_mouse_selection(
     buf: &mut Buffer,
-    layout: &AppLayout,
+    screen: &ScreenLayout,
     session: &Session,
     ui: &UiState,
 ) {
@@ -35,9 +35,9 @@ pub fn render_mouse_selection(
         return;
     };
 
-    let window = &ui.window;
-    let id_area = Block::bordered().inner(layout.sequence_id_pane);
-    let rows_area = layout.alignment_pane_sequence_rows;
+    let window = &screen.window;
+    let id_area = Block::bordered().inner(screen.app.sequence_id_pane);
+    let rows_area = screen.app.alignment_pane_sequence_rows;
 
     for (y, position) in (rows_area.y..).zip(screen_rows(session.layout(), window)) {
         if position.is_some_and(|position| selection.rows.contains(&position)) {
@@ -127,8 +127,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        test_utils::{pinned_session, ui_state},
-        ui::layout::{AlignmentHeaderLayout, Window},
+        test_utils::{pinned_session, screen, ui_state},
+        ui::layout::Window,
     };
 
     fn selection(
@@ -142,17 +142,16 @@ mod tests {
     }
 
     fn highlighted(session: &Session, window: Window, selection: Selection) -> Vec<String> {
-        let area = Rect::new(0, 0, 20, 12);
-        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::new(0));
+        let area = Rect::new(0, 0, 20, 15);
+        let screen = screen(area, 0, window);
         let mut ui = ui_state();
-        ui.window = window;
         ui.selection = Some(selection);
         let mut buf = Buffer::empty(area);
 
-        render_mouse_selection(&mut buf, &layout, session, &ui);
+        render_mouse_selection(&mut buf, &screen, session, &ui);
 
-        let id_x = Block::bordered().inner(layout.sequence_id_pane).x;
-        let rows_area = layout.alignment_pane_sequence_rows;
+        let id_x = Block::bordered().inner(screen.app.sequence_id_pane).x;
+        let rows_area = screen.app.alignment_pane_sequence_rows;
         let mark = |x, y| {
             if buf[(x, y)].modifier.contains(Modifier::REVERSED) {
                 '#'
