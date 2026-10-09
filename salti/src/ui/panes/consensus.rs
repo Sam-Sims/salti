@@ -93,6 +93,11 @@ fn shows_conservation_line(session: &Session) -> bool {
     session.grid().alignment_type() != libmsa::AlignmentType::Generic
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 fn spark(summary: &libmsa::ColumnSummary) -> &'static str {
     summary.conservation.map_or(" ", |value| {
         debug_assert!((0.0..=1.0).contains(&value));

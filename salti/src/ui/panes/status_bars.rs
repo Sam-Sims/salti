@@ -98,18 +98,13 @@ fn build_bottom_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<
 
 fn build_top_status_bar(session: Option<&Session>, ui: &UiState) -> Vec<Span<'static>> {
     let theme = &ui.theme.styles;
-    let file_name = ui
-        .meta
-        .input_path
-        .as_deref()
-        .map(|input| {
-            // for local paths, show just the file name for URLs makes more sense to show the full input.
-            std::path::Path::new(input)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(input)
-        })
-        .unwrap_or("Unknown");
+    let file_name = ui.meta.input_path.as_deref().map_or("Unknown", |input| {
+        // for local paths, show just the file name for URLs makes more sense to show the full input.
+        std::path::Path::new(input)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(input)
+    });
 
     let loading_status = match &ui.meta.loading_state {
         LoadingState::Idle => Span::styled("Status: Idle", theme.text_dim),

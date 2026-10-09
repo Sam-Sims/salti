@@ -66,6 +66,7 @@ pub fn fit(offset: &mut usize, visible: usize, total: usize) -> Range<usize> {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_field_names)]
 pub struct FrameLayout {
     pub top_status_area: Rect,
     pub overlay_area: Rect,

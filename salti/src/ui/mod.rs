@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)]
+
 pub(crate) mod features;
 pub(crate) mod layers;
 pub(crate) mod layout;

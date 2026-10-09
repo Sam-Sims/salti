@@ -81,6 +81,7 @@ pub fn render_mouse_selection(
     }
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
     let from = f32::from(from);
     let to = f32::from(to);

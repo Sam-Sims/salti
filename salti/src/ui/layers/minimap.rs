@@ -89,6 +89,7 @@ impl MinimapState {
         self.pan_drag.is_dragging()
     }
 
+    #[allow(clippy::unused_self)]
     pub fn contains_mouse(&self, mouse: MouseEvent, overlay_area: Rect) -> bool {
         let track_area = layout(overlay_area).track_area;
         track_area.contains((mouse.column, mouse.row).into())

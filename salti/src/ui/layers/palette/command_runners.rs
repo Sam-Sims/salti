@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use anyhow::format_err;
 use tracing::warn;
 
@@ -111,14 +113,11 @@ pub(super) fn run_jump_position(
     run_command("jump-position", arguments, || {
         let value = require_argument(arguments)?;
 
-        let Ok(position) = value.parse::<usize>() else {
-            return Err(format_err!("Invalid argument: expected a positive integer",));
+        let Ok(position) = value.parse::<NonZeroUsize>() else {
+            return Err(format_err!("Invalid argument: expected a positive integer"));
         };
-        if position == 0 {
-            return Err(format_err!("Invalid argument: expected a positive integer",));
-        }
 
-        Ok(Command::JumpToColumn(position - 1))
+        Ok(Command::JumpToColumn(position.get() - 1))
     })
 }
 

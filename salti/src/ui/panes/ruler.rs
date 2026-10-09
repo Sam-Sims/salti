@@ -35,7 +35,7 @@ impl Widget for Ruler<'_> {
         );
         Paragraph::new(vec![number_line, marker_line])
             .style(self.theme.styles.base_block)
-            .render(area, buf)
+            .render(area, buf);
     }
 }
 

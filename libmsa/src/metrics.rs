@@ -325,7 +325,7 @@ mod tests {
             alignment
                 .grid(AlignmentType::Dna)
                 .summaries(&[0, 1], &[], ConsensusMethod::Majority);
-        assert!(summaries.is_empty());
+        assert_eq!(summaries, []);
     }
 
     #[test]
