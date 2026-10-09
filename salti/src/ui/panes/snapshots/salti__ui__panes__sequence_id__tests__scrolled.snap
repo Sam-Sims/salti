@@ -1,6 +1,6 @@
 ---
 source: salti/src/ui/panes/sequence_id.rs
-expression: "render_text(&session, &window, AlignmentHeaderLayout::without_features())"
+expression: "render_text(&session, &window, AlignmentHeaderLayout::new(0))"
 ---
 ┌────────────────────────────┐
 │                            │

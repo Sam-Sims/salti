@@ -188,11 +188,7 @@ mod tests {
     fn render_text(session: Option<&Session>, ui: &UiState) -> String {
         let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
         let frame_layout = FrameLayout::new(AREA);
-        let layout = AppLayout::new(
-            frame_layout.content_area,
-            0,
-            AlignmentHeaderLayout::without_features(),
-        );
+        let layout = AppLayout::new(frame_layout.content_area, 0, AlignmentHeaderLayout::new(0));
 
         terminal
             .draw(|frame| render(frame, session, None, ui, &frame_layout, &layout))

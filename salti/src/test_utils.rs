@@ -1,9 +1,14 @@
+use std::ops::Range;
+
 use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
     cli::StartupState,
-    core::session::{Position, Session},
+    core::{
+        gff::{Feature, FeatureType, Gff, Strand},
+        session::{Position, Session},
+    },
     ui::{layout::Window, ui_state::UiState},
 };
 
@@ -59,6 +64,21 @@ pub(crate) fn pinned_session(row_count: usize, pinned: &[usize]) -> Session {
         })
         .unwrap();
     session
+}
+
+pub(crate) fn genes(ranges: &[Range<usize>]) -> Gff {
+    Gff {
+        features: ranges
+            .iter()
+            .enumerate()
+            .map(|(i, range)| Feature {
+                name: format!("gene{i}"),
+                kind: FeatureType::Gene,
+                range: range.clone(),
+                strand: Strand::Forward,
+            })
+            .collect(),
+    }
 }
 
 pub(crate) fn ui_state() -> UiState {

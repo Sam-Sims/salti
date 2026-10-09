@@ -284,7 +284,7 @@ mod tests {
         let app_layout = AppLayout::new(
             frame_layout.content_area,
             gff_height,
-            AlignmentHeaderLayout::without_features(),
+            AlignmentHeaderLayout::new(0),
         );
         (frame_layout, app_layout)
     }

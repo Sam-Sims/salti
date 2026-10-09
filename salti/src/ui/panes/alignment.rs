@@ -14,7 +14,7 @@ use crate::{
         session::{DiffMode, Session},
     },
     ui::{
-        layout::{AlignmentHeaderLayout, Window, screen_rows},
+        layout::{AlignmentHeaderLayout, RULER_HEIGHT_ROWS, Window, screen_rows},
         panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
         rows::{render_column_scrollbar, stretch},
         ui_state::ThemeState,
@@ -37,7 +37,7 @@ impl Widget for AlignmentPane<'_> {
 
         let [local_feature_area, ruler_area, sequence_rows_area] = inner_area.layout(&vertical![
             ==self.header.local_feature_rows,
-            ==self.header.ruler_rows,
+            ==RULER_HEIGHT_ROWS,
             *=1
         ]);
 
@@ -148,9 +148,9 @@ mod tests {
     }
 
     fn render_text(session: &Session, gff: Option<&Gff>, window: &Window, area: Rect) -> String {
-        let header = gff.map_or(AlignmentHeaderLayout::without_features(), |gff| {
+        let header = gff.map_or(AlignmentHeaderLayout::new(0), |gff| {
             let rows = local_feature_row_count(gff, session, &window.columns);
-            AlignmentHeaderLayout::with_features(u16::try_from(rows).unwrap())
+            AlignmentHeaderLayout::new(u16::try_from(rows).unwrap())
         });
         let layout = AppLayout::new(area, 0, header);
         let columns = session.window_columns(window.columns.clone());

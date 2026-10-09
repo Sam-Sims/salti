@@ -28,7 +28,7 @@ impl Widget for SequenceIdPane<'_> {
 
         let (layout, theme) = (self.session.layout(), self.theme);
         let mut lines = vec![Line::from(" "); usize::from(self.header.height())];
-        if self.header.ruler_rows > 1 && !self.window.pinned.is_empty() {
+        if !self.window.pinned.is_empty() {
             lines[usize::from(self.header.local_feature_rows) + 1] =
                 Line::from("Pinned sequences:".set_style(theme.styles.text_muted));
         }
@@ -106,7 +106,7 @@ mod tests {
         insta::assert_snapshot!(render_text(
             &session,
             &full_window(&session),
-            AlignmentHeaderLayout::without_features()
+            AlignmentHeaderLayout::new(0)
         ));
     }
 
@@ -117,7 +117,7 @@ mod tests {
         insta::assert_snapshot!(render_text(
             &session,
             &full_window(&session),
-            AlignmentHeaderLayout::with_features(2)
+            AlignmentHeaderLayout::new(2)
         ));
     }
 
@@ -135,7 +135,7 @@ mod tests {
         insta::assert_snapshot!(render_text(
             &session,
             &full_window(&session),
-            AlignmentHeaderLayout::without_features()
+            AlignmentHeaderLayout::new(0)
         ));
     }
 
@@ -154,7 +154,7 @@ mod tests {
         insta::assert_snapshot!(render_text(
             &session,
             &window,
-            AlignmentHeaderLayout::without_features()
+            AlignmentHeaderLayout::new(0)
         ));
     }
 }

@@ -83,25 +83,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        core::gff::{Feature, FeatureType, Strand},
-        test_utils::session,
-    };
-
-    fn genes(ranges: &[Range<usize>]) -> Gff {
-        Gff {
-            features: ranges
-                .iter()
-                .enumerate()
-                .map(|(i, range)| Feature {
-                    name: format!("gene{i}"),
-                    kind: FeatureType::Gene,
-                    range: range.clone(),
-                    strand: Strand::Forward,
-                })
-                .collect(),
-        }
-    }
+    use crate::test_utils::{genes, session};
 
     fn display(gff: &Gff) -> Vec<DisplayFeature<'_>> {
         gff.features

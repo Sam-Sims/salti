@@ -143,7 +143,7 @@ mod tests {
 
     fn highlighted(session: &Session, window: Window, selection: Selection) -> Vec<String> {
         let area = Rect::new(0, 0, 20, 12);
-        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
+        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::new(0));
         let mut ui = ui_state();
         ui.window = window;
         ui.selection = Some(selection);

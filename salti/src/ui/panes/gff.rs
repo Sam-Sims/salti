@@ -276,7 +276,7 @@ mod tests {
     use super::*;
     use crate::{
         core::gff::{FeatureType, Strand},
-        test_utils::{buffer_text, session},
+        test_utils::{buffer_text, genes, session},
     };
 
     fn feature(name: &str, range: Range<usize>, strand: Strand) -> Feature {
@@ -285,16 +285,6 @@ mod tests {
             kind: FeatureType::Gene,
             range,
             strand,
-        }
-    }
-
-    fn genes(ranges: &[Range<usize>]) -> Gff {
-        Gff {
-            features: ranges
-                .iter()
-                .enumerate()
-                .map(|(i, range)| feature(&format!("gene{i}"), range.clone(), Strand::Forward))
-                .collect(),
         }
     }
 

@@ -118,7 +118,7 @@ mod tests {
     const CAT: &[u8] = b"CATCATCATCATCATCAT";
 
     fn render_text(session: &Session, area: Rect) -> String {
-        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
+        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::new(0));
         let columns = session.window_columns(full_window(session).columns);
         let theme = ThemeState::default();
         let mut buf = Buffer::empty(area);

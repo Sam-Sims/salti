@@ -104,11 +104,8 @@ mod tests {
 
     fn layouts() -> (FrameLayout, AppLayout) {
         let frame_layout = FrameLayout::new(Rect::new(0, 0, 80, 24));
-        let app_layout = AppLayout::new(
-            frame_layout.content_area,
-            5,
-            AlignmentHeaderLayout::without_features(),
-        );
+        let app_layout =
+            AppLayout::new(frame_layout.content_area, 5, AlignmentHeaderLayout::new(0));
         (frame_layout, app_layout)
     }
 
