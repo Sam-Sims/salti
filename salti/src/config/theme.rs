@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 use libmsa::{AlignmentType, residue};
 use ratatui::style::{Color, Style};
 
