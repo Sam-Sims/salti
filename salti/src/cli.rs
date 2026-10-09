@@ -1,9 +1,10 @@
-use clap::Parser;
+use clap::{Parser, builder::FalseyValueParser};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct StartupState {
     /// Input source (file path, URL, or SSH path)
     pub file_path: Option<String>,
+    pub update_check: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -20,12 +21,17 @@ pub struct Cli {
     /// Enable debug logging to `salti.log`
     #[arg(long)]
     pub debug: bool,
+
+    /// Don't check crates.io for a newer version at startup
+    #[arg(long, env = "SALTI_SKIP_UPDATE_CHECK", value_parser = FalseyValueParser::new())]
+    pub skip_update_check: bool,
 }
 
 impl Cli {
-    pub fn load_startup_sate(self) -> StartupState {
+    pub fn startup_state(self) -> StartupState {
         StartupState {
             file_path: self.file,
+            update_check: !self.skip_update_check,
         }
     }
 }
