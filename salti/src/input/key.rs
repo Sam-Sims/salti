@@ -25,17 +25,10 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent};
 
     use super::*;
-    use crate::{cli::StartupState, ui::layers::palette::CommandPaletteState};
-
-    fn ui_state() -> UiState {
-        UiState::new(StartupState {
-            file_path: None,
-            initial_position: 0,
-        })
-    }
+    use crate::{test_utils::ui_state, ui::layers::palette::CommandPaletteState};
 
     #[test]
-    fn global_keys_return_binding_command() {
+    fn handle_key_event_uses_keybindings() {
         let mut ui = ui_state();
 
         let commands = handle_key_event(&mut ui, KeyEvent::from(KeyCode::Char('q')));
@@ -44,7 +37,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_keys_are_routed_to_palette_state() {
+    fn handle_key_event_sends_keys_to_open_palette() {
         let mut ui = ui_state();
         ui.layers.open_palette(CommandPaletteState::empty());
 
