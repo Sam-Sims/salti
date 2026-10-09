@@ -119,195 +119,109 @@ fn shader(buf: &mut Buffer, area: Rect, tint: Color, alpha: f32) {
 
 #[cfg(test)]
 mod tests {
+    use std::ops;
+
+    use ratatui::style::Modifier;
+    use rstest::rstest;
 
     use super::*;
-    use crate::core::{Viewport, model::AlignmentModel};
+    use crate::{
+        test_utils::{pinned_session, ui_state},
+        ui::layout::{AlignmentHeaderLayout, Window},
+    };
 
-    fn raw(id: &str, sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: id.to_string(),
-            residues: sequence.to_vec(),
+    fn selection(
+        rows: ops::RangeInclusive<usize>,
+        columns: ops::RangeInclusive<usize>,
+    ) -> Selection {
+        Selection {
+            rows: rows.into(),
+            columns: columns.into(),
         }
     }
 
-    fn alignment_model(ids: &[&str]) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(ids.iter().map(|id| raw(id, b"ACGT")))
-            .expect("test alignment should be valid");
-        AlignmentModel::new(alignment).expect("base alignment should be accepted")
-    }
+    fn highlighted(session: &Session, window: Window, selection: Selection) -> Vec<String> {
+        let area = Rect::new(0, 0, 20, 12);
+        let layout = AppLayout::new(area, 0, AlignmentHeaderLayout::without_features());
+        let mut ui = ui_state();
+        ui.window = window;
+        ui.selection = Some(selection);
+        let mut buf = Buffer::empty(area);
 
-    #[test]
-    fn selection_row_bounds_normalises_order() {
-        let selection = MouseSelection {
-            sequence_id: 5,
-            column: 0,
-            end_sequence_id: 2,
-            end_column: 3,
+        render_mouse_selection(&mut buf, &layout, session, &ui);
+
+        let id_x = Block::bordered().inner(layout.sequence_id_pane).x;
+        let rows_area = layout.alignment_pane_sequence_rows;
+        let mark = |x, y| {
+            if buf[(x, y)].modifier.contains(Modifier::REVERSED) {
+                '#'
+            } else {
+                '.'
+            }
         };
-        assert_eq!(selection_row_bounds(selection), (2, 5));
-
-        let selection = MouseSelection {
-            sequence_id: 1,
-            column: 0,
-            end_sequence_id: 4,
-            end_column: 3,
-        };
-        assert_eq!(selection_row_bounds(selection), (1, 4));
+        (rows_area.top()..rows_area.bottom())
+            .map(|y| {
+                let mut line = String::from(mark(id_x, y));
+                line.push('|');
+                line.extend((rows_area.left()..rows_area.right()).map(|x| mark(x, y)));
+                line
+            })
+            .collect()
     }
 
-    #[test]
-    fn selection_visible_col_range_maps_absolute_to_relative() {
-        let model = alignment_model(&["s1", "s2"]);
-        // Unfiltered: absolute == relative for columns.
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 1,
-            end_sequence_id: 0,
-            end_column: 2,
-        };
+    #[rstest]
+    #[case::rows_and_columns(
+        &[],
+        Window { rows: 0..4, columns: 0..15, ..Window::default() },
+        selection(1..=2, 2..=3),
+        &[
+            ".|..##...........",
+            "#|###############",
+            "#|###############",
+            ".|..##...........",
+        ],
+    )]
+    #[case::scrolled(
+        &[],
+        Window { rows: 2..6, columns: 3..18, ..Window::default() },
+        selection(1..=3, 4..=4),
+        &[
+            "#|###############",
+            "#|###############",
+            ".|.#.............",
+            ".|.#.............",
+        ],
+    )]
+    #[case::columns_outside_window(
+        &[],
+        Window { rows: 0..4, columns: 3..18, ..Window::default() },
+        selection(0..=0, 0..=1),
+        &[
+            "#|###############",
+            ".|...............",
+            ".|...............",
+            ".|...............",
+        ],
+    )]
+    #[case::pinned_and_main_skip_divider(
+        &[3],
+        Window { pinned: 0..1, rows: 0..2, columns: 0..15, ..Window::default() },
+        selection(0..=1, 0..=0),
+        &[
+            "#|###############",
+            ".|#..............",
+            "#|###############",
+            ".|#..............",
+        ],
+    )]
+    fn render_mouse_selection_works(
+        #[case] pinned: &[usize],
+        #[case] window: Window,
+        #[case] selection: Selection,
+        #[case] expected: &[&str],
+    ) {
+        let session = pinned_session(6, pinned);
 
-        let range = selection_visible_col_range(selection, &model, &(0..4));
-        assert_eq!(range, Some(1..3));
-    }
-
-    #[test]
-    fn selection_visible_col_range_returns_none_when_outside_viewport() {
-        let model = alignment_model(&["s1", "s2"]);
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 10,
-            end_sequence_id: 0,
-            end_column: 20,
-        };
-
-        let range = selection_visible_col_range(selection, &model, &(0..4));
-        assert!(range.is_none());
-    }
-
-    #[test]
-    fn translated_selection_visible_col_range_expands_to_overlapping_codon() {
-        let alignment =
-            libmsa::Alignment::new(vec![raw("s1", b"ATGAAATTT"), raw("s2", b"ATGAAATTT")])
-                .expect("alignment should be valid");
-        let mut model = AlignmentModel::new(alignment).expect("alignment model should be accepted");
-        model
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 1,
-            end_sequence_id: 0,
-            end_column: 1,
-        };
-
-        let range = selection_visible_col_range(selection, &model, &(0..9));
-        assert_eq!(range, Some(0..3));
-    }
-
-    #[test]
-    fn translated_selection_visible_col_range_clips_to_visible_window() {
-        let alignment =
-            libmsa::Alignment::new(vec![raw("s1", b"ATGAAATTT"), raw("s2", b"ATGAAATTT")])
-                .expect("alignment should be valid");
-        let mut model = AlignmentModel::new(alignment).expect("alignment model should be accepted");
-        model
-            .set_translation(Some(libmsa::ReadingFrame::Frame1))
-            .expect("translation should succeed");
-
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 1,
-            end_sequence_id: 0,
-            end_column: 1,
-        };
-
-        let range = selection_visible_col_range(selection, &model, &(1..5));
-        assert_eq!(range, Some(1..3));
-    }
-
-    #[test]
-    fn selection_visible_col_range_uses_absolute_columns_after_gap_filtering() {
-        let alignment = libmsa::Alignment::new(vec![raw("s1", b"A--T"), raw("s2", b"A--T")])
-            .expect("alignment should be valid");
-        let mut model = AlignmentModel::new(alignment).expect("alignment model should be accepted");
-        model
-            .set_gap_filter(Some(0.0))
-            .expect("gap filter should succeed");
-
-        let selection = MouseSelection {
-            sequence_id: 0,
-            column: 0,
-            end_sequence_id: 0,
-            end_column: 3,
-        };
-
-        let range = selection_visible_col_range(selection, &model, &(0..2));
-        assert_eq!(range, Some(0..2));
-    }
-
-    #[test]
-    fn selection_point_crosshair_maps_to_absolute_filtered_column() {
-        let alignment = libmsa::Alignment::new(vec![raw("s1", b"A--T"), raw("s2", b"A--T")])
-            .expect("alignment should be valid");
-        let mut model = AlignmentModel::new(alignment).expect("alignment model should be accepted");
-        model
-            .set_gap_filter(Some(0.0))
-            .expect("gap filter should succeed");
-
-        let mut viewport = Viewport::default();
-        viewport.update_dimensions(2, 2, 2);
-        viewport.set_bounds(2, 2, 2);
-
-        let area = Rect::new(0, 0, 2, 2);
-        let result = selection_point_crosshair(&model, &viewport, area, 1, 0);
-        assert_eq!(result, Some((0, 3)));
-    }
-
-    #[test]
-    fn crosshair_returns_none_outside_area() {
-        let model = alignment_model(&["s1", "s2", "s3"]);
-        let mut viewport = Viewport::default();
-        viewport.update_dimensions(4, 3, 2);
-        viewport.set_bounds(3, 4, 2);
-
-        let area = Rect::new(10, 10, 4, 3);
-        // Click outside area.
-        assert!(selection_point_crosshair(&model, &viewport, area, 5, 5).is_none());
-    }
-
-    #[test]
-    fn crosshair_maps_scroll_band_correctly() {
-        let model = alignment_model(&["s1", "s2", "s3"]);
-        let mut viewport = Viewport::default();
-        viewport.update_dimensions(4, 3, 2);
-        viewport.set_bounds(3, 4, 2);
-
-        let area = Rect::new(0, 0, 4, 3);
-        let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
-        assert_eq!(result, Some((0, 0)));
-
-        let result = selection_point_crosshair(&model, &viewport, area, 3, 2);
-        assert_eq!(result, Some((2, 3)));
-    }
-
-    #[test]
-    fn crosshair_handles_pinned_band() {
-        let mut model = alignment_model(&["s1", "s2", "s3", "s4"]);
-        model.pin(0).expect("should pin");
-
-        let mut viewport = Viewport::default();
-        viewport.update_dimensions(4, 2, 2);
-        viewport.set_bounds(3, 4, 2);
-
-        let area = Rect::new(0, 0, 4, 4);
-        let result = selection_point_crosshair(&model, &viewport, area, 0, 0);
-        assert_eq!(result, Some((0, 0)));
-
-        let result = selection_point_crosshair(&model, &viewport, area, 0, 1);
-        assert!(result.is_none());
-
-        let result = selection_point_crosshair(&model, &viewport, area, 0, 2);
-        assert_eq!(result, Some((1, 0)));
+        assert_eq!(highlighted(&session, window, selection), expected);
     }
 }

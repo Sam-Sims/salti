@@ -58,3 +58,22 @@ pub fn truncate_label(value: &str, width: usize) -> String {
     }
     text
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::fits("abc", 5, "abc")]
+    #[case::exact_fit("abcde", 5, "abcde")]
+    #[case::ellipsis("abcdefgh", 6, "abc...")]
+    #[case::too_narrow_for_ellipsis("abcdef", 3, "abc")]
+    #[case::zero_width("abc", 0, "")]
+    #[case::wide_characters("日本語テキスト", 7, "日本...")]
+    #[case::wide_character_not_split("日本語", 5, "日...")]
+    fn truncate_label_works(#[case] value: &str, #[case] width: usize, #[case] expected: &str) {
+        assert_eq!(truncate_label(value, width), expected);
+    }
+}

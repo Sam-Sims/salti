@@ -98,101 +98,95 @@ pub(crate) fn render_features(
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+    use rstest::rstest;
+
     use super::*;
-    use crate::core::gff::Strand;
+    use crate::{
+        core::{
+            gff::FeatureType,
+            session::{Position, ViewState},
+        },
+        test_utils::session,
+    };
 
-    fn feature(start: usize, end: usize) -> Feature {
-        Feature {
-            name: "gene".to_owned(),
-            kind: crate::core::gff::FeatureType::Gene,
-            range: start..end + 1,
-            strand: Strand::Forward,
+    type Change = fn(&mut ViewState) -> Result<()>;
+
+    fn gff(ranges: &[Range<usize>]) -> Gff {
+        Gff {
+            features: ranges
+                .iter()
+                .map(|range| Feature {
+                    name: format!("gene{}", range.start),
+                    kind: FeatureType::Gene,
+                    range: range.clone(),
+                    strand: Strand::Forward,
+                })
+                .collect(),
         }
     }
 
-    fn raw(sequence: &[u8]) -> libmsa::Sequence {
-        libmsa::Sequence {
-            id: "seq".to_owned(),
-            residues: sequence.to_vec(),
-        }
+    fn gap_filter(state: &mut ViewState) -> Result<()> {
+        state.set_gap_filter(Some(0.0))
     }
 
-    fn model_with_sequence(sequence: &[u8]) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![raw(sequence)]).unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn protein_view_frame3(state: &mut ViewState) -> Result<()> {
+        state.frame = libmsa::ReadingFrame::Frame3;
+        state.toggle_protein_view()
     }
 
-    fn model_with_len(len: usize) -> AlignmentModel {
-        let alignment = libmsa::Alignment::new(vec![libmsa::Sequence {
-            id: "seq".to_owned(),
-            residues: vec![b'A'; len],
-        }])
-        .unwrap();
-        AlignmentModel::new(alignment).unwrap()
+    fn shown_columns(sequence: &[u8], change: Change, feature: Range<usize>) -> Vec<Range<usize>> {
+        let mut session = session(&[sequence]);
+        session.update(Position::default(), change).unwrap();
+        let gff = gff(&[feature]);
+
+        display_features(&gff, &session)
+            .into_iter()
+            .map(|display| display.columns)
+            .collect()
     }
 
-    #[test]
-    fn filtered_nt_collapses_hidden_cols() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
+    #[rstest]
+    #[case::plain(b"ACGTACGT", |_: &mut ViewState| Ok(()), 2..5, 2..5)]
+    #[case::partly_hidden_shrinks(b"-A-CC--G", gap_filter, 2..7, 1..3)]
+    #[case::clipped_past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 6..11, 6..8)]
+    #[case::protein_view(b"ATGAAATTTCC", ViewState::toggle_protein_view, 3..9, 1..3)]
+    #[case::protein_view_after_offset(b"AAATGAAATTT", protein_view_frame3, 0..5, 0..1)]
+    fn display_features_works(
+        #[case] sequence: &[u8],
+        #[case] change: Change,
+        #[case] feature: Range<usize>,
+        #[case] expected: Range<usize>,
+    ) {
+        assert_eq!(shown_columns(sequence, change, feature), [expected]);
+    }
 
-        assert!(model.view().absolute_column_ids().eq([1, 3, 4, 7]));
+    #[rstest]
+    #[case::hidden_by_filter(b"-A-CC--G", gap_filter, 5..7)]
+    #[case::past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 10..12)]
+    #[case::before_frame_offset(b"AAATGAAATTT", protein_view_frame3, 0..2)]
+    fn display_features_hides(
+        #[case] sequence: &[u8],
+        #[case] change: Change,
+        #[case] feature: Range<usize>,
+    ) {
         assert_eq!(
-            mapping.map_feature(model.view(), &feature(2, 6)),
-            Some(1..3)
+            shown_columns(sequence, change, feature),
+            Vec::<Range<usize>>::new()
         );
     }
 
     #[test]
-    fn filtered_nt_hides_feature() {
-        let mut model = model_with_sequence(b"-A-CC--G");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::for_alignment(&model);
+    fn display_features_colours_only_shown_features() {
+        let mut session = session(&[b"-A-CC--G"]);
+        session.update(Position::default(), gap_filter).unwrap();
+        let gff = gff(&[5..7, 1..2, 3..5]);
 
-        assert_eq!(mapping.map_feature(model.view(), &feature(5, 6)), None);
-    }
+        let colours: Vec<(usize, usize)> = display_features(&gff, &session)
+            .into_iter()
+            .map(|display| (display.feature.range.start, display.colour_idx))
+            .collect();
 
-    #[test]
-    fn filtered_protein_projects_cols() {
-        let mut model = model_with_sequence(b"M-M-M");
-        model.set_gap_filter(Some(0.0)).unwrap();
-        let mapping = FeatureMap::protein(5, 0);
-
-        assert!(model.view().absolute_column_ids().eq([0, 2, 4]));
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(3, 8)),
-            Some(1..2)
-        );
-    }
-
-    #[test]
-    fn protein_clips_before_frame() {
-        let model = model_with_len(5);
-        let mapping = FeatureMap::protein(5, 2);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(0, 4)),
-            Some(0..1)
-        );
-    }
-
-    #[test]
-    fn mapping_clips_past_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(
-            mapping.map_feature(model.view(), &feature(6, 10)),
-            Some(6..8)
-        );
-    }
-
-    #[test]
-    fn mapping_hides_after_alignment_end() {
-        let model = model_with_len(8);
-        let mapping = FeatureMap::for_alignment(&model);
-
-        assert_eq!(mapping.map_feature(model.view(), &feature(10, 12)), None);
+        assert_eq!(colours, [(1, 0), (3, 1)]);
     }
 }

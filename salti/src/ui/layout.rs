@@ -157,3 +157,68 @@ pub fn gff_pane_height(feature_row_count: usize) -> u16 {
     let inner = u16::try_from(feature_row_count).unwrap_or(u16::MAX.saturating_sub(3));
     inner.saturating_add(3)
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::test_utils::pinned_session;
+
+    #[rstest]
+    #[case::no_pins(&[], 0..0, 1..3, &[Some(1), Some(2)])]
+    #[case::pinned_then_divider_then_main(&[5, 4], 0..2, 0..2, &[Some(0), Some(1), None, Some(2), Some(3)])]
+    #[case::scrolled(&[5, 4], 1..2, 1..3, &[Some(1), None, Some(3), Some(4)])]
+    #[case::no_pinned_space_no_divider(&[5, 4], 0..0, 0..2, &[Some(2), Some(3)])]
+    fn screen_rows_works(
+        #[case] pinned: &[usize],
+        #[case] window_pinned: Range<usize>,
+        #[case] window_rows: Range<usize>,
+        #[case] expected: &[Option<usize>],
+    ) {
+        let session = pinned_session(6, pinned);
+        let window = Window {
+            pinned: window_pinned,
+            rows: window_rows,
+            ..Window::default()
+        };
+
+        assert_eq!(
+            screen_rows(session.layout(), &window).collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::from_start(0, 5, 10, 0..5)]
+    #[case::scrolled(3, 5, 10, 3..8)]
+    #[case::clamped_to_last_page(8, 5, 10, 5..10)]
+    #[case::fewer_than_visible(2, 5, 3, 0..3)]
+    fn fit_works(
+        #[case] offset: usize,
+        #[case] visible: usize,
+        #[case] total: usize,
+        #[case] expected: Range<usize>,
+    ) {
+        let mut offset = offset;
+
+        assert_eq!(fit(&mut offset, visible, total), expected);
+        assert_eq!(offset, expected.start);
+    }
+
+    #[rstest]
+    #[case::no_items(4, 5, 0)]
+    #[case::no_space(4, 0, 10)]
+    fn fit_is_empty(#[case] offset: usize, #[case] visible: usize, #[case] total: usize) {
+        let mut offset = offset;
+
+        assert!(fit(&mut offset, visible, total).is_empty());
+    }
+
+    #[rstest]
+    #[case::no_features(0, 0)]
+    #[case::adds_borders_and_navigation_row(2, 5)]
+    fn gff_pane_height_works(#[case] feature_rows: usize, #[case] expected: u16) {
+        assert_eq!(gff_pane_height(feature_rows), expected);
+    }
+}
