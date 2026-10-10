@@ -34,6 +34,7 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
 human-panic = "2"
 noodles-gff = "0.56.0"
+strum = { version = "0.28", features = ["derive"] }
 
 [dev-dependencies]
 insta = "1.46.3"
