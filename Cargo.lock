@@ -1550,6 +1550,7 @@ version = "0.3.0"
 dependencies = [
  "rayon",
  "rstest",
+ "strum",
  "thiserror 2.0.18",
 ]
 
@@ -2771,6 +2772,7 @@ dependencies = [
  "rstest",
  "semver",
  "serde",
+ "strum",
  "tempfile",
  "tokio",
  "tokio-stream",

@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 rayon = "1.11"
+strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0.18"
 
 [dev-dependencies]
