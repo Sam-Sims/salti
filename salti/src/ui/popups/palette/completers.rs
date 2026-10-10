@@ -1,7 +1,9 @@
 use std::{fs, path::Path};
 
+use strum::VariantArray;
+
 use super::names;
-use crate::{config::theme::ThemeId, core::session::DiffMode, ui::popups::Context};
+use crate::ui::popups::Context;
 
 pub(super) fn sequences(ctx: &Context, _: &str) -> Vec<String> {
     ctx.session
@@ -43,31 +45,8 @@ pub(super) fn constant_percentages(_: &Context, _: &str) -> Vec<String> {
     ["0", "70", "90", "95", "100"].map(str::to_string).to_vec()
 }
 
-pub(super) fn frames(_: &Context, _: &str) -> Vec<String> {
-    libmsa::ReadingFrame::all()
-        .map(|frame| frame.name().to_string())
-        .to_vec()
-}
-
-pub(super) fn consensus_methods(_: &Context, _: &str) -> Vec<String> {
-    libmsa::ConsensusMethod::all()
-        .map(|method| method.name().to_string())
-        .to_vec()
-}
-
-pub(super) fn diff_modes(_: &Context, _: &str) -> Vec<String> {
-    DiffMode::all().map(|mode| mode.name().to_string()).to_vec()
-}
-
-pub(super) fn themes(_: &Context, _: &str) -> Vec<String> {
-    ThemeId::ALL
-        .iter()
-        .map(|theme| theme.name().to_string())
-        .collect()
-}
-
-pub(super) fn sequence_types(_: &Context, _: &str) -> Vec<String> {
-    ["dna", "protein", "generic"].map(str::to_string).to_vec()
+pub(super) fn choices<T: VariantArray + ToString>(_: &Context, _: &str) -> Vec<String> {
+    T::VARIANTS.iter().map(ToString::to_string).collect()
 }
 
 pub(super) fn filter_matches(ctx: &Context, argument: &str) -> Vec<String> {
@@ -149,7 +128,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::test_utils::{genes, pinned_session, with_context};
+    use crate::{
+        core::session::DiffMode,
+        test_utils::{genes, pinned_session, with_context},
+    };
 
     type CompleterFn = fn(&Context, &str) -> Vec<String>;
 
@@ -166,6 +148,7 @@ mod tests {
     #[case::features_in_gff_order(features, "", &["gene0", "gene1"])]
     #[case::filter_matches_all_without_pattern(filter_matches, "", &["s1", "s0", "s2"])]
     #[case::filter_matches_regex(filter_matches, "s[02]", &["s0", "s2"])]
+    #[case::choices_in_order(choices::<DiffMode>, "", &["off", "reference", "consensus"])]
     fn completer_works(
         #[case] completer: CompleterFn,
         #[case] argument: &str,

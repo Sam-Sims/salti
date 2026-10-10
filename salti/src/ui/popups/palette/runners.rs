@@ -1,11 +1,11 @@
 #![allow(clippy::unnecessary_wraps)]
 
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, str::FromStr};
 
 use anyhow::{Context as _, Result, format_err};
 
 use super::row_named;
-use crate::{command::Command, core::session::DiffMode, ui::popups::Context};
+use crate::{command::Command, ui::popups::Context};
 
 pub(super) fn jump_position(_: &Context, argument: &str) -> Result<Command> {
     let position = argument
@@ -64,35 +64,32 @@ pub(super) fn set_reference(ctx: &Context, argument: &str) -> Result<Command> {
 }
 
 pub(super) fn diff_mode(_: &Context, argument: &str) -> Result<Command> {
-    Ok(Command::SetDiffMode(argument.parse::<DiffMode>()?))
+    Ok(Command::SetDiffMode(parse_choice(argument, "diff mode")?))
 }
 
 pub(super) fn consensus_method(_: &Context, argument: &str) -> Result<Command> {
-    let method = argument
-        .parse()
-        .map_err(|()| format_err!("unknown consensus method '{argument}'"))?;
-    Ok(Command::SetConsensusMethod(method))
+    Ok(Command::SetConsensusMethod(parse_choice(
+        argument,
+        "consensus method",
+    )?))
 }
 
 pub(super) fn translation_frame(_: &Context, argument: &str) -> Result<Command> {
-    let frame = argument
-        .parse()
-        .map_err(|()| format_err!("unknown reading frame '{argument}'"))?;
-    Ok(Command::SetTranslationFrame(frame))
+    Ok(Command::SetTranslationFrame(parse_choice(
+        argument,
+        "reading frame",
+    )?))
 }
 
 pub(super) fn theme(_: &Context, argument: &str) -> Result<Command> {
-    let theme = argument
-        .parse()
-        .map_err(|()| format_err!("unknown theme '{argument}'"))?;
-    Ok(Command::SetTheme(theme))
+    Ok(Command::SetTheme(parse_choice(argument, "theme")?))
 }
 
 pub(super) fn sequence_type(_: &Context, argument: &str) -> Result<Command> {
-    let alignment_type = argument
-        .parse::<libmsa::AlignmentType>()
-        .map_err(|_| format_err!("unknown sequence type '{argument}'"))?;
-    Ok(Command::SetActiveType(alignment_type))
+    Ok(Command::SetActiveType(parse_choice(
+        argument,
+        "sequence type",
+    )?))
 }
 
 pub(super) fn load_alignment(_: &Context, argument: &str) -> Result<Command> {
@@ -103,6 +100,12 @@ pub(super) fn load_gff(_: &Context, argument: &str) -> Result<Command> {
     Ok(Command::LoadGff {
         path: argument.to_string(),
     })
+}
+
+fn parse_choice<T: FromStr>(argument: &str, what: &str) -> Result<T> {
+    argument
+        .parse()
+        .map_err(|_| format_err!("unknown {what} '{argument}'"))
 }
 
 fn parse_percentage(argument: &str) -> Result<Option<f64>> {
@@ -119,7 +122,11 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::test_utils::{genes, pinned_session, with_context};
+    use crate::{
+        config::theme::ThemeId,
+        core::session::DiffMode,
+        test_utils::{genes, pinned_session, with_context},
+    };
 
     type Runner = fn(&Context, &str) -> Result<Command>;
 
@@ -140,6 +147,23 @@ mod tests {
     #[case::filter_gaps(filter_gaps, "25", Command::SetGapFilter(Some(0.25)))]
     #[case::filter_gaps_zero_clears(filter_gaps, "0", Command::SetGapFilter(None))]
     #[case::filter_constant(filter_constant, "100", Command::SetConstantFilter(Some(1.0)))]
+    #[case::diff_mode(diff_mode, "reference", Command::SetDiffMode(DiffMode::Reference))]
+    #[case::consensus_method(
+        consensus_method,
+        "majority",
+        Command::SetConsensusMethod(libmsa::ConsensusMethod::Majority)
+    )]
+    #[case::translation_frame(
+        translation_frame,
+        "2",
+        Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2)
+    )]
+    #[case::theme(theme, "tokyo-night", Command::SetTheme(ThemeId::TokyoNight))]
+    #[case::sequence_type(
+        sequence_type,
+        "protein",
+        Command::SetActiveType(libmsa::AlignmentType::Protein)
+    )]
     fn runner_works(#[case] runner: Runner, #[case] argument: &str, #[case] expected: Command) {
         assert_eq!(run(runner, argument).unwrap(), expected);
     }
@@ -155,6 +179,7 @@ mod tests {
     #[case::filter_gaps_above_range(filter_gaps, "101")]
     #[case::filter_gaps_below_range(filter_gaps, "-1")]
     #[case::filter_gaps_not_a_number(filter_gaps, "NaN")]
+    #[case::unknown_choice(diff_mode, "sideways")]
     fn runner_rejects(#[case] runner: Runner, #[case] argument: &str) {
         assert!(run(runner, argument).is_err());
     }

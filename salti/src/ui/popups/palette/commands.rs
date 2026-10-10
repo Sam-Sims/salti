@@ -1,7 +1,10 @@
 use anyhow::Result;
+use libmsa::{AlignmentType, ConsensusMethod, ReadingFrame};
 
 use super::{completers, runners};
-use crate::{command::Command, ui::popups::Context};
+use crate::{
+    command::Command, config::theme::ThemeId, core::session::DiffMode, ui::popups::Context,
+};
 
 pub(super) struct PaletteCommand {
     pub(super) name: &'static str,
@@ -148,7 +151,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         doc: "Set diff highlighting mode.",
         action: Action::Required {
             run: runners::diff_mode,
-            completer: Some(completers::diff_modes),
+            completer: Some(completers::choices::<DiffMode>),
         },
     },
     PaletteCommand {
@@ -166,7 +169,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         doc: "Set the consensus method used for the consensus row.",
         action: Action::Required {
             run: runners::consensus_method,
-            completer: Some(completers::consensus_methods),
+            completer: Some(completers::choices::<ConsensusMethod>),
         },
     },
     PaletteCommand {
@@ -175,7 +178,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         doc: "Set the reading frame used by the translation overlay and the protein view.",
         action: Action::Required {
             run: runners::translation_frame,
-            completer: Some(completers::frames),
+            completer: Some(completers::choices::<ReadingFrame>),
         },
     },
     PaletteCommand {
@@ -184,7 +187,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         doc: "Set the active theme.",
         action: Action::Required {
             run: runners::theme,
-            completer: Some(completers::themes),
+            completer: Some(completers::choices::<ThemeId>),
         },
     },
     PaletteCommand {
@@ -193,7 +196,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         doc: "Override sequence type detection for rendering.",
         action: Action::Required {
             run: runners::sequence_type,
-            completer: Some(completers::sequence_types),
+            completer: Some(completers::choices::<AlignmentType>),
         },
     },
     PaletteCommand {

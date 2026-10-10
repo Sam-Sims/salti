@@ -266,7 +266,10 @@ pub const TERMINAL_DEFAULT: Theme = Theme {
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::EnumString, strum::VariantArray,
+)]
+#[strum(serialize_all = "kebab-case")]
 pub enum ThemeId {
     EverforestDark,
     SolarizedLight,
@@ -275,22 +278,6 @@ pub enum ThemeId {
 }
 
 impl ThemeId {
-    pub const ALL: &[ThemeId] = &[
-        ThemeId::EverforestDark,
-        ThemeId::SolarizedLight,
-        ThemeId::TokyoNight,
-        ThemeId::TerminalDefault,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            ThemeId::EverforestDark => "everforest-dark",
-            ThemeId::SolarizedLight => "solarized-light",
-            ThemeId::TokyoNight => "tokyo-night",
-            ThemeId::TerminalDefault => "terminal-default",
-        }
-    }
-
     pub fn theme(self) -> Theme {
         match self {
             ThemeId::EverforestDark => EVERFOREST_DARK,
@@ -298,24 +285,6 @@ impl ThemeId {
             ThemeId::TokyoNight => TOKYO_NIGHT,
             ThemeId::TerminalDefault => TERMINAL_DEFAULT,
         }
-    }
-}
-
-impl std::fmt::Display for ThemeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl std::str::FromStr for ThemeId {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|theme| theme.name() == value)
-            .ok_or(())
     }
 }
 

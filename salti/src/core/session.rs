@@ -1,46 +1,27 @@
-use std::{fmt, ops::Range, range::RangeInclusive, str::FromStr};
+use std::{ops::Range, range::RangeInclusive};
 
 use anyhow::{Result, bail, ensure};
 
 use crate::core::layout::Layout;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantArray,
+)]
+#[strum(serialize_all = "lowercase")]
 pub enum DiffMode {
     #[default]
     Off,
     Reference,
     Consensus,
-}
-
-impl DiffMode {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Reference => "reference",
-            Self::Consensus => "consensus",
-        }
-    }
-
-    pub const fn all() -> [Self; 3] {
-        [Self::Off, Self::Reference, Self::Consensus]
-    }
-}
-
-impl fmt::Display for DiffMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl FromStr for DiffMode {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|mode| mode.name() == value)
-            .ok_or_else(|| anyhow::format_err!("invalid diff mode: {value}"))
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
