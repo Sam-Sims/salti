@@ -1,13 +1,14 @@
-use std::str::FromStr;
-
 use rayon::prelude::*;
 
-use crate::{error::AlignmentError, model::Sequence, residue};
+use crate::{model::Sequence, residue};
 
 const SAMPLE_SIZE: usize = 100;
 
 /// The kind of residues in an alignment
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::VariantArray,
+)]
+#[strum(serialize_all = "lowercase")]
 pub enum AlignmentType {
     Dna,
     Protein,
@@ -27,29 +28,6 @@ impl AlignmentType {
     /// Returns true if the type can be translated, which only DNA can
     pub const fn supports_translation(self) -> bool {
         matches!(self, Self::Dna)
-    }
-}
-
-impl std::fmt::Display for AlignmentType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Dna => f.write_str("dna"),
-            Self::Protein => f.write_str("protein"),
-            Self::Generic => f.write_str("generic"),
-        }
-    }
-}
-
-impl FromStr for AlignmentType {
-    type Err = AlignmentError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "dna" => Ok(Self::Dna),
-            "protein" => Ok(Self::Protein),
-            "generic" => Ok(Self::Generic),
-            _ => Err(AlignmentError::InvalidAlignmentType),
-        }
     }
 }
 

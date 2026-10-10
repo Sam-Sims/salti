@@ -10,28 +10,19 @@ const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
 ];
 
 /// A forward reading frame, which sets the nucleotide column the first codon starts at
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::VariantArray,
+)]
 pub enum ReadingFrame {
+    #[strum(serialize = "1")]
     Frame1,
+    #[strum(serialize = "2")]
     Frame2,
+    #[strum(serialize = "3")]
     Frame3,
 }
 
 impl ReadingFrame {
-    /// Returns the name that [`FromStr`](std::str::FromStr) parses
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Frame1 => "1",
-            Self::Frame2 => "2",
-            Self::Frame3 => "3",
-        }
-    }
-
-    /// Returns every frame
-    pub const fn all() -> [Self; 3] {
-        [Self::Frame1, Self::Frame2, Self::Frame3]
-    }
-
     /// Returns the nucleotide column the first codon starts at
     pub const fn offset(self) -> usize {
         match self {
@@ -83,23 +74,6 @@ impl ReadingFrame {
         }
 
         ((nucleotide_length - 1 - offset) / 3) + 1
-    }
-}
-
-impl std::fmt::Display for ReadingFrame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl std::str::FromStr for ReadingFrame {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|frame| frame.name() == value)
-            .ok_or(())
     }
 }
 
