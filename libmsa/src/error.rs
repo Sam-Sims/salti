@@ -19,7 +19,4 @@ pub enum AlignmentError {
         actual: usize,
         id: String,
     },
-    /// The string is not `dna`, `protein` or `generic`
-    #[error("invalid alignment type: expected `dna`, `protein`, or `generic`")]
-    InvalidAlignmentType,
 }
