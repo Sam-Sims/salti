@@ -162,13 +162,13 @@ impl CommandPaletteState {
 
     fn close_palette_with(&mut self, command: Command) -> Vec<Command> {
         self.reset_palette();
-        vec![command, Command::CloseOverlay]
+        vec![command, Command::ClosePopup]
     }
 
     fn command_error(&mut self, error: &anyhow::Error) -> Vec<Command> {
         self.reset_palette();
         vec![
-            Command::CloseOverlay,
+            Command::ClosePopup,
             Command::ShowNotification(Notification {
                 level: NotificationLevel::Error,
                 message: error.to_string(),
@@ -197,7 +197,7 @@ impl CommandPaletteState {
 
     fn handle_global_key(&mut self, code: KeyCode) -> Option<Vec<Command>> {
         match code {
-            KeyCode::Esc => Some(vec![Command::CloseOverlay]),
+            KeyCode::Esc => Some(vec![Command::ClosePopup]),
             KeyCode::Tab => {
                 self.cycle_selection(Direction::Forward);
                 Some(Vec::new())
@@ -399,7 +399,7 @@ mod tests {
 
         assert_eq!(
             commands,
-            vec![Command::JumpToPosition(1), Command::CloseOverlay]
+            vec![Command::JumpToPosition(1), Command::ClosePopup]
         );
     }
 
@@ -422,7 +422,7 @@ mod tests {
 
         assert_eq!(
             commands,
-            vec![Command::JumpToPosition(2), Command::CloseOverlay]
+            vec![Command::JumpToPosition(2), Command::ClosePopup]
         );
     }
 
@@ -433,7 +433,7 @@ mod tests {
 
         let commands = palette.handle_key_event(key(KeyCode::Enter));
 
-        assert_eq!(commands, vec![Command::Quit, Command::CloseOverlay]);
+        assert_eq!(commands, vec![Command::Quit, Command::ClosePopup]);
     }
 
     #[test]
@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(
             commands,
             vec![
-                Command::CloseOverlay,
+                Command::ClosePopup,
                 Command::ShowNotification(Notification {
                     level: NotificationLevel::Error,
                     message: "Unknown command".to_string(),

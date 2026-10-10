@@ -3,8 +3,7 @@ use crate::{
     core::session::Position,
     ui::{
         bars::{Notification, NotificationLevel},
-        panes::gff::GffPaneState,
-        popups::state::LayerState,
+        popups::Popup,
         selection::Selection,
     },
 };
@@ -37,8 +36,7 @@ impl Default for ThemeState {
 
 #[derive(Debug, Default)]
 pub struct UiState {
-    pub(crate) layers: LayerState,
-    pub(crate) gff_pane: GffPaneState,
+    pub(crate) popup: Option<Popup>,
     notification: Option<Notification>,
     pub selection: Option<Selection>,
     pub theme: ThemeState,
@@ -74,7 +72,7 @@ impl UiState {
 
     pub fn clear_transient_state(&mut self) {
         self.selection = None;
-        self.layers.close_active();
+        self.popup = None;
         self.notification = None;
         self.gff_tooltip = None;
     }

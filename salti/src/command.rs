@@ -3,9 +3,9 @@ use crate::{config::theme::ThemeId, core::session::DiffMode, ui::bars::Notificat
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Quit,
-    OpenCommandPalette,
-    CloseOverlay,
-    ToggleMinimap,
+    OpenPalette,
+    ClosePopup,
+    OpenMinimap,
     SetTheme(ThemeId),
     ShowNotification(Notification),
     LoadAlignment(String),

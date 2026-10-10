@@ -8,7 +8,7 @@ use ratatui::{
 use crate::{
     core::{gff::Gff, session::Session},
     ui::{
-        bars::render_frame,
+        bars::{render_frame, render_input_bar},
         input_name,
         layout::ScreenLayout,
         panes::{
@@ -17,7 +17,7 @@ use crate::{
             gff::{GffInfoPane, GffPane},
             sequence_id::SequenceIdPane,
         },
-        popups::render::render_overlays,
+        popups::Context,
         render_centred_lines,
         selection::render_mouse_selection,
         state::UiState,
@@ -61,11 +61,35 @@ pub fn render(
         return;
     }
     render_frame(f, screen, session, ui);
-    let Some(session) = session else {
-        render_empty_state_with_ui(f, screen.frame.content_area, ui);
-        render_overlays(f, screen, None, ui);
-        return;
-    };
+    match session {
+        Some(session) => render_panes(f, screen, session, gff, ui),
+        None => render_empty_state_with_ui(f, screen.frame.content_area, ui),
+    }
+    render_input_bar(
+        f,
+        screen.frame.input_area,
+        ui.notification(),
+        &ui.theme.styles,
+    );
+    if let Some(popup) = &ui.popup {
+        popup.render(
+            f.buffer_mut(),
+            &Context {
+                session,
+                theme: &ui.theme,
+                screen,
+            },
+        );
+    }
+}
+
+fn render_panes(
+    f: &mut Frame,
+    screen: &ScreenLayout,
+    session: &Session,
+    gff: Option<&Gff>,
+    ui: &UiState,
+) {
     let (layout, window) = (&screen.app, &screen.window);
     let columns = session.window_columns(window.columns.clone());
 
@@ -124,8 +148,6 @@ pub fn render(
         layout.consensus_alignment_pane,
     );
     render_mouse_selection(f.buffer_mut(), screen, session, ui);
-
-    render_overlays(f, screen, Some(session), ui);
 }
 
 #[cfg(test)]
@@ -140,7 +162,6 @@ mod tests {
         test_utils::{buffer_text, session_with_ids, ui_state},
         ui::{
             bars::{Notification, NotificationLevel},
-            popups::palette::CommandPaletteState,
             selection::Selection,
         },
     };
@@ -243,15 +264,6 @@ mod tests {
             level: NotificationLevel::Info,
             message: "Loaded alignment".to_string(),
         });
-
-        insta::assert_snapshot!(render_text(Some(&session), &ui));
-    }
-
-    #[test]
-    fn palette() {
-        let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
-        let mut ui = ui_state();
-        ui.layers.open_palette(CommandPaletteState::empty());
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));
     }

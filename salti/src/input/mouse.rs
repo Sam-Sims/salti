@@ -1,16 +1,16 @@
-use std::ops::Range;
-
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use crate::{
     command::Command,
     core::{gff::Gff, session::Session},
-    input::route::{MouseRoute, route_mouse},
+    input::{
+        movement::centre_on_pointer,
+        route::{MouseRoute, route_mouse},
+    },
     ui::{
-        layout::{FrameLayout, ScreenLayout, Window, screen_rows},
+        layout::{ScreenLayout, Window, screen_rows},
         panes::gff,
-        popups::{minimap::MinimapState, state::ActiveLayer},
         selection::Selection,
         state::UiState,
     },
@@ -77,22 +77,7 @@ pub(crate) fn handle_mouse_event(
     let mut commands = Vec::new();
     ui.gff_tooltip = None;
 
-    match route_mouse(ui, &screen.frame, &screen.app, mouse, gff.is_some()) {
-        MouseRoute::Palette => (),
-        MouseRoute::Minimap => {
-            if let Some(session) = session
-                && let Some(ActiveLayer::Minimap(minimap_state)) = ui.layers.active.as_mut()
-            {
-                handle_minimap_mouse_event(
-                    &mut commands,
-                    session,
-                    &screen.window.columns,
-                    minimap_state,
-                    &screen.frame,
-                    mouse,
-                );
-            }
-        }
+    match route_mouse(&screen.app, mouse, gff.is_some()) {
         MouseRoute::GffPane => {
             if let (Some(gff), Some(session)) = (gff, session) {
                 handle_gff_mouse_event(&mut commands, gff, session, ui, screen, mouse);
@@ -107,24 +92,6 @@ pub(crate) fn handle_mouse_event(
     commands
 }
 
-fn handle_minimap_mouse_event(
-    commands: &mut Vec<Command>,
-    session: &Session,
-    window_columns: &Range<usize>,
-    minimap_state: &mut MinimapState,
-    frame_layout: &FrameLayout,
-    mouse: MouseEvent,
-) {
-    let total_columns = session.layout().columns().len();
-    let overlay_area = frame_layout.overlay_area;
-
-    if let Some(cmd) =
-        minimap_state.handle_mouse(mouse, overlay_area, window_columns, total_columns)
-    {
-        commands.push(cmd);
-    }
-}
-
 fn handle_gff_mouse_event(
     commands: &mut Vec<Command>,
     gff: &Gff,
@@ -136,12 +103,12 @@ fn handle_gff_mouse_event(
     let gff_pane_rows = screen.app.gff_pane_rows;
     let total_columns = session.layout().columns().len();
 
-    if let Some(cmd) =
-        ui.gff_pane
-            .handle_mouse(mouse, gff_pane_rows, &screen.window.columns, total_columns)
-    {
-        commands.push(cmd);
-    }
+    commands.extend(centre_on_pointer(
+        mouse,
+        gff::gff_content_area(gff_pane_rows, total_columns),
+        screen.window.columns.len(),
+        total_columns,
+    ));
 
     ui.gff_tooltip = gff::tooltip_at(gff, session, gff_pane_rows, mouse.column, mouse.row);
 }
@@ -250,7 +217,6 @@ mod tests {
             session::{Position, ViewState},
         },
         test_utils::{mouse_event, pinned_session, screen, session, ui_state},
-        ui::popups::palette::CommandPaletteState,
     };
 
     const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);
@@ -451,26 +417,6 @@ mod tests {
 
         handle_all(&session, &mut ui, &[(LEFT_DOWN, KeyModifiers::NONE, 30, 1)]);
 
-        assert_eq!(ui.selection, None);
-    }
-
-    #[test]
-    fn handle_mouse_event_palette_ignores_mouse() {
-        let session = pinned_session(6, &[3]);
-        let mut ui = ui_state();
-        ui.layers.open_palette(CommandPaletteState::empty());
-
-        let commands = handle_all(
-            &session,
-            &mut ui,
-            &[
-                (LEFT_DOWN, KeyModifiers::NONE, 0, 0),
-                (MIDDLE_DOWN, KeyModifiers::NONE, 0, 0),
-                (MIDDLE_DRAG, KeyModifiers::NONE, 2, 2),
-            ],
-        );
-
-        assert_eq!(commands, []);
         assert_eq!(ui.selection, None);
     }
 

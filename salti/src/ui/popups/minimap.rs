@@ -1,21 +1,16 @@
 use std::ops::Range;
 
-use crossterm::event::MouseEvent;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    text::{Line, Span},
-    widgets::{Block, Clear, Paragraph, Widget},
-};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
     command::Command,
-    config::theme::Theme,
+    config::{keybindings, theme::Theme},
     core::session::Session,
-    input::movement::HorizontalDrag,
+    input::movement::centre_on_pointer,
     ui::{
-        layout::ScreenLayout,
-        state::{ThemeState, UiState},
+        popups::{Context, PopupContent, PopupFrame},
+        state::ThemeState,
     },
 };
 
@@ -26,88 +21,57 @@ const MINIMAP_HEIGHT_ROWS: u16 = 7;
 const MINIMAP_COLUMN_SAMPLES_PER_CELL: usize = 8;
 const MINIMAP_ROW_SAMPLES: usize = 128;
 
-#[derive(Debug, Clone, Copy)]
-struct MinimapLayout {
-    area: Rect,
-    track_area: Rect,
-}
+#[derive(Debug)]
+pub(crate) struct Minimap;
 
-pub struct Minimap<'a> {
-    screen: &'a ScreenLayout,
-    session: &'a Session,
-    ui: &'a UiState,
-}
-
-impl<'a> Minimap<'a> {
-    pub fn new(screen: &'a ScreenLayout, session: &'a Session, ui: &'a UiState) -> Self {
-        Self {
-            screen,
-            session,
-            ui,
+impl PopupContent for Minimap {
+    fn frame(&self) -> PopupFrame<'_> {
+        PopupFrame::Bordered {
+            title: "Minimap (drag to pan)",
         }
     }
-}
 
-impl Widget for Minimap<'_> {
-    fn render(self, area: Rect, buffer: &mut Buffer) {
-        let minimap_layout = layout(area);
-        let theme = &self.ui.theme.theme;
-        let styles = &self.ui.theme.styles;
-        let total_columns = self.session.layout().columns().len();
+    fn area(&self, ctx: &Context) -> Rect {
+        let overlay_area = ctx.screen.frame.overlay_area;
+        let height = overlay_area.height.min(MINIMAP_HEIGHT_ROWS);
+        Rect {
+            y: overlay_area.bottom() - height,
+            height,
+            ..overlay_area
+        }
+    }
 
-        Clear.render(minimap_layout.area, buffer);
-        Block::bordered()
-            .border_style(styles.border)
-            .style(styles.panel_block)
-            .render(minimap_layout.area, buffer);
-        if total_columns > 0 {
-            render_minimap_track(
-                buffer,
-                minimap_layout.track_area,
-                self.session,
-                &self.ui.theme,
-            );
-            if let Some(window_box) = highlight_box(
-                minimap_layout.track_area,
-                self.screen.window.columns.clone(),
-                total_columns,
-            ) {
-                shade_highlight_box(buffer, window_box, theme);
+    fn handle_key(&mut self, key: KeyEvent, _: Rect, _: &Context) -> Vec<Command> {
+        match key.code {
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+                keybindings::lookup(key.code, key.modifiers)
+                    .into_iter()
+                    .collect()
             }
+            _ => Vec::new(),
         }
-
-        Paragraph::new(Line::from(Span::styled("Drag to pan", styles.text_dim)))
-            .style(styles.base_block)
-            .render(self.screen.frame.input_area, buffer);
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MinimapState {
-    pan_drag: HorizontalDrag,
-}
-
-impl MinimapState {
-    pub fn is_dragging(&self) -> bool {
-        self.pan_drag.is_dragging()
     }
 
-    #[allow(clippy::unused_self)]
-    pub fn contains_mouse(&self, mouse: MouseEvent, overlay_area: Rect) -> bool {
-        let track_area = layout(overlay_area).track_area;
-        track_area.contains((mouse.column, mouse.row).into())
+    fn handle_mouse(&mut self, mouse: MouseEvent, inner: Rect, ctx: &Context) -> Vec<Command> {
+        let session = ctx.session.expect("minimap opens only with an alignment");
+        let total_columns = session.layout().columns().len();
+        centre_on_pointer(mouse, inner, ctx.screen.window.columns.len(), total_columns)
+            .into_iter()
+            .collect()
     }
 
-    pub fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        overlay_area: Rect,
-        viewport_column_range: &Range<usize>,
-        total_columns: usize,
-    ) -> Option<Command> {
-        let track_area = layout(overlay_area).track_area;
-        self.pan_drag
-            .handle_mouse(mouse, track_area, viewport_column_range, total_columns)
+    fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context) {
+        let session = ctx.session.expect("minimap opens only with an alignment");
+        let total_columns = session.layout().columns().len();
+        if total_columns == 0 {
+            return;
+        }
+        render_minimap_track(buf, inner, session, ctx.theme);
+        if let Some(window_box) =
+            highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
+        {
+            shade_highlight_box(buf, window_box, &ctx.theme.theme);
+        }
     }
 }
 
@@ -175,12 +139,4 @@ fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, them
             }
         }
     }
-}
-
-fn layout(overlay_area: Rect) -> MinimapLayout {
-    let height = overlay_area.height.min(MINIMAP_HEIGHT_ROWS);
-    let top = overlay_area.y.saturating_add(overlay_area.height - height);
-    let area = Rect::new(overlay_area.x, top, overlay_area.width, height);
-    let track_area = Block::bordered().inner(area);
-    MinimapLayout { area, track_area }
 }

@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use crossterm::event::MouseEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -10,12 +9,10 @@ use ratatui::{
 };
 
 use crate::{
-    command::Command,
     core::{
         gff::{Feature, Gff},
         session::Session,
     },
-    input::movement::HorizontalDrag,
     ui::{
         layout::Window,
         panes::{
@@ -106,32 +103,6 @@ impl Widget for GffInfoPane<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct GffPaneState {
-    pan_drag: HorizontalDrag,
-}
-
-impl GffPaneState {
-    pub(crate) fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        gff_inner: Rect,
-        window_columns: &Range<usize>,
-        total_columns: usize,
-    ) -> Option<Command> {
-        self.pan_drag.handle_mouse(
-            mouse,
-            gff_content_area(gff_inner, total_columns),
-            window_columns,
-            total_columns,
-        )
-    }
-
-    pub(crate) fn is_dragging(&self) -> bool {
-        self.pan_drag.is_dragging()
-    }
-}
-
 pub(crate) fn tooltip_at(
     gff: &Gff,
     session: &Session,
@@ -158,7 +129,7 @@ pub(crate) fn feature_row_count(gff: &Gff, session: &Session, width: usize) -> u
     FeatureTrack::for_alignment(gff, session, width).row_count()
 }
 
-fn gff_content_area(area: Rect, total_columns: usize) -> Rect {
+pub(crate) fn gff_content_area(area: Rect, total_columns: usize) -> Rect {
     let width = area
         .width
         .min(u16::try_from(total_columns).unwrap_or(u16::MAX));

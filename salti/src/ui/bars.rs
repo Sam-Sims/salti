@@ -176,17 +176,19 @@ pub struct Notification {
     pub message: String,
 }
 
-pub fn render_notification(
+pub fn render_input_bar(
     f: &mut Frame,
     input_area: Rect,
-    notification: &Notification,
+    notification: Option<&Notification>,
     theme: &ThemeStyles,
 ) {
-    let (prefix, style) = notification_prefix(notification.level, theme);
-    let line = Line::from(vec![
-        Span::styled(prefix, style),
-        Span::styled(notification.message.as_str(), style),
-    ]);
+    let line = notification.map_or_else(Line::default, |notification| {
+        let (prefix, style) = notification_prefix(notification.level, theme);
+        Line::from(vec![
+            Span::styled(prefix, style),
+            Span::styled(notification.message.as_str(), style),
+        ])
+    });
     f.render_widget(Paragraph::new(line).style(theme.base_block), input_area);
 }
 

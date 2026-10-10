@@ -8,6 +8,7 @@ use tracing::debug;
 use crate::{
     cli::StartupState,
     command::Command,
+    config::keybindings,
     core::{
         gff::{self, Gff},
         session::{Position, Session, ViewState},
@@ -18,8 +19,7 @@ use crate::{
         bars::{Notification, NotificationLevel},
         input_name,
         layout::ScreenLayout,
-        panes::gff::GffPaneState,
-        popups::palette::CommandPaletteState,
+        popups::{self, Popup, minimap::Minimap},
         render::render,
         state::UiState,
     },
@@ -63,18 +63,40 @@ impl App {
         match event {
             Event::Key(key) => {
                 self.ui.clear_notification();
-                let commands = input::handle_key_event(&mut self.ui, key);
+                let commands = match &mut self.ui.popup {
+                    Some(popup) => popup.handle_key(
+                        key,
+                        &popups::Context {
+                            session: self.session.as_ref(),
+                            theme: &self.ui.theme,
+                            screen: &self.screen,
+                        },
+                    ),
+                    None => keybindings::lookup(key.code, key.modifiers)
+                        .into_iter()
+                        .collect(),
+                };
                 self.execute_commands(commands);
             }
             Event::Mouse(mouse) => {
-                let commands = input::handle_mouse_event(
-                    &mut self.mouse_tracker,
-                    self.session.as_ref(),
-                    self.gff.as_ref(),
-                    &mut self.ui,
-                    &self.screen,
-                    mouse,
-                );
+                let commands = match &mut self.ui.popup {
+                    Some(popup) => popup.handle_mouse(
+                        mouse,
+                        &popups::Context {
+                            session: self.session.as_ref(),
+                            theme: &self.ui.theme,
+                            screen: &self.screen,
+                        },
+                    ),
+                    None => input::handle_mouse_event(
+                        &mut self.mouse_tracker,
+                        self.session.as_ref(),
+                        self.gff.as_ref(),
+                        &mut self.ui,
+                        &self.screen,
+                        mouse,
+                    ),
+                };
                 self.execute_commands(commands);
             }
             Event::Resize(area) => self.rebuild_layout(area),
@@ -162,15 +184,17 @@ impl App {
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Quit => self.should_quit = true,
-            Command::OpenCommandPalette => self.open_command_palette(),
-            Command::CloseOverlay => self.ui.layers.close_active(),
-            Command::ToggleMinimap => self.ui.layers.toggle_minimap(),
+            Command::OpenPalette => todo!("the palette moves onto Popup in step 2"),
+            Command::OpenMinimap => {
+                self.session()?;
+                self.ui.popup = Some(Popup::Minimap(Minimap));
+            }
+            Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse_gff(Path::new(&path))?);
-                self.ui.gff_pane = GffPaneState::default();
                 self.show_info(format!("Loaded GFF file: {path}"));
             }
             Command::CheckForUpdate => self.jobs.check_for_update(true),
@@ -273,16 +297,6 @@ impl App {
         }
 
         Ok(())
-    }
-
-    fn open_command_palette(&mut self) {
-        let palette = self
-            .session
-            .as_ref()
-            .map_or_else(CommandPaletteState::empty, |session| {
-                CommandPaletteState::from_session(session, self.gff.as_ref())
-            });
-        self.ui.layers.open_palette(palette);
     }
 
     fn clear_mouse_selection(&mut self) {

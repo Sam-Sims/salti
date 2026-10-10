@@ -20,7 +20,7 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Char(':'),
         modifiers: KeyModifiers::NONE,
-        action: Command::OpenCommandPalette,
+        action: Command::OpenPalette,
         help: "Open command palette",
     },
     Binding {
@@ -56,8 +56,8 @@ const KEY_BINDINGS: &[Binding] = &[
     Binding {
         code: KeyCode::Char('m'),
         modifiers: KeyModifiers::NONE,
-        action: Command::ToggleMinimap,
-        help: "Toggle minimap overlay",
+        action: Command::OpenMinimap,
+        help: "Open minimap",
     },
     Binding {
         code: KeyCode::Down,
