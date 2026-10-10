@@ -169,10 +169,7 @@ impl App {
             Command::ToggleMinimap => self.ui.layers.toggle_minimap(),
             Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
             Command::ShowNotification(notification) => self.ui.notify(notification),
-            Command::LoadAlignment(input) => {
-                self.clear_mouse_selection();
-                self.load(input);
-            }
+            Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse_gff(Path::new(&path))?);
                 self.ui.gff_pane = GffPaneState::default();
