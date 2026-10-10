@@ -10,7 +10,8 @@ use crate::{
     },
     ui::{
         layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, ScreenLayout, Window},
-        state::UiState,
+        popups::Context,
+        state::{ThemeState, UiState},
     },
 };
 
@@ -97,6 +98,21 @@ pub(crate) fn genes(ranges: &[Range<usize>]) -> Gff {
             })
             .collect(),
     }
+}
+
+pub(crate) fn with_context<T>(
+    session: Option<&Session>,
+    gff: Option<&Gff>,
+    check: impl FnOnce(&Context) -> T,
+) -> T {
+    let theme = ThemeState::default();
+    let screen = ScreenLayout::new(Rect::default(), session, gff, &mut Position::default());
+    check(&Context {
+        session,
+        gff,
+        theme: &theme,
+        screen: &screen,
+    })
 }
 
 pub(crate) fn ui_state() -> UiState {

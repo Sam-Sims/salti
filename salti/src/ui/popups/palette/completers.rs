@@ -1,99 +1,91 @@
 use std::{fs, path::Path};
 
-use super::input::{CommandPaletteState, VisibleSequence};
-use crate::{config::theme::ThemeId, core::session::DiffMode};
+use super::names;
+use crate::{config::theme::ThemeId, core::session::DiffMode, ui::popups::Context};
 
-fn sequence_names_from(sequences: &[VisibleSequence]) -> Vec<String> {
-    sequences
-        .iter()
-        .map(|sequence| sequence.sequence_name.clone())
-        .collect()
+pub(super) fn sequences(ctx: &Context, _: &str) -> Vec<String> {
+    ctx.session
+        .map(|session| names(session, session.layout().rows()))
+        .unwrap_or_default()
 }
 
-pub(super) fn sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    sequence_names_from(&state.rows)
+pub(super) fn main_sequences(ctx: &Context, _: &str) -> Vec<String> {
+    ctx.session
+        .map(|session| names(session, session.layout().main()))
+        .unwrap_or_default()
 }
 
-pub(super) fn main_sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    sequence_names_from(&state.rows[state.pinned..])
+pub(super) fn pinned_sequences(ctx: &Context, _: &str) -> Vec<String> {
+    ctx.session
+        .map(|session| {
+            let layout = session.layout();
+            names(session, &layout.rows()[..layout.pinned()])
+        })
+        .unwrap_or_default()
 }
 
-pub(super) fn pinned_sequences(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    sequence_names_from(&state.rows[..state.pinned])
+pub(super) fn features(ctx: &Context, _: &str) -> Vec<String> {
+    ctx.gff
+        .map(|gff| {
+            gff.features
+                .iter()
+                .map(|feature| feature.name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-pub(super) fn features(state: &CommandPaletteState, _: &str) -> Vec<String> {
-    state.feature_names.clone().unwrap_or_default()
+pub(super) fn gap_percentages(_: &Context, _: &str) -> Vec<String> {
+    ["0", "5", "10", "25", "50"].map(str::to_string).to_vec()
 }
 
-pub(super) fn frames(_: &CommandPaletteState, _: &str) -> Vec<String> {
+pub(super) fn constant_percentages(_: &Context, _: &str) -> Vec<String> {
+    ["0", "70", "90", "95", "100"].map(str::to_string).to_vec()
+}
+
+pub(super) fn frames(_: &Context, _: &str) -> Vec<String> {
     libmsa::ReadingFrame::all()
         .map(|frame| frame.name().to_string())
         .to_vec()
 }
 
-pub(super) fn consensus_methods(_: &CommandPaletteState, _: &str) -> Vec<String> {
+pub(super) fn consensus_methods(_: &Context, _: &str) -> Vec<String> {
     libmsa::ConsensusMethod::all()
         .map(|method| method.name().to_string())
         .to_vec()
 }
 
-pub(super) fn diff_modes(_: &CommandPaletteState, _: &str) -> Vec<String> {
+pub(super) fn diff_modes(_: &Context, _: &str) -> Vec<String> {
     DiffMode::all().map(|mode| mode.name().to_string()).to_vec()
 }
 
-pub(super) fn themes(_: &CommandPaletteState, _: &str) -> Vec<String> {
+pub(super) fn themes(_: &Context, _: &str) -> Vec<String> {
     ThemeId::ALL
         .iter()
         .map(|theme| theme.name().to_string())
         .collect()
 }
 
-pub(super) fn filter_matches(state: &CommandPaletteState, arguments: &str) -> Vec<String> {
-    let regex_text = arguments.trim();
-    if regex_text.is_empty() {
-        return sequence_names_from(&state.rows);
-    }
+pub(super) fn sequence_types(_: &Context, _: &str) -> Vec<String> {
+    ["dna", "protein", "generic"].map(str::to_string).to_vec()
+}
 
-    let Ok(regex) = regex::Regex::new(regex_text) else {
+pub(super) fn filter_matches(ctx: &Context, argument: &str) -> Vec<String> {
+    let names = sequences(ctx, argument);
+    let pattern = argument.trim();
+    if pattern.is_empty() {
+        return names;
+    }
+    let Ok(regex) = regex::Regex::new(pattern) else {
         return Vec::new();
     };
-
-    state
-        .rows
-        .iter()
-        .map(|sequence| &sequence.sequence_name)
-        .filter(|sequence_name| regex.is_match(sequence_name))
-        .cloned()
+    names
+        .into_iter()
+        .filter(|name| regex.is_match(name))
         .collect()
 }
 
-fn split_dir_and_prefix(query: &str) -> (&str, &str) {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return ("", "");
-    }
-
-    if let Some(index) = trimmed.rfind('/') {
-        let (dir, rest) = trimmed.split_at(index + 1);
-        return (dir, rest);
-    }
-
-    ("", trimmed)
-}
-
-fn join_display_path(dir_prefix: &str, name: &str) -> String {
-    if dir_prefix.is_empty() {
-        return name.to_string();
-    }
-
-    let mut joined = String::with_capacity(dir_prefix.len() + name.len());
-    joined.push_str(dir_prefix);
-    joined.push_str(name);
-    joined
-}
-
-pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> {
+pub(super) fn filename(_: &Context, arguments: &str) -> Vec<String> {
     let (dir_prefix, name_prefix) = split_dir_and_prefix(arguments);
     let base_dir = if dir_prefix.is_empty() {
         Path::new(".")
@@ -127,44 +119,76 @@ pub(super) fn filename(_: &CommandPaletteState, arguments: &str) -> Vec<String> 
     matches.into_iter().map(|(_, label)| label).collect()
 }
 
-#[cfg(any())]
+fn split_dir_and_prefix(query: &str) -> (&str, &str) {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return ("", "");
+    }
+
+    if let Some(index) = trimmed.rfind('/') {
+        let (dir, rest) = trimmed.split_at(index + 1);
+        return (dir, rest);
+    }
+
+    ("", trimmed)
+}
+
+fn join_display_path(dir_prefix: &str, name: &str) -> String {
+    if dir_prefix.is_empty() {
+        return name.to_string();
+    }
+
+    let mut joined = String::with_capacity(dir_prefix.len() + name.len());
+    joined.push_str(dir_prefix);
+    joined.push_str(name);
+    joined
+}
+
+#[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
-    use crate::ui::popups::palette::input::{CommandPaletteSnapshot, GffFeatureTarget};
+    use crate::test_utils::{genes, pinned_session, with_context};
 
-    fn palette_state_with_gff_features(
-        gff_feature_targets: Option<Vec<GffFeatureTarget>>,
-    ) -> CommandPaletteState {
-        CommandPaletteState::new(CommandPaletteSnapshot {
-            selectable_sequences: Vec::new(),
-            pinned_sequences: Vec::new(),
-            active_type: libmsa::AlignmentType::Dna,
-            is_reloaded_as_protein: false,
-            visible_columns: vec![0, 1, 2],
-            gff_feature_targets,
-        })
+    type CompleterFn = fn(&Context, &str) -> Vec<String>;
+
+    fn complete(completer: CompleterFn, argument: &str) -> Vec<String> {
+        let session = pinned_session(3, &[1]);
+        let gff = genes(&[0..3, 3..6]);
+        with_context(Some(&session), Some(&gff), |ctx| completer(ctx, argument))
     }
 
-    #[test]
-    fn features_returns_gff_feature_names_in_gff_order() {
-        let state = palette_state_with_gff_features(Some(vec![
-            GffFeatureTarget {
-                feature_name: "gene-b".into(),
-                target_col: Some(1),
-            },
-            GffFeatureTarget {
-                feature_name: "gene-a".into(),
-                target_col: Some(2),
-            },
-        ]));
-
-        assert_eq!(features(&state, ""), vec!["gene-b", "gene-a"]);
+    #[rstest]
+    #[case::sequences_pinned_first(sequences, "", &["s1", "s0", "s2"])]
+    #[case::main_sequences_skip_pinned(main_sequences, "", &["s0", "s2"])]
+    #[case::pinned_sequences(pinned_sequences, "", &["s1"])]
+    #[case::features_in_gff_order(features, "", &["gene0", "gene1"])]
+    #[case::filter_matches_all_without_pattern(filter_matches, "", &["s1", "s0", "s2"])]
+    #[case::filter_matches_regex(filter_matches, "s[02]", &["s0", "s2"])]
+    fn completer_works(
+        #[case] completer: CompleterFn,
+        #[case] argument: &str,
+        #[case] expected: &[&str],
+    ) {
+        assert_eq!(complete(completer, argument), expected);
     }
 
-    #[test]
-    fn features_returns_an_empty_list_without_a_gff() {
-        let state = palette_state_with_gff_features(None);
+    #[rstest]
+    #[case::filter_matches_invalid_regex(filter_matches, "(")]
+    fn completer_is_empty(#[case] completer: CompleterFn, #[case] argument: &str) {
+        assert_eq!(complete(completer, argument), Vec::<String>::new());
+    }
 
-        assert!(features(&state, "").is_empty());
+    #[rstest]
+    #[case::sequences(sequences)]
+    #[case::main_sequences(main_sequences)]
+    #[case::pinned_sequences(pinned_sequences)]
+    #[case::features(features)]
+    fn completer_is_empty_without_document(#[case] completer: CompleterFn) {
+        assert_eq!(
+            with_context(None, None, |ctx| completer(ctx, "")),
+            Vec::<String>::new()
+        );
     }
 }

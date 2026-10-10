@@ -1,6 +1,8 @@
 pub(crate) mod minimap;
 pub(crate) mod palette;
+mod text_input;
 
+use anyhow::{Context as _, Result};
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use ratatui::{
     buffer::Buffer,
@@ -10,7 +12,7 @@ use ratatui::{
 
 use crate::{
     command::Command,
-    core::session::Session,
+    core::{gff::Gff, session::Session},
     ui::{layout::ScreenLayout, popups::minimap::Minimap, state::ThemeState},
 };
 
@@ -84,8 +86,16 @@ enum PopupFrame<'a> {
 
 pub(crate) struct Context<'a> {
     pub(crate) session: Option<&'a Session>,
+    pub(crate) gff: Option<&'a Gff>,
     pub(crate) theme: &'a ThemeState,
     pub(crate) screen: &'a ScreenLayout,
+}
+
+impl Context<'_> {
+    fn session(&self) -> Result<&Session> {
+        self.session
+            .context("No alignment is loaded. Open one with load-alignment")
+    }
 }
 
 fn block(frame: PopupFrame<'_>) -> Block<'_> {

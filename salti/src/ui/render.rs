@@ -76,6 +76,7 @@ pub fn render(
             f.buffer_mut(),
             &Context {
                 session,
+                gff,
                 theme: &ui.theme,
                 screen,
             },

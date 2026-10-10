@@ -68,6 +68,7 @@ impl App {
                         key,
                         &popups::Context {
                             session: self.session.as_ref(),
+                            gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
                         },
@@ -84,6 +85,7 @@ impl App {
                         mouse,
                         &popups::Context {
                             session: self.session.as_ref(),
+                            gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
                         },
