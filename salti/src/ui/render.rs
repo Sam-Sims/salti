@@ -8,18 +8,19 @@ use ratatui::{
 use crate::{
     core::{gff::Gff, session::Session},
     ui::{
-        layers::render::render_overlays,
+        bars::render_frame,
+        input_name,
         layout::ScreenLayout,
         panes::{
             alignment::AlignmentPane,
             consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
             gff::{GffInfoPane, GffPane},
             sequence_id::SequenceIdPane,
-            status_bars::render_frame,
         },
+        popups::render::render_overlays,
+        render_centred_lines,
         selection::render_mouse_selection,
-        ui_state::UiState,
-        utils::{input_name, render_centred_lines},
+        state::UiState,
     },
 };
 
@@ -138,10 +139,8 @@ mod tests {
         core::session::{DiffMode, Position, ViewState},
         test_utils::{buffer_text, session_with_ids, ui_state},
         ui::{
-            layers::{
-                notification::{Notification, NotificationLevel},
-                palette::CommandPaletteState,
-            },
+            bars::{Notification, NotificationLevel},
+            popups::palette::CommandPaletteState,
             selection::Selection,
         },
     };

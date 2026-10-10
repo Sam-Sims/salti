@@ -1,9 +1,9 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::ui::{
-    layers::state::ActiveLayer,
     layout::{AppLayout, FrameLayout},
-    ui_state::UiState,
+    popups::state::ActiveLayer,
+    state::UiState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +93,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{mouse_event, ui_state},
-        ui::{layers::palette::CommandPaletteState, layout::AlignmentHeaderLayout},
+        ui::{layout::AlignmentHeaderLayout, popups::palette::CommandPaletteState},
     };
 
     const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);

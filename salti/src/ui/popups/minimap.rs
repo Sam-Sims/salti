@@ -15,7 +15,7 @@ use crate::{
     input::movement::HorizontalDrag,
     ui::{
         layout::ScreenLayout,
-        ui_state::{ThemeState, UiState},
+        state::{ThemeState, UiState},
     },
 };
 

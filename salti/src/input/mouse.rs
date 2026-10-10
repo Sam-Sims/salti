@@ -8,11 +8,11 @@ use crate::{
     core::{gff::Gff, session::Session},
     input::route::{MouseRoute, route_mouse},
     ui::{
-        layers::{minimap::MinimapState, state::ActiveLayer},
         layout::{FrameLayout, ScreenLayout, Window, screen_rows},
         panes::gff,
+        popups::{minimap::MinimapState, state::ActiveLayer},
         selection::Selection,
-        ui_state::UiState,
+        state::UiState,
     },
 };
 
@@ -250,7 +250,7 @@ mod tests {
             session::{Position, ViewState},
         },
         test_utils::{mouse_event, pinned_session, screen, session, ui_state},
-        ui::layers::palette::CommandPaletteState,
+        ui::popups::palette::CommandPaletteState,
     };
 
     const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);

@@ -1,8 +1,16 @@
+mod command_definitions;
+mod command_runners;
+mod command_spec;
+mod completers;
+mod input;
+mod ui;
+
+pub use input::CommandPaletteState;
 use ratatui::buffer::CellWidth;
 
-use crate::ui::utils::truncate_label;
+use crate::ui::truncate_label;
 
-pub(super) fn parse_argument(input: &str) -> Option<String> {
+fn parse_argument(input: &str) -> Option<String> {
     let mut current = String::new();
     let mut quote: Option<char> = None;
 
@@ -30,13 +38,13 @@ pub(super) fn parse_argument(input: &str) -> Option<String> {
     (!current.is_empty()).then_some(current)
 }
 
-pub(super) fn pad_label(label: &str, width: usize) -> (String, String) {
+fn pad_label(label: &str, width: usize) -> (String, String) {
     let text = truncate_label(label, width);
     let padding = width.saturating_sub(usize::from(text.cell_width()));
     (text, " ".repeat(padding))
 }
 
-pub(super) fn wrap_text(text: &str, width: usize) -> Vec<String> {
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }

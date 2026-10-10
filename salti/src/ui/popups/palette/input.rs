@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use super::{
     command_definitions::COMMAND_SPECS,
     command_spec::{PaletteCommand, TypableCommand},
-    utils::parse_argument,
+    parse_argument,
 };
 use crate::{
     command::Command,
@@ -13,7 +13,7 @@ use crate::{
         search::{Direction, SearchableList},
         session::Session,
     },
-    ui::layers::notification::{Notification, NotificationLevel},
+    ui::bars::{Notification, NotificationLevel},
 };
 
 #[derive(Debug, Clone, Copy)]

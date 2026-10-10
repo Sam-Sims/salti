@@ -22,7 +22,7 @@ use super::{
 /// - `completer`: a function that provides autocompletion suggestions for the command's argument
 ///   These are only used for typable commands.
 /// - `run`: the function that is called to execute the command. These are defined in
-///   `ui/layers/palette/command_runners`
+///   `ui/popups/palette/command_runners`
 pub(super) const COMMAND_SPECS: &[PaletteCommand] = &[
     PaletteCommand::Typable(TypableCommand {
         name: "jump-position",

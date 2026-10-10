@@ -10,7 +10,7 @@ use crate::{
     },
     ui::{
         layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, ScreenLayout, Window},
-        ui_state::UiState,
+        state::UiState,
     },
 };
 

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     core::session::Session,
-    ui::{layout::Window, ui_state::ThemeState},
+    ui::{layout::Window, state::ThemeState},
 };
 
 pub(crate) struct Ruler<'a> {

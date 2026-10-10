@@ -2,17 +2,20 @@ use std::fmt::Write as _;
 
 use ratatui::{
     Frame,
-    style::Styled,
+    layout::Rect,
+    style::{Style, Styled},
     text::{Line, Span},
     widgets::Paragraph,
 };
 
 use crate::{
+    config::theme::ThemeStyles,
     core::session::{Session, ViewMode},
     ui::{
+        input_name,
         layout::{ScreenLayout, Window},
-        ui_state::UiState,
-        utils::{input_name, truncate_label},
+        state::UiState,
+        truncate_label,
     },
 };
 
@@ -156,6 +159,42 @@ pub fn render_frame(f: &mut Frame, screen: &ScreenLayout, session: Option<&Sessi
             Paragraph::new(contextual_line).style(theme.panel_block),
             bottom_status_area,
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationLevel {
+    Error,
+    #[allow(dead_code)]
+    Warning,
+    Info,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notification {
+    pub level: NotificationLevel,
+    pub message: String,
+}
+
+pub fn render_notification(
+    f: &mut Frame,
+    input_area: Rect,
+    notification: &Notification,
+    theme: &ThemeStyles,
+) {
+    let (prefix, style) = notification_prefix(notification.level, theme);
+    let line = Line::from(vec![
+        Span::styled(prefix, style),
+        Span::styled(notification.message.as_str(), style),
+    ]);
+    f.render_widget(Paragraph::new(line).style(theme.base_block), input_area);
+}
+
+fn notification_prefix(level: NotificationLevel, theme: &ThemeStyles) -> (&'static str, Style) {
+    match level {
+        NotificationLevel::Error => ("Error: ", theme.error),
+        NotificationLevel::Warning => ("Warning: ", theme.warning),
+        NotificationLevel::Info => ("", theme.success),
     }
 }
 

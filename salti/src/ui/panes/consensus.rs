@@ -7,8 +7,11 @@ use ratatui::{
 };
 
 use crate::{
-    core::{columns::WindowColumns, session::Session},
-    ui::{rows::stretch, ui_state::ThemeState, utils::render_pane},
+    core::session::{Session, WindowColumns},
+    ui::{
+        panes::{render_pane, stretch},
+        state::ThemeState,
+    },
 };
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];

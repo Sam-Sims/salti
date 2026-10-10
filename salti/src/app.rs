@@ -15,15 +15,13 @@ use crate::{
     input::{self, MouseTracker},
     jobs::{JobEvent, Jobs},
     ui::{
-        layers::{
-            notification::{Notification, NotificationLevel},
-            palette::CommandPaletteState,
-        },
+        bars::{Notification, NotificationLevel},
+        input_name,
         layout::ScreenLayout,
         panes::gff::GffPaneState,
+        popups::palette::CommandPaletteState,
         render::render,
-        ui_state::UiState,
-        utils::input_name,
+        state::UiState,
     },
     update::{CRATE_VERSION, UpdateResult},
 };

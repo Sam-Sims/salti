@@ -3,9 +3,10 @@ use ratatui::{Frame, widgets::Block};
 use crate::{
     core::session::Session,
     ui::{
-        layers::{minimap::Minimap, notification::render_notification, state::ActiveLayer},
+        bars::render_notification,
         layout::ScreenLayout,
-        ui_state::UiState,
+        popups::{minimap::Minimap, state::ActiveLayer},
+        state::UiState,
     },
 };
 

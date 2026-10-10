@@ -5,7 +5,7 @@ use tracing::warn;
 
 use super::{
     input::{CommandPaletteState, VisibleSequence},
-    utils::parse_argument,
+    parse_argument,
 };
 use crate::command::Command;
 
@@ -309,7 +309,7 @@ mod tests {
             gff::{Feature, FeatureType, Gff, Strand},
             model::AlignmentModel,
         },
-        ui::layers::palette::input::{CommandPaletteSnapshot, GffFeatureTarget},
+        ui::popups::palette::input::{CommandPaletteSnapshot, GffFeatureTarget},
     };
 
     fn raw(sequence: &[u8]) -> libmsa::Sequence {

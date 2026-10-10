@@ -9,16 +9,17 @@ use ratatui::{
 
 use crate::{
     core::{
-        columns::WindowColumns,
         gff::Gff,
-        session::{DiffMode, Session},
+        session::{DiffMode, Session, WindowColumns},
     },
     ui::{
         layout::{AlignmentHeaderLayout, RULER_HEIGHT_ROWS, Window, screen_rows},
-        panes::{local_feature_track::LocalFeatureTrack, ruler::Ruler},
-        rows::{render_column_scrollbar, stretch},
-        ui_state::ThemeState,
-        utils::{render_centred_lines, render_pane, separator_line},
+        panes::{
+            local_feature_track::LocalFeatureTrack, render_column_scrollbar, render_pane,
+            ruler::Ruler, separator_line, stretch,
+        },
+        render_centred_lines,
+        state::ThemeState,
     },
 };
 

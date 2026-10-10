@@ -4,7 +4,7 @@ use crate::{
     command::Command,
     config::keybindings,
     input::route::{KeyRoute, route_key},
-    ui::{layers::state::ActiveLayer, ui_state::UiState},
+    ui::{popups::state::ActiveLayer, state::UiState},
 };
 
 pub(crate) fn handle_key_event(ui: &mut UiState, key: KeyEvent) -> Vec<Command> {
@@ -25,7 +25,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent};
 
     use super::*;
-    use crate::{test_utils::ui_state, ui::layers::palette::CommandPaletteState};
+    use crate::{test_utils::ui_state, ui::popups::palette::CommandPaletteState};
 
     #[test]
     fn handle_key_event_uses_keybindings() {

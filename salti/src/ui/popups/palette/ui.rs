@@ -9,7 +9,7 @@ use ratatui::{
 use super::{
     command_spec::PaletteCommand,
     input::{CommandPaletteState, PaletteState},
-    utils::{pad_label, wrap_text},
+    pad_label, wrap_text,
 };
 use crate::core::search::SearchableList;
 

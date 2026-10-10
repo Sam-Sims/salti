@@ -11,7 +11,7 @@ use crate::{
     core::session::Session,
     ui::{
         layout::{ScreenLayout, screen_rows},
-        ui_state::UiState,
+        state::UiState,
     },
 };
 

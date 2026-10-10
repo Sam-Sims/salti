@@ -2,10 +2,7 @@ use std::{fmt, ops::Range, range::RangeInclusive, str::FromStr};
 
 use anyhow::{Result, bail, ensure};
 
-use crate::core::{
-    columns::{Cell, WindowColumns},
-    layout::Layout,
-};
+use crate::core::layout::Layout;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DiffMode {
@@ -387,6 +384,20 @@ impl Session {
             });
         (start..=end.min(last_column)).into()
     }
+}
+
+#[derive(Debug)]
+pub struct WindowColumns<'a> {
+    pub grid: libmsa::Grid<'a>,
+    pub columns: Vec<usize>,
+    pub cells: Vec<Option<Cell>>,
+    pub summaries: Vec<libmsa::ColumnSummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cell {
+    pub index: usize,
+    pub centre: bool,
 }
 
 #[cfg(test)]

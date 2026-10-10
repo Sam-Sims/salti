@@ -1,6 +1,4 @@
-use crate::{
-    config::theme::ThemeId, core::session::DiffMode, ui::layers::notification::Notification,
-};
+use crate::{config::theme::ThemeId, core::session::DiffMode, ui::bars::Notification};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {

@@ -10,8 +10,8 @@ use crate::{
     core::session::Session,
     ui::{
         layout::{AlignmentHeaderLayout, Window, screen_rows},
-        ui_state::ThemeState,
-        utils::{render_pane, separator_line},
+        panes::{render_pane, separator_line},
+        state::ThemeState,
     },
 };
 

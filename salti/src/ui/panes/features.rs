@@ -11,27 +11,27 @@ use crate::{
         gff::{Feature, Gff, Strand},
         session::Session,
     },
-    ui::ui_state::ThemeState,
+    ui::state::ThemeState,
 };
 
 const MIN_LABEL_WIDTH: usize = 2;
 
 #[derive(Debug, Clone)]
-pub(crate) struct DisplayFeature<'a> {
-    pub(crate) feature: &'a Feature,
-    pub(crate) columns: Range<usize>,
-    pub(crate) colour_idx: usize,
+pub(super) struct DisplayFeature<'a> {
+    pub(super) feature: &'a Feature,
+    pub(super) columns: Range<usize>,
+    pub(super) colour_idx: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PlacedFeature<'a> {
-    pub(crate) feature: &'a Feature,
-    pub(crate) span: Range<usize>,
-    pub(crate) row: usize,
-    pub(crate) colour_idx: usize,
+pub(super) struct PlacedFeature<'a> {
+    pub(super) feature: &'a Feature,
+    pub(super) span: Range<usize>,
+    pub(super) row: usize,
+    pub(super) colour_idx: usize,
 }
 
-pub(crate) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<DisplayFeature<'a>> {
+pub(super) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<DisplayFeature<'a>> {
     let layout = session.layout();
     gff.features
         .iter()
@@ -49,7 +49,7 @@ pub(crate) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<Displ
         .collect()
 }
 
-pub(crate) fn render_features(
+pub(super) fn render_features(
     placed_features: &[PlacedFeature<'_>],
     area: Rect,
     theme: &ThemeState,

@@ -17,11 +17,12 @@ use crate::{
     },
     input::movement::HorizontalDrag,
     ui::{
-        features::{DisplayFeature, PlacedFeature, display_features, render_features},
         layout::Window,
-        rows::render_column_scrollbar,
-        ui_state::ThemeState,
-        utils::render_pane,
+        panes::{
+            features::{DisplayFeature, PlacedFeature, display_features, render_features},
+            render_column_scrollbar, render_pane,
+        },
+        state::ThemeState,
     },
 };
 

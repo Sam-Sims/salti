@@ -5,9 +5,9 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use crate::{
     core::{gff::Gff, session::Session},
     ui::{
-        features::{DisplayFeature, PlacedFeature, display_features, render_features},
         layout::Window,
-        ui_state::ThemeState,
+        panes::features::{DisplayFeature, PlacedFeature, display_features, render_features},
+        state::ThemeState,
     },
 };
 

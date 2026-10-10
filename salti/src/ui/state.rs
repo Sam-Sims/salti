@@ -2,11 +2,9 @@ use crate::{
     config::theme::{SequenceStyles, Theme, ThemeId, ThemeStyles},
     core::session::Position,
     ui::{
-        layers::{
-            notification::{Notification, NotificationLevel},
-            state::LayerState,
-        },
+        bars::{Notification, NotificationLevel},
         panes::gff::GffPaneState,
+        popups::state::LayerState,
         selection::Selection,
     },
 };
