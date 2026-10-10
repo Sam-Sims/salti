@@ -8,6 +8,7 @@ default-members = ["salti"]
 
 [workspace.lints.clippy]
 pedantic = "warn"
+mod_module_files = "warn"
 
 [profile.release]
 debug = true
