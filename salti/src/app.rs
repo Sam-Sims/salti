@@ -19,7 +19,7 @@ use crate::{
         bars::{Notification, NotificationLevel},
         input_name,
         layout::ScreenLayout,
-        popups::{self, Popup, minimap::Minimap},
+        popups::{self, Popup, minimap::Minimap, palette::PaletteState},
         render::render,
         state::UiState,
     },
@@ -186,7 +186,7 @@ impl App {
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Quit => self.should_quit = true,
-            Command::OpenPalette => todo!("the palette moves onto Popup in step 2"),
+            Command::OpenPalette => self.ui.popup = Some(Popup::Palette(PaletteState::default())),
             Command::OpenMinimap => {
                 self.session()?;
                 self.ui.popup = Some(Popup::Minimap(Minimap));
@@ -350,10 +350,15 @@ pub(crate) enum Event {
 mod tests {
     use std::ops;
 
+    use crossterm::event::KeyCode;
+    use ratatui::{Terminal, backend::TestBackend};
     use rstest::rstest;
 
     use super::*;
-    use crate::{test_utils::session, ui::selection::Selection};
+    use crate::{
+        test_utils::{buffer_text, session},
+        ui::selection::Selection,
+    };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
     const DNA: &[&[u8]] = &[b"ATGAAATTTCCC", b"ATG---TTTCCC", b"ATGAAGTTTCCC"];
@@ -513,5 +518,46 @@ mod tests {
         app.finish_update_check(result, requested);
 
         assert_eq!(notification_level(&app), None);
+    }
+
+    fn press(app: &mut App, codes: impl IntoIterator<Item = KeyCode>) {
+        for code in codes {
+            app.handle(Event::Key(KeyEvent::from(code)));
+        }
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        press(app, text.chars().map(KeyCode::Char));
+    }
+
+    fn screen_text(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        buffer_text(terminal.backend().buffer(), AREA)
+    }
+
+    #[test]
+    fn palette_open() {
+        let mut app = app(DNA);
+        type_text(&mut app, ":");
+
+        insta::assert_snapshot!(screen_text(&app));
+    }
+
+    #[test]
+    fn palette_argument() {
+        let mut app = app(DNA);
+        type_text(&mut app, ":jump-sequence ");
+
+        insta::assert_snapshot!(screen_text(&app));
+    }
+
+    #[test]
+    fn palette_tab() {
+        let mut app = app(DNA);
+        type_text(&mut app, ":jump-sequence ");
+        press(&mut app, [KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&app));
     }
 }

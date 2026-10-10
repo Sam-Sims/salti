@@ -25,6 +25,15 @@ pub(super) enum Action {
     },
 }
 
+impl Action {
+    pub(super) fn completer(&self) -> Completer {
+        match self {
+            Self::Fixed(_) => None,
+            Self::Optional { completer, .. } | Self::Required { completer, .. } => *completer,
+        }
+    }
+}
+
 pub(super) type Completer = Option<fn(&Context, &str) -> Vec<String>>;
 
 pub(super) const COMMANDS: &[PaletteCommand] = &[

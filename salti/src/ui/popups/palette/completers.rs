@@ -3,59 +3,54 @@ use std::{fs, path::Path};
 use strum::VariantArray;
 
 use super::names;
-use crate::ui::popups::Context;
+use crate::ui::popups::{Context, fuzzy::fuzzy_match};
 
-pub(super) fn sequences(ctx: &Context, _: &str) -> Vec<String> {
-    ctx.session
-        .map(|session| names(session, session.layout().rows()))
-        .unwrap_or_default()
+pub(super) fn sequences(ctx: &Context, word: &str) -> Vec<String> {
+    fuzzy_match(word, all_names(ctx))
 }
 
-pub(super) fn main_sequences(ctx: &Context, _: &str) -> Vec<String> {
-    ctx.session
+pub(super) fn main_sequences(ctx: &Context, word: &str) -> Vec<String> {
+    let names = ctx
+        .session
         .map(|session| names(session, session.layout().main()))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    fuzzy_match(word, names)
 }
 
-pub(super) fn pinned_sequences(ctx: &Context, _: &str) -> Vec<String> {
-    ctx.session
+pub(super) fn pinned_sequences(ctx: &Context, word: &str) -> Vec<String> {
+    let names = ctx
+        .session
         .map(|session| {
             let layout = session.layout();
             names(session, &layout.rows()[..layout.pinned()])
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    fuzzy_match(word, names)
 }
 
-pub(super) fn features(ctx: &Context, _: &str) -> Vec<String> {
-    ctx.gff
-        .map(|gff| {
-            gff.features
-                .iter()
-                .map(|feature| feature.name.clone())
-                .collect()
-        })
-        .unwrap_or_default()
+pub(super) fn features(ctx: &Context, word: &str) -> Vec<String> {
+    let names = ctx.gff.into_iter().flat_map(|gff| &gff.features);
+    fuzzy_match(word, names.map(|feature| feature.name.clone()))
 }
 
-pub(super) fn gap_percentages(_: &Context, _: &str) -> Vec<String> {
-    ["0", "5", "10", "25", "50"].map(str::to_string).to_vec()
+pub(super) fn gap_percentages(_: &Context, word: &str) -> Vec<String> {
+    fuzzy_match(word, ["0", "5", "10", "25", "50"].map(str::to_string))
 }
 
-pub(super) fn constant_percentages(_: &Context, _: &str) -> Vec<String> {
-    ["0", "70", "90", "95", "100"].map(str::to_string).to_vec()
+pub(super) fn constant_percentages(_: &Context, word: &str) -> Vec<String> {
+    fuzzy_match(word, ["0", "70", "90", "95", "100"].map(str::to_string))
 }
 
-pub(super) fn choices<T: VariantArray + ToString>(_: &Context, _: &str) -> Vec<String> {
-    T::VARIANTS.iter().map(ToString::to_string).collect()
+pub(super) fn choices<T: VariantArray + ToString>(_: &Context, word: &str) -> Vec<String> {
+    fuzzy_match(word, T::VARIANTS.iter().map(ToString::to_string))
 }
 
-pub(super) fn filter_matches(ctx: &Context, argument: &str) -> Vec<String> {
-    let names = sequences(ctx, argument);
-    let pattern = argument.trim();
-    if pattern.is_empty() {
+pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
+    let names = all_names(ctx);
+    if word.is_empty() {
         return names;
     }
-    let Ok(regex) = regex::Regex::new(pattern) else {
+    let Ok(regex) = regex::Regex::new(word) else {
         return Vec::new();
     };
     names
@@ -96,6 +91,12 @@ pub(super) fn filename(_: &Context, arguments: &str) -> Vec<String> {
 
     matches.sort();
     matches.into_iter().map(|(_, label)| label).collect()
+}
+
+fn all_names(ctx: &Context) -> Vec<String> {
+    ctx.session
+        .map(|session| names(session, session.layout().rows()))
+        .unwrap_or_default()
 }
 
 fn split_dir_and_prefix(query: &str) -> (&str, &str) {
@@ -148,6 +149,7 @@ mod tests {
     #[case::features_in_gff_order(features, "", &["gene0", "gene1"])]
     #[case::filter_matches_all_without_pattern(filter_matches, "", &["s1", "s0", "s2"])]
     #[case::filter_matches_regex(filter_matches, "s[02]", &["s0", "s2"])]
+    #[case::main_sequences_fuzzy_match_word(main_sequences, "2", &["s2"])]
     #[case::choices_in_order(choices::<DiffMode>, "", &["off", "reference", "consensus"])]
     fn completer_works(
         #[case] completer: CompleterFn,

@@ -1,0 +1,28 @@
+---
+source: salti/src/app.rs
+expression: screen_text(&app)
+---
+ File: test.fasta | Status: Loaded | 3 alignments | Length: 12 | Positions: 1-12
+┌──────────────┬───────────────────────────────────────────────────────────────┐
+│              │1       10                                                     │
+│              │.   .    |                                                     │
+│1 s0          │ATGAAATTTCCC                                                   │
+│2 s1          │ATG---TTTCCC                                                   │
+│3 s2          │ATGAAGTTTCCC                                                   │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+jump-position                           clear-reference
+jump-sequence                           toggle-translation-overlay
+jump-feature                            toggle-protein-view
+pin-sequence                            check-update
+unpin-sequence                          quit
+filter-rows                             set-diff-mode
+clear-all-filters                       load-alignment
+filter-gaps                             set-consensus-method
+filter-constant                         set-translation-frame
+set-reference                           set-theme
+:

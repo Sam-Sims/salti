@@ -1,3 +1,4 @@
+mod fuzzy;
 pub(crate) mod minimap;
 pub(crate) mod palette;
 mod text_input;
@@ -13,11 +14,16 @@ use ratatui::{
 use crate::{
     command::Command,
     core::{gff::Gff, session::Session},
-    ui::{layout::ScreenLayout, popups::minimap::Minimap, state::ThemeState},
+    ui::{
+        layout::ScreenLayout,
+        popups::{minimap::Minimap, palette::PaletteState},
+        state::ThemeState,
+    },
 };
 
 #[derive(Debug)]
 pub(crate) enum Popup {
+    Palette(PaletteState),
     Minimap(Minimap),
 }
 
@@ -58,12 +64,14 @@ impl Popup {
 
     fn content(&self) -> &dyn PopupContent {
         match self {
+            Self::Palette(palette) => palette,
             Self::Minimap(minimap) => minimap,
         }
     }
 
     fn content_mut(&mut self) -> &mut dyn PopupContent {
         match self {
+            Self::Palette(palette) => palette,
             Self::Minimap(minimap) => minimap,
         }
     }
@@ -82,6 +90,7 @@ trait PopupContent {
 #[derive(Clone, Copy)]
 enum PopupFrame<'a> {
     Bordered { title: &'a str },
+    Bare,
 }
 
 pub(crate) struct Context<'a> {
@@ -101,5 +110,6 @@ impl Context<'_> {
 fn block(frame: PopupFrame<'_>) -> Block<'_> {
     match frame {
         PopupFrame::Bordered { title } => Block::bordered().title(title),
+        PopupFrame::Bare => Block::new(),
     }
 }
