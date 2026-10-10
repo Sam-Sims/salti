@@ -4,10 +4,7 @@ use ratatui::layout::Rect;
 use crate::{
     command::Command,
     core::{gff::Gff, session::Session},
-    input::{
-        movement::centre_on_pointer,
-        route::{MouseRoute, route_mouse},
-    },
+    input::movement::centre_on_pointer,
     ui::{
         layout::{ScreenLayout, Window, screen_rows},
         panes::gff,
@@ -16,15 +13,46 @@ use crate::{
     },
 };
 
+pub(crate) fn handle_mouse_event(
+    tracker: &mut MouseTracker,
+    session: Option<&Session>,
+    gff: Option<&Gff>,
+    ui: &mut UiState,
+    screen: &ScreenLayout,
+    mouse: MouseEvent,
+) -> Vec<Command> {
+    ui.gff_tooltip = None;
+    let Some(session) = session else {
+        return Vec::new();
+    };
+    if matches!(mouse.kind, MouseEventKind::Down(_)) {
+        tracker.clear_anchors();
+    }
+
+    let point = (mouse.column, mouse.row).into();
+    if let Some(gff) = gff
+        && screen.app.gff_pane_rows.contains(point)
+    {
+        return handle_gff_mouse_event(gff, session, ui, screen, mouse);
+    }
+    if screen.app.alignment_pane_sequence_rows.contains(point) {
+        return handle_alignment_mouse_event(tracker, session, ui, screen, mouse);
+    }
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        ui.selection = None;
+    }
+    Vec::new()
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct MouseTracker {
-    box_anchor: Option<Selection>,
+    selection_drag: Option<SelectionDrag>,
     pan_anchor: Option<(u16, u16)>,
 }
 
 impl MouseTracker {
     pub fn clear_anchors(&mut self) {
-        self.box_anchor = None;
+        self.selection_drag = None;
         self.pan_anchor = None;
     }
 
@@ -66,61 +94,41 @@ impl MouseTracker {
     }
 }
 
-pub(crate) fn handle_mouse_event(
-    tracker: &mut MouseTracker,
-    session: Option<&Session>,
-    gff: Option<&Gff>,
-    ui: &mut UiState,
-    screen: &ScreenLayout,
-    mouse: MouseEvent,
-) -> Vec<Command> {
-    let mut commands = Vec::new();
-    ui.gff_tooltip = None;
-
-    match route_mouse(&screen.app, mouse, gff.is_some()) {
-        MouseRoute::GffPane => {
-            if let (Some(gff), Some(session)) = (gff, session) {
-                handle_gff_mouse_event(&mut commands, gff, session, ui, screen, mouse);
-            }
-        }
-        MouseRoute::Alignment => {
-            if let Some(session) = session {
-                handle_alignment_mouse_event(&mut commands, tracker, session, ui, screen, mouse);
-            }
-        }
-    }
-    commands
+#[derive(Debug, Clone, Copy)]
+enum SelectionDrag {
+    Follow,
+    Box(Selection),
 }
 
 fn handle_gff_mouse_event(
-    commands: &mut Vec<Command>,
     gff: &Gff,
     session: &Session,
     ui: &mut UiState,
     screen: &ScreenLayout,
     mouse: MouseEvent,
-) {
+) -> Vec<Command> {
     let gff_pane_rows = screen.app.gff_pane_rows;
     let total_columns = session.layout().columns().len();
 
-    commands.extend(centre_on_pointer(
+    ui.gff_tooltip = gff::tooltip_at(gff, session, gff_pane_rows, mouse.column, mouse.row);
+
+    centre_on_pointer(
         mouse,
         gff::gff_content_area(gff_pane_rows, total_columns),
         screen.window.columns.len(),
         total_columns,
-    ));
-
-    ui.gff_tooltip = gff::tooltip_at(gff, session, gff_pane_rows, mouse.column, mouse.row);
+    )
+    .into_iter()
+    .collect()
 }
 
 fn handle_alignment_mouse_event(
-    commands: &mut Vec<Command>,
     tracker: &mut MouseTracker,
     session: &Session,
     ui: &mut UiState,
     screen: &ScreenLayout,
     mouse: MouseEvent,
-) {
+) -> Vec<Command> {
     let resolved_anchor = anchor_at(
         session,
         &screen.window,
@@ -133,39 +141,42 @@ fn handle_alignment_mouse_event(
         MouseEventKind::Down(MouseButton::Left) => {
             let Some(anchor) = resolved_anchor else {
                 ui.selection = None;
-                tracker.clear_anchors();
-                return;
+                return Vec::new();
             };
-            let store_anchor = mouse.modifiers.contains(KeyModifiers::CONTROL);
-
-            tracker.box_anchor = store_anchor.then_some(anchor);
+            tracker.selection_drag = Some(if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                SelectionDrag::Box(anchor)
+            } else {
+                SelectionDrag::Follow
+            });
             ui.selection = Some(anchor);
         }
         MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
-            if let Some(current) = resolved_anchor {
-                let anchor = tracker.box_anchor.unwrap_or(current);
-                ui.selection = Some(selection_from_anchors(anchor, current));
+            if let (Some(drag), Some(current)) = (tracker.selection_drag, resolved_anchor) {
+                ui.selection = Some(match drag {
+                    SelectionDrag::Follow => current,
+                    SelectionDrag::Box(anchor) => selection_from_anchors(anchor, current),
+                });
             }
             if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-                tracker.clear_anchors();
+                tracker.selection_drag = None;
             }
         }
         MouseEventKind::Down(MouseButton::Middle) => {
             tracker.pan_anchor = Some((mouse.column, mouse.row));
         }
         MouseEventKind::Drag(MouseButton::Middle) => {
-            commands.extend(
-                tracker
-                    .pan_drag_commands(mouse.column, mouse.row)
-                    .into_iter()
-                    .flatten(),
-            );
+            return tracker
+                .pan_drag_commands(mouse.column, mouse.row)
+                .into_iter()
+                .flatten()
+                .collect();
         }
         MouseEventKind::Up(MouseButton::Middle) => {
             tracker.pan_anchor = None;
         }
         _ => (),
     }
+    Vec::new()
 }
 
 fn anchor_at(
@@ -395,7 +406,7 @@ mod tests {
     )]
     #[case::release_ends_box(
         &[(LEFT_DOWN, KeyModifiers::CONTROL, 0, 0), (LEFT_UP, KeyModifiers::NONE, 1, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 3)],
-        Some(selection(2..=2, 3..=3)),
+        Some(selection(0..=0, 0..=1)),
     )]
     fn handle_mouse_event_selects(
         #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],
