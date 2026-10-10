@@ -114,45 +114,24 @@ pub struct ColumnSummary {
 /// When several bytes share the highest count, the lowest byte wins. Bytes are compared as
 /// they are, so `A` beats `C`, uppercase beats lowercase, and under
 /// [`ConsensusMethod::Majority`] a gap (`-`) or `*` beats every letter
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantArray,
+)]
+#[strum(serialize_all = "kebab-case")]
 pub enum ConsensusMethod {
     /// The most common byte, gaps included
     Majority,
     /// The most common byte that isn't a gap
     #[default]
     MajorityNonGap,
-}
-
-impl ConsensusMethod {
-    /// Returns name
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Majority => "majority",
-            Self::MajorityNonGap => "majority-non-gap",
-        }
-    }
-
-    /// Returns every method
-    pub const fn all() -> [Self; 2] {
-        [Self::Majority, Self::MajorityNonGap]
-    }
-}
-
-impl std::fmt::Display for ConsensusMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl std::str::FromStr for ConsensusMethod {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::all()
-            .into_iter()
-            .find(|method| method.name() == value)
-            .ok_or(())
-    }
 }
 
 /// Rules for hiding columns. `None` turns a rule off, and both fractions are in `0.0..=1.0`
@@ -429,19 +408,6 @@ mod tests {
                 .consensus(rows, cols, ConsensusMethod::Majority),
             None
         );
-    }
-
-    #[rstest]
-    fn consensus_method_from_str_agrees_with_name(
-        #[values(ConsensusMethod::Majority, ConsensusMethod::MajorityNonGap)]
-        method: ConsensusMethod,
-    ) {
-        assert_eq!(method.name().parse(), Ok(method));
-    }
-
-    #[test]
-    fn consensus_method_from_str_rejects_unknown() {
-        assert_eq!("majority-gap".parse::<ConsensusMethod>(), Err(()));
     }
 
     #[rstest]
