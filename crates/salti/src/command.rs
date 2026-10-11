@@ -33,6 +33,7 @@ pub enum Command {
     SetActiveType(libmsa::AlignmentType),
     SetTranslationFrame(libmsa::ReadingFrame),
     SetDiffMode(DiffMode),
+    CycleDiffMode,
     ToggleTranslationOverlay,
     ToggleProteinView,
     LoadGff { path: String },

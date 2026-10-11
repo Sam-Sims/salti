@@ -254,7 +254,7 @@ mod tests {
                 state.toggle_translation_overlay()
             })
             .unwrap();
-        session.diff_mode = DiffMode::Reference;
+        session.set_diff_mode(DiffMode::Reference).unwrap();
 
         insta::assert_snapshot!(render_text(Some(&session), &ui_state()));
     }

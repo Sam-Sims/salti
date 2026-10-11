@@ -97,7 +97,7 @@ impl Widget for AlignmentPane<'_> {
                 .cells(row, &columns.columns)
                 .collect::<Vec<u8>>()
         };
-        let diff = match session.diff_mode {
+        let diff = match session.diff_mode() {
             DiffMode::Off => None,
             DiffMode::Reference => session.state().reference().map(bytes),
             DiffMode::Consensus => Some(
@@ -288,7 +288,7 @@ mod tests {
                 Ok(())
             },
         );
-        session.diff_mode = DiffMode::Reference;
+        session.set_diff_mode(DiffMode::Reference).unwrap();
 
         insta::assert_snapshot!(render_full(&session));
     }
@@ -302,7 +302,7 @@ mod tests {
                 state.toggle_translation_overlay()
             },
         );
-        session.diff_mode = DiffMode::Reference;
+        session.set_diff_mode(DiffMode::Reference).unwrap();
 
         insta::assert_snapshot!(render_full(&session));
     }
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn diff_consensus() {
         let mut session = session(&[CAT, b"CATCATGATCATCATCAT", b"CATCATCATCATGATCAT"]);
-        session.diff_mode = DiffMode::Consensus;
+        session.set_diff_mode(DiffMode::Consensus).unwrap();
 
         insta::assert_snapshot!(render_full(&session));
     }

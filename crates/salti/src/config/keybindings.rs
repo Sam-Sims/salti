@@ -65,6 +65,14 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         description: "Open minimap",
     },
     Binding {
+        name: "cycle-diff-mode",
+        code: KeyCode::Char('d'),
+        modifiers: KeyModifiers::NONE,
+        command: Command::CycleDiffMode,
+        category: Category::General,
+        description: "Cycle diff mode",
+    },
+    Binding {
         name: "scroll-up",
         code: KeyCode::Up,
         modifiers: KeyModifiers::NONE,

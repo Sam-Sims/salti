@@ -13,7 +13,7 @@ expression: screen_text(&app)
 │              │  │:            Open command palette          │                │
 │              │  │?            Show key bindings             │                │
 │              │  │m            Open minimap                  │                │
-│              │  │                                           │                │
+│              │  │d            Cycle diff mode               │                │
 │              │  │                                           │                │
 │              │  │                                           │                │
 │              │  │                                           │                │

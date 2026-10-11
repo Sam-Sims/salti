@@ -294,7 +294,8 @@ impl App {
                 self.apply(|s| s.set_alignment_type(alignment_type))?;
             }
             Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
-            Command::SetDiffMode(mode) => self.session_mut()?.diff_mode = mode,
+            Command::SetDiffMode(mode) => self.session_mut()?.set_diff_mode(mode)?,
+            Command::CycleDiffMode => self.session_mut()?.cycle_diff_mode(),
         }
 
         Ok(())
