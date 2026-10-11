@@ -30,6 +30,7 @@ use crate::{
 };
 
 const FRAME: Duration = Duration::from_millis(16);
+const MAX_FRAME_DELTA: Duration = Duration::from_millis(100);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -106,10 +107,14 @@ async fn run(mut terminal: DefaultTerminal, startup: StartupState) -> Result<()>
     let mut events = EventStream::new();
     let mut dirty = true;
     let mut next_draw = Instant::now();
+    let mut last_draw = Instant::now();
     while !app.should_quit() {
         if dirty && Instant::now() >= next_draw {
-            terminal.draw(|frame| app.draw(frame))?;
-            dirty = false;
+            let now = Instant::now();
+            let delta = (now - last_draw).min(MAX_FRAME_DELTA);
+            last_draw = now;
+            terminal.draw(|frame| app.draw(frame, delta))?;
+            dirty = app.is_animating();
             next_draw = Instant::now() + FRAME;
         }
 

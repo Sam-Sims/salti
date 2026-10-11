@@ -11,7 +11,13 @@ use ratatui::{
 use crate::{
     config::theme::ThemeStyles,
     core::session::{Session, ViewMode},
-    ui::{input_name, layout::Window, selection::Selection, truncate_label},
+    ui::{
+        input_name,
+        layout::Window,
+        notification::{Notification, NotificationLevel},
+        selection::Selection,
+        truncate_label,
+    },
 };
 
 /// maximum displayed character count for a selected sequence name in the status bar before truncation
@@ -170,20 +176,6 @@ impl Widget for InputBar<'_> {
             .style(self.styles.base_block)
             .render(area, buf);
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Notification {
-    pub level: NotificationLevel,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NotificationLevel {
-    Error,
-    #[allow(dead_code)]
-    Warning,
-    Info,
 }
 
 fn format_percent(fraction: f64) -> String {

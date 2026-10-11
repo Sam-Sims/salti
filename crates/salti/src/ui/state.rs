@@ -1,8 +1,10 @@
+use ratatui::style::Color;
+
 use crate::{
     config::theme::{SequenceStyles, Theme, ThemeId, ThemeStyles},
     core::session::Position,
     ui::{
-        bars::{Notification, NotificationLevel},
+        notification::{Notification, Notifications},
         popups::Popup,
         selection::Selection,
     },
@@ -37,7 +39,7 @@ impl Default for ThemeState {
 #[derive(Debug, Default)]
 pub struct UiState {
     pub(crate) popup: Option<Popup>,
-    notification: Option<Notification>,
+    pub(crate) notifications: Notifications,
     pub selection: Option<Selection>,
     pub theme: ThemeState,
     pub position: Position,
@@ -46,22 +48,9 @@ pub struct UiState {
 }
 
 impl UiState {
-    pub fn notification(&self) -> Option<&Notification> {
-        self.notification.as_ref()
-    }
-
     pub fn notify(&mut self, notification: Notification) {
-        let error_shown = self
-            .notification
-            .as_ref()
-            .is_some_and(|shown| shown.level == NotificationLevel::Error);
-        if notification.level == NotificationLevel::Error || !error_shown {
-            self.notification = Some(notification);
-        }
-    }
-
-    pub fn clear_notification(&mut self) {
-        self.notification = None;
+        let input_bg = self.theme.styles.base_block.bg.unwrap_or(Color::Reset);
+        self.notifications.notify(notification, input_bg);
     }
 
     pub fn set_theme(&mut self, theme_id: ThemeId) {
@@ -73,53 +62,7 @@ impl UiState {
     pub fn clear_transient_state(&mut self) {
         self.selection = None;
         self.popup = None;
-        self.notification = None;
+        self.notifications = Notifications::default();
         self.gff_tooltip = None;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use rstest::rstest;
-
-    use super::*;
-
-    fn notification(level: NotificationLevel) -> Notification {
-        Notification {
-            level,
-            message: String::new(),
-        }
-    }
-
-    #[rstest]
-    #[case::first(None, NotificationLevel::Info, NotificationLevel::Info)]
-    #[case::info_replaces_info(
-        Some(NotificationLevel::Info),
-        NotificationLevel::Info,
-        NotificationLevel::Info
-    )]
-    #[case::error_replaces_info(
-        Some(NotificationLevel::Info),
-        NotificationLevel::Error,
-        NotificationLevel::Error
-    )]
-    #[case::info_keeps_error(
-        Some(NotificationLevel::Error),
-        NotificationLevel::Info,
-        NotificationLevel::Error
-    )]
-    fn notify_works(
-        #[case] shown: Option<NotificationLevel>,
-        #[case] level: NotificationLevel,
-        #[case] expected: NotificationLevel,
-    ) {
-        let mut ui = UiState::default();
-        if let Some(shown) = shown {
-            ui.notify(notification(shown));
-        }
-
-        ui.notify(notification(level));
-
-        assert_eq!(ui.notification().map(|shown| shown.level), Some(expected));
     }
 }
