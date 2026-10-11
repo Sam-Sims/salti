@@ -117,7 +117,7 @@ async fn run(mut terminal: DefaultTerminal, startup: StartupState) -> Result<()>
             event = events.next() => match event {
                 Some(Ok(event)) => {
                     let event = match event {
-                        TermEvent::Key(key) => Event::Key(key),
+                        TermEvent::Key(key) if !key.is_release() => Event::Key(key),
                         TermEvent::Mouse(mouse) => Event::Mouse(mouse),
                         TermEvent::Resize(width, height) => {
                             Event::Resize(Rect::new(0, 0, width, height))

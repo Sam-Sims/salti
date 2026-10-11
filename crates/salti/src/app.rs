@@ -19,7 +19,7 @@ use crate::{
         bars::{Notification, NotificationLevel},
         input_name,
         layout::ScreenLayout,
-        popups::{self, Popup, minimap::Minimap, palette::PaletteState},
+        popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
         render::render,
         state::UiState,
     },
@@ -73,9 +73,7 @@ impl App {
                             screen: &self.screen,
                         },
                     ),
-                    None => keybindings::lookup(key.code, key.modifiers)
-                        .into_iter()
-                        .collect(),
+                    None => keybindings::lookup(key).into_iter().collect(),
                 };
                 self.execute_commands(commands);
             }
@@ -191,6 +189,7 @@ impl App {
                 self.session()?;
                 self.ui.popup = Some(Popup::Minimap(Minimap));
             }
+            Command::OpenKeybinds => self.ui.popup = Some(Popup::Keybinds(Keybinds::default())),
             Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
             Command::ShowNotification(notification) => self.ui.notify(notification),
@@ -295,7 +294,8 @@ impl App {
                 self.apply(|s| s.set_alignment_type(alignment_type))?;
             }
             Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
-            Command::SetDiffMode(mode) => self.session_mut()?.diff_mode = mode,
+            Command::SetDiffMode(mode) => self.session_mut()?.set_diff_mode(mode)?,
+            Command::CycleDiffMode => self.session_mut()?.cycle_diff_mode(),
         }
 
         Ok(())
@@ -531,9 +531,10 @@ mod tests {
     }
 
     fn screen_text(app: &App) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
+        let area = app.screen.area;
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
-        buffer_text(terminal.backend().buffer(), AREA)
+        buffer_text(terminal.backend().buffer(), area)
     }
 
     #[test]
@@ -557,6 +558,37 @@ mod tests {
         let mut app = app(DNA);
         type_text(&mut app, ":jump-sequence ");
         press(&mut app, [KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&app));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn keybinds_open() {
+        let mut app = app(DNA);
+        type_text(&mut app, "?");
+
+        insta::assert_snapshot!(screen_text(&app));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn keybinds_last_tab() {
+        let mut app = app(DNA);
+        type_text(&mut app, "?");
+        press(&mut app, [KeyCode::Right; 3]);
+
+        insta::assert_snapshot!(screen_text(&app));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn keybinds_scrolled() {
+        let mut app = app(DNA);
+        app.handle(Event::Resize(Rect::new(0, 0, AREA.width, 10)));
+        type_text(&mut app, "?");
+        press(&mut app, [KeyCode::Right]);
+        press(&mut app, [KeyCode::Down; 12]);
 
         insta::assert_snapshot!(screen_text(&app));
     }

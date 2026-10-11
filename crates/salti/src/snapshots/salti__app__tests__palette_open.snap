@@ -19,10 +19,10 @@ jump-position                           clear-reference
 jump-sequence                           toggle-translation-overlay
 jump-feature                            toggle-protein-view
 pin-sequence                            check-update
-unpin-sequence                          quit
-filter-rows                             set-diff-mode
-clear-all-filters                       load-alignment
-filter-gaps                             set-consensus-method
-filter-constant                         set-translation-frame
-set-reference                           set-theme
+unpin-sequence                          keybinds
+filter-rows                             quit
+clear-all-filters                       set-diff-mode
+filter-gaps                             load-alignment
+filter-constant                         set-consensus-method
+set-reference                           set-translation-frame
 :

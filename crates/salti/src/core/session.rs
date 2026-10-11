@@ -208,7 +208,7 @@ pub struct Session {
     source: String,
     state: ViewState,
     layout: Layout,
-    pub diff_mode: DiffMode,
+    diff_mode: DiffMode,
     pub consensus_method: libmsa::ConsensusMethod,
 }
 
@@ -256,6 +256,9 @@ impl Session {
         change(&mut next)?;
         self.layout = Layout::build(&self.base_alignment, &next);
         self.state = next;
+        if self.diff_mode == DiffMode::Reference && self.state.reference().is_none() {
+            self.diff_mode = DiffMode::default();
+        }
 
         Ok(Position {
             column: nt.map_or(position.column, |nt| {
@@ -265,6 +268,26 @@ impl Session {
             row: top.map_or(0, |row| self.layout.row_position(row)),
             ..position
         })
+    }
+
+    pub fn diff_mode(&self) -> DiffMode {
+        self.diff_mode
+    }
+
+    pub fn set_diff_mode(&mut self, mode: DiffMode) -> Result<()> {
+        if mode == DiffMode::Reference && self.state.reference().is_none() {
+            bail!("No reference sequence is set. Set one with set-reference");
+        }
+        self.diff_mode = mode;
+        Ok(())
+    }
+
+    pub fn cycle_diff_mode(&mut self) {
+        self.diff_mode = match self.diff_mode {
+            DiffMode::Off if self.state.reference().is_some() => DiffMode::Reference,
+            DiffMode::Off | DiffMode::Reference => DiffMode::Consensus,
+            DiffMode::Consensus => DiffMode::Off,
+        };
     }
 
     pub fn state(&self) -> &ViewState {
@@ -406,6 +429,67 @@ mod tests {
             row,
             ..Position::default()
         }
+    }
+
+    fn with_reference(reference: Option<usize>) -> Session {
+        let mut session = session(&[b"A", b"A", b"A"]);
+        session
+            .update(Position::default(), |state| {
+                state.set_reference(reference);
+                Ok(())
+            })
+            .unwrap();
+        session
+    }
+
+    #[rstest]
+    #[case::reference(Some(0), DiffMode::Reference)]
+    #[case::consensus_without_reference(None, DiffMode::Consensus)]
+    fn set_diff_mode_works(#[case] reference: Option<usize>, #[case] mode: DiffMode) {
+        let mut session = with_reference(reference);
+
+        session.set_diff_mode(mode).unwrap();
+
+        assert_eq!(session.diff_mode(), mode);
+    }
+
+    #[test]
+    fn set_diff_mode_rejects() {
+        let mut session = with_reference(None);
+
+        assert!(session.set_diff_mode(DiffMode::Reference).is_err());
+        assert_eq!(session.diff_mode(), DiffMode::Off);
+    }
+
+    #[rstest]
+    #[case::off_to_reference(Some(0), DiffMode::Off, DiffMode::Reference)]
+    #[case::reference_to_consensus(Some(0), DiffMode::Reference, DiffMode::Consensus)]
+    #[case::consensus_to_off(Some(0), DiffMode::Consensus, DiffMode::Off)]
+    #[case::skips_reference(None, DiffMode::Off, DiffMode::Consensus)]
+    #[case::consensus_to_off_without_reference(None, DiffMode::Consensus, DiffMode::Off)]
+    fn cycle_diff_mode_works(
+        #[case] reference: Option<usize>,
+        #[case] from: DiffMode,
+        #[case] expected: DiffMode,
+    ) {
+        let mut session = with_reference(reference);
+        session.set_diff_mode(from).unwrap();
+
+        session.cycle_diff_mode();
+
+        assert_eq!(session.diff_mode(), expected);
+    }
+
+    #[rstest]
+    #[case::clear_reference(|state: &mut ViewState| { state.set_reference(None); Ok(()) }, DiffMode::Off)]
+    #[case::pin(|state: &mut ViewState| { state.pin(1); Ok(()) }, DiffMode::Reference)]
+    fn update_diff_mode_works(#[case] change: Change, #[case] expected: DiffMode) {
+        let mut session = with_reference(Some(0));
+        session.set_diff_mode(DiffMode::Reference).unwrap();
+
+        session.update(Position::default(), change).unwrap();
+
+        assert_eq!(session.diff_mode(), expected);
     }
 
     #[test]
