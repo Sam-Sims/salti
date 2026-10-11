@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use crate::{
@@ -42,14 +42,18 @@ impl PopupContent for Minimap {
     }
 
     fn handle_key(&mut self, key: KeyEvent, _: Rect, _: &Context) -> Vec<Command> {
-        match key.code {
-            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
-                keybindings::lookup(key.code, key.modifiers)
-                    .into_iter()
-                    .collect()
-            }
-            _ => Vec::new(),
-        }
+        keybindings::lookup(key)
+            .filter(|command| {
+                matches!(
+                    command,
+                    Command::ScrollUp { .. }
+                        | Command::ScrollDown { .. }
+                        | Command::ScrollLeft { .. }
+                        | Command::ScrollRight { .. }
+                )
+            })
+            .into_iter()
+            .collect()
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, inner: Rect, ctx: &Context) -> Vec<Command> {

@@ -73,9 +73,7 @@ impl App {
                             screen: &self.screen,
                         },
                     ),
-                    None => keybindings::lookup(key.code, key.modifiers)
-                        .into_iter()
-                        .collect(),
+                    None => keybindings::lookup(key).into_iter().collect(),
                 };
                 self.execute_commands(commands);
             }

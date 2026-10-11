@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::command::Command;
 
@@ -31,7 +31,7 @@ const KEY_BINDINGS: &[Binding] = &[
     },
     Binding {
         code: KeyCode::Char('T'),
-        modifiers: KeyModifiers::SHIFT,
+        modifiers: KeyModifiers::NONE,
         action: Command::ToggleProteinView,
         help: "Toggle the protein view",
     },
@@ -133,9 +133,41 @@ const KEY_BINDINGS: &[Binding] = &[
     },
 ];
 
-pub fn lookup(code: KeyCode, modifiers: KeyModifiers) -> Option<Command> {
+pub(crate) fn lookup(key: KeyEvent) -> Option<Command> {
+    let mut modifiers = key.modifiers;
+    if let KeyCode::Char(_) = key.code {
+        modifiers.remove(KeyModifiers::SHIFT);
+    }
     KEY_BINDINGS
         .iter()
-        .find(|binding| binding.code == code && binding.modifiers == modifiers)
+        .find(|binding| binding.code == key.code && binding.modifiers == modifiers)
         .map(|binding| binding.action.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::letter(KeyCode::Char('T'), KeyModifiers::NONE, Command::ToggleProteinView)]
+    #[case::shifted_letter(KeyCode::Char('T'), KeyModifiers::SHIFT, Command::ToggleProteinView)]
+    #[case::shifted_punctuation(KeyCode::Char(':'), KeyModifiers::SHIFT, Command::OpenPalette)]
+    #[case::arrow(KeyCode::Up, KeyModifiers::NONE, Command::ScrollUp { amount: 1 })]
+    #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, Command::ScrollUp { amount: 10 })]
+    fn lookup_works(
+        #[case] code: KeyCode,
+        #[case] modifiers: KeyModifiers,
+        #[case] expected: Command,
+    ) {
+        assert_eq!(lookup(KeyEvent::new(code, modifiers)), Some(expected));
+    }
+
+    #[rstest]
+    #[case::unbound(KeyCode::Char('z'), KeyModifiers::NONE)]
+    #[case::control(KeyCode::Char('t'), KeyModifiers::CONTROL)]
+    fn lookup_rejects(#[case] code: KeyCode, #[case] modifiers: KeyModifiers) {
+        assert_eq!(lookup(KeyEvent::new(code, modifiers)), None);
+    }
 }
