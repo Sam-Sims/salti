@@ -54,8 +54,8 @@ impl UiState {
         let error_shown = self
             .notification
             .as_ref()
-            .is_some_and(|shown| shown.level == NotificationLevel::Error);
-        if notification.level == NotificationLevel::Error || !error_shown {
+            .is_some_and(|shown| shown.level() == NotificationLevel::Error);
+        if notification.level() == NotificationLevel::Error || !error_shown {
             self.notification = Some(notification);
         }
     }
@@ -84,42 +84,35 @@ mod tests {
 
     use super::*;
 
-    fn notification(level: NotificationLevel) -> Notification {
-        Notification {
-            level,
-            message: String::new(),
-        }
-    }
-
     #[rstest]
-    #[case::first(None, NotificationLevel::Info, NotificationLevel::Info)]
+    #[case::first(None, Notification::info(""), NotificationLevel::Info)]
     #[case::info_replaces_info(
-        Some(NotificationLevel::Info),
-        NotificationLevel::Info,
+        Some(Notification::info("")),
+        Notification::info(""),
         NotificationLevel::Info
     )]
     #[case::error_replaces_info(
-        Some(NotificationLevel::Info),
-        NotificationLevel::Error,
+        Some(Notification::info("")),
+        Notification::error(""),
         NotificationLevel::Error
     )]
     #[case::info_keeps_error(
-        Some(NotificationLevel::Error),
-        NotificationLevel::Info,
+        Some(Notification::error("")),
+        Notification::info(""),
         NotificationLevel::Error
     )]
     fn notify_works(
-        #[case] shown: Option<NotificationLevel>,
-        #[case] level: NotificationLevel,
+        #[case] shown: Option<Notification>,
+        #[case] incoming: Notification,
         #[case] expected: NotificationLevel,
     ) {
         let mut ui = UiState::default();
         if let Some(shown) = shown {
-            ui.notify(notification(shown));
+            ui.notify(shown);
         }
 
-        ui.notify(notification(level));
+        ui.notify(incoming);
 
-        assert_eq!(ui.notification().map(|shown| shown.level), Some(expected));
+        assert_eq!(ui.notification().map(Notification::level), Some(expected));
     }
 }

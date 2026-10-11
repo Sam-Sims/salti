@@ -174,8 +174,28 @@ impl Widget for InputBar<'_> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
-    pub level: NotificationLevel,
-    pub message: String,
+    level: NotificationLevel,
+    message: String,
+}
+
+impl Notification {
+    pub fn info(message: impl Into<String>) -> Self {
+        Self {
+            level: NotificationLevel::Info,
+            message: message.into(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            level: NotificationLevel::Error,
+            message: message.into(),
+        }
+    }
+
+    pub fn level(&self) -> NotificationLevel {
+        self.level
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -173,10 +173,7 @@ mod tests {
     use crate::{
         core::session::{DiffMode, Position, ViewState},
         test_utils::{buffer_text, session_with_numbered_ids, ui_state},
-        ui::{
-            bars::{Notification, NotificationLevel},
-            selection::Selection,
-        },
+        ui::{bars::Notification, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 100, 24);
@@ -263,10 +260,7 @@ mod tests {
     fn notification() {
         let session = session_with_numbered_ids(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
         let mut ui = ui_state();
-        ui.notify(Notification {
-            level: NotificationLevel::Info,
-            message: "Loaded alignment".to_string(),
-        });
+        ui.notify(Notification::info("Loaded alignment"));
 
         insta::assert_snapshot!(render_text(Some(&session), &ui));
     }

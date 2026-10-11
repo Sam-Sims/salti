@@ -17,7 +17,7 @@ use self::commands::{Action, COMMANDS, PaletteCommand};
 use crate::{
     command::Command,
     ui::{
-        bars::{Notification, NotificationLevel},
+        bars::Notification,
         popups::{Context, PopupContent, PopupFrame, fuzzy::fuzzy_match, text_input::TextInput},
     },
 };
@@ -155,12 +155,8 @@ fn run_line(line: &str, ctx: &Context) -> Vec<Command> {
     if line.trim().is_empty() {
         return vec![Command::ClosePopup];
     }
-    let command = parse_line(line, ctx).unwrap_or_else(|error| {
-        Command::ShowNotification(Notification {
-            level: NotificationLevel::Error,
-            message: error.to_string(),
-        })
-    });
+    let command = parse_line(line, ctx)
+        .unwrap_or_else(|error| Command::ShowNotification(Notification::error(error.to_string())));
     vec![Command::ClosePopup, command]
 }
 
@@ -278,7 +274,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::test_utils::{buffer_text, pinned_session, session_with_ids, with_context};
+    use crate::{
+        test_utils::{buffer_text, pinned_session, session_with_ids, with_context},
+        ui::bars::NotificationLevel,
+    };
 
     fn run(line: &str) -> Vec<Command> {
         let session = pinned_session(3, &[1]);
@@ -321,13 +320,8 @@ mod tests {
 
         assert!(matches!(
             commands.as_slice(),
-            [
-                Command::ClosePopup,
-                Command::ShowNotification(Notification {
-                    level: NotificationLevel::Error,
-                    ..
-                })
-            ]
+            [Command::ClosePopup, Command::ShowNotification(notification)]
+                if notification.level() == NotificationLevel::Error
         ));
     }
 

@@ -16,7 +16,7 @@ use crate::{
     input::{self, MouseTracker},
     jobs::{JobEvent, Jobs},
     ui::{
-        bars::{Notification, NotificationLevel},
+        bars::Notification,
         input_name,
         layout::ScreenLayout,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
@@ -144,10 +144,10 @@ impl App {
                 self.ui.position = Position::default();
                 self.rebuild_layout(self.screen.area);
             }
-            Err(error) => self.ui.notify(Notification {
-                level: NotificationLevel::Error,
-                message: format!("Failed to load {}: {error}", input_name(&input)),
-            }),
+            Err(error) => self.ui.notify(Notification::error(format!(
+                "Failed to load {}: {error}",
+                input_name(&input)
+            ))),
         }
     }
 
@@ -161,7 +161,7 @@ impl App {
             Some(UpdateResult::UpToDate) if requested => "salti is up to date".to_string(),
             Some(UpdateResult::UpToDate) | None => return,
         };
-        self.show_info(message);
+        self.ui.notify(Notification::info(message));
     }
 
     fn execute_commands(&mut self, commands: Vec<Command>) {
@@ -171,10 +171,7 @@ impl App {
         for command in commands {
             if let Err(error) = self.execute_command(command) {
                 debug!(error = ?error, "Command failed");
-                self.ui.notify(Notification {
-                    level: NotificationLevel::Error,
-                    message: error.to_string(),
-                });
+                self.ui.notify(Notification::error(error.to_string()));
             }
         }
         self.rebuild_layout(self.screen.area);
@@ -196,7 +193,8 @@ impl App {
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse_gff(Path::new(&path))?);
-                self.show_info(format!("Loaded GFF file: {path}"));
+                self.ui
+                    .notify(Notification::info(format!("Loaded GFF file: {path}")));
             }
             Command::CheckForUpdate => self.jobs.check_for_update(true),
 
@@ -306,13 +304,6 @@ impl App {
         self.mouse_tracker.clear_anchors();
     }
 
-    fn show_info(&mut self, message: String) {
-        self.ui.notify(Notification {
-            level: NotificationLevel::Info,
-            message,
-        });
-    }
-
     fn session(&self) -> Result<&Session> {
         self.session
             .as_ref()
@@ -357,7 +348,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{buffer_text, session},
-        ui::selection::Selection,
+        ui::{bars::NotificationLevel, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
@@ -396,10 +387,6 @@ mod tests {
         .unwrap()
     }
 
-    fn notification_level(app: &App) -> Option<NotificationLevel> {
-        app.ui.notification().map(|notification| notification.level)
-    }
-
     #[test]
     fn execute_commands_clamps_once_after_batch() {
         let gapped: Vec<u8> = (0..200)
@@ -427,7 +414,10 @@ mod tests {
         ]);
 
         assert_eq!(app.ui.position.column, 3);
-        assert_eq!(notification_level(&app), Some(NotificationLevel::Error));
+        assert_eq!(
+            app.ui.notification().map(Notification::level),
+            Some(NotificationLevel::Error)
+        );
     }
 
     #[rstest]
@@ -492,7 +482,10 @@ mod tests {
 
         assert_eq!(app.session.as_ref().unwrap().source(), "test.fasta");
         assert_eq!(app.ui.loading, None);
-        assert_eq!(notification_level(&app), Some(NotificationLevel::Error));
+        assert_eq!(
+            app.ui.notification().map(Notification::level),
+            Some(NotificationLevel::Error)
+        );
     }
 
     #[rstest]
@@ -503,7 +496,10 @@ mod tests {
 
         app.finish_update_check(result, requested);
 
-        assert_eq!(notification_level(&app), Some(NotificationLevel::Info));
+        assert_eq!(
+            app.ui.notification().map(Notification::level),
+            Some(NotificationLevel::Info)
+        );
     }
 
     #[rstest]
@@ -517,7 +513,7 @@ mod tests {
 
         app.finish_update_check(result, requested);
 
-        assert_eq!(notification_level(&app), None);
+        assert_eq!(app.ui.notification().map(Notification::level), None);
     }
 
     fn press(app: &mut App, codes: impl IntoIterator<Item = KeyCode>) {
