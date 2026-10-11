@@ -20,10 +20,7 @@ pub(super) fn main_sequences(ctx: &Context, word: &str) -> Vec<String> {
 pub(super) fn pinned_sequences(ctx: &Context, word: &str) -> Vec<String> {
     let names = ctx
         .session
-        .map(|session| {
-            let layout = session.layout();
-            names(session, &layout.rows()[..layout.pinned()])
-        })
+        .map(|session| names(session, session.state().pinned()))
         .unwrap_or_default();
     fuzzy_match(word, names)
 }

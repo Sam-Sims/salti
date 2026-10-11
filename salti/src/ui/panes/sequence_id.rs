@@ -1,7 +1,6 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    macros::vertical,
     style::Styled,
     text::Line,
     widgets::{Paragraph, Widget},
@@ -10,7 +9,7 @@ use ratatui::{
 use crate::{
     core::session::Session,
     ui::{
-        layout::{RULER_HEIGHT_ROWS, Window, screen_rows},
+        layout::{Window, screen_rows, split_alignment_header},
         panes::{render_pane, separator_line},
         selection::Selection,
         state::ThemeState,
@@ -30,47 +29,50 @@ pub(crate) struct SequenceIdPane<'a> {
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let [_, ruler_area, rows_area] =
+            split_alignment_header(inner_area, self.local_feature_rows);
 
         let (layout, theme) = (self.session.layout(), self.theme);
-        let header_height = self.local_feature_rows + RULER_HEIGHT_ROWS;
-        let mut lines = vec![Line::from(" "); usize::from(header_height)];
         if !self.window.pinned.is_empty() {
-            lines[usize::from(self.local_feature_rows) + 1] =
-                Line::from("Pinned sequences:".set_style(theme.styles.text_muted));
+            Paragraph::new(vec![
+                Line::default(),
+                Line::from("Pinned sequences:".set_style(theme.styles.text_muted)),
+            ])
+            .render(ruler_area, buf);
         }
 
         let names = &self.window.names;
-        lines.extend(screen_rows(layout, self.window).map(|pos| match pos {
-            Some(pos) => {
-                let row = layout.rows()[pos];
-                let style = if pos < layout.pinned() {
-                    theme.styles.accent
-                } else {
-                    theme.styles.text
-                };
+        let lines: Vec<Line> = screen_rows(layout, self.window)
+            .map(|pos| match pos {
+                Some(pos) => {
+                    let row = layout.rows()[pos];
+                    let style = if pos < layout.pinned() {
+                        theme.styles.accent
+                    } else {
+                        theme.styles.text
+                    };
 
-                let id: String = self
-                    .session
-                    .base_alignment()
-                    .id(row)
-                    .chars()
-                    .skip(names.start)
-                    .take(names.len())
-                    .collect();
-                Line::from(vec![
-                    format!("{} ", row + 1).set_style(theme.styles.success),
-                    id.set_style(style),
-                ])
-            }
-            None => separator_line(inner_area.width, &theme.styles),
-        }));
-
+                    let id: String = self
+                        .session
+                        .base_alignment()
+                        .id(row)
+                        .chars()
+                        .skip(names.start)
+                        .take(names.len())
+                        .collect();
+                    Line::from(vec![
+                        format!("{} ", row + 1).set_style(theme.styles.success),
+                        id.set_style(style),
+                    ])
+                }
+                None => separator_line(rows_area.width, &theme.styles),
+            })
+            .collect();
         Paragraph::new(lines)
             .style(theme.styles.base_block)
-            .render(inner_area, buf);
+            .render(rows_area, buf);
 
         if let Some(selection) = self.selection {
-            let [_, rows_area] = inner_area.layout(&vertical![==header_height, *=1]);
             selection.shade_rows(
                 buf,
                 rows_area,

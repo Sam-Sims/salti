@@ -40,8 +40,7 @@ pub(super) fn pin_sequence(ctx: &Context, argument: &str) -> Result<Command> {
 
 pub(super) fn unpin_sequence(ctx: &Context, argument: &str) -> Result<Command> {
     let session = ctx.session()?;
-    let layout = session.layout();
-    let row = row_named(session, &layout.rows()[..layout.pinned()], argument)?;
+    let row = row_named(session, session.state().pinned(), argument)?;
     Ok(Command::UnpinSequence(row))
 }
 

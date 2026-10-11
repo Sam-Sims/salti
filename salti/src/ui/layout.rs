@@ -20,7 +20,7 @@ use crate::{
 /// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
 /// fixed height (rows) for the alignment ruler above sequence rows.
-pub(crate) const RULER_HEIGHT_ROWS: u16 = 2;
+const RULER_HEIGHT_ROWS: u16 = 2;
 /// width percentage for the left sequence ID pane (used in alignment and consensus panes).
 /// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
@@ -109,6 +109,10 @@ pub fn screen_rows(
     window.pinned.clone().map(Some).chain(divider).chain(main)
 }
 
+pub(crate) fn split_alignment_header(inner: Rect, local_feature_rows: u16) -> [Rect; 3] {
+    inner.layout(&vertical![==local_feature_rows, ==RULER_HEIGHT_ROWS, *=1])
+}
+
 #[derive(Debug, Default)]
 pub struct Window {
     pub pinned: Range<usize>,
@@ -169,12 +173,10 @@ impl AppLayout {
             consensus_sequence_id_pane_area,
             consensus_alignment_pane_area,
         ] = split_id_pane(consensus_area);
-        let inner_alignment_pane = Block::bordered().inner(alignment_pane_area);
-        let [_, _, sequence_rows_area] = inner_alignment_pane.layout(&vertical![
-                ==local_feature_rows,
-                ==RULER_HEIGHT_ROWS,
-                *=1
-        ]);
+        let [_, _, sequence_rows_area] = split_alignment_header(
+            Block::bordered().inner(alignment_pane_area),
+            local_feature_rows,
+        );
 
         let [gff_info_pane_area, gff_pane_area] = split_id_pane(gff_area);
         let gff_pane_rows = Block::bordered().inner(gff_pane_area);

@@ -1,7 +1,6 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
-    macros::vertical,
     style::{Style, Styled},
     text::Line,
     widgets::{Paragraph, Widget},
@@ -13,7 +12,7 @@ use crate::{
         session::{DiffMode, Session, WindowColumns},
     },
     ui::{
-        layout::{RULER_HEIGHT_ROWS, Window, screen_rows},
+        layout::{Window, screen_rows, split_alignment_header},
         panes::{
             local_feature_track::LocalFeatureTrack, render_column_scrollbar, render_pane,
             ruler::Ruler, separator_line, stretch,
@@ -41,11 +40,8 @@ impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
-        let [local_feature_area, ruler_area, sequence_rows_area] = inner_area.layout(&vertical![
-            ==self.local_feature_rows,
-            ==RULER_HEIGHT_ROWS,
-            *=1
-        ]);
+        let [local_feature_area, ruler_area, sequence_rows_area] =
+            split_alignment_header(inner_area, self.local_feature_rows);
 
         if let Some(gff) = self.gff {
             LocalFeatureTrack {
