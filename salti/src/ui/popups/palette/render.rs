@@ -136,30 +136,19 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }
-
-    let mut lines = Vec::new();
-    for raw_line in text.split('\n') {
-        let mut current = String::new();
-        for word in raw_line.split_whitespace() {
-            if current.is_empty() {
-                current.push_str(word);
-                continue;
-            }
-            if current.len() + 1 + word.len() > width {
-                lines.push(current);
-                current = word.to_string();
-            } else {
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let current = lines.last_mut().expect("lines starts with one line");
+        let fits = usize::from(current.as_str().cell_width()) + 1 + usize::from(word.cell_width())
+            <= width;
+        if current.is_empty() || fits {
+            if !current.is_empty() {
                 current.push(' ');
-                current.push_str(word);
             }
+            current.push_str(word);
+        } else {
+            lines.push(word.to_string());
         }
-        if !current.is_empty() {
-            lines.push(current);
-        }
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
     }
     lines
 }
