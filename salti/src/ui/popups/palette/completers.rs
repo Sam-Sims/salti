@@ -129,11 +129,10 @@ mod tests {
     use crate::{
         core::session::DiffMode,
         test_utils::{genes, pinned_session, with_context},
+        ui::popups::palette::commands::Completer,
     };
 
-    type CompleterFn = fn(&Context, &str) -> Vec<String>;
-
-    fn complete(completer: CompleterFn, argument: &str) -> Vec<String> {
+    fn complete(completer: Completer, argument: &str) -> Vec<String> {
         let session = pinned_session(3, &[1]);
         let gff = genes(&[0..3, 3..6]);
         with_context(Some(&session), Some(&gff), |ctx| completer(ctx, argument))
@@ -149,7 +148,7 @@ mod tests {
     #[case::main_sequences_fuzzy_match_word(main_sequences, "2", &["s2"])]
     #[case::choices_in_order(choices::<DiffMode>, "", &["off", "reference", "consensus"])]
     fn completer_works(
-        #[case] completer: CompleterFn,
+        #[case] completer: Completer,
         #[case] argument: &str,
         #[case] expected: &[&str],
     ) {
@@ -158,7 +157,7 @@ mod tests {
 
     #[rstest]
     #[case::filter_matches_invalid_regex(filter_matches, "(")]
-    fn completer_is_empty(#[case] completer: CompleterFn, #[case] argument: &str) {
+    fn completer_is_empty(#[case] completer: Completer, #[case] argument: &str) {
         assert_eq!(complete(completer, argument), Vec::<String>::new());
     }
 
@@ -167,7 +166,7 @@ mod tests {
     #[case::main_sequences(main_sequences)]
     #[case::pinned_sequences(pinned_sequences)]
     #[case::features(features)]
-    fn completer_is_empty_without_document(#[case] completer: CompleterFn) {
+    fn completer_is_empty_without_document(#[case] completer: Completer) {
         assert_eq!(
             with_context(None, None, |ctx| completer(ctx, "")),
             Vec::<String>::new()

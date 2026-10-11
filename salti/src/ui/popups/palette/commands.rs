@@ -17,16 +17,16 @@ pub(super) enum Action {
     Fixed(Command),
     Optional {
         run: fn(&Context, Option<&str>) -> Result<Command>,
-        completer: Completer,
+        completer: Option<Completer>,
     },
     Required {
         run: fn(&Context, &str) -> Result<Command>,
-        completer: Completer,
+        completer: Option<Completer>,
     },
 }
 
 impl Action {
-    pub(super) fn completer(&self) -> Completer {
+    pub(super) fn completer(&self) -> Option<Completer> {
         match self {
             Self::Fixed(_) => None,
             Self::Optional { completer, .. } | Self::Required { completer, .. } => *completer,
@@ -34,7 +34,7 @@ impl Action {
     }
 }
 
-pub(super) type Completer = Option<fn(&Context, &str) -> Vec<String>>;
+pub(super) type Completer = fn(&Context, &str) -> Vec<String>;
 
 pub(super) const COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
