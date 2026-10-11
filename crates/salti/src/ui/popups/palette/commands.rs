@@ -149,6 +149,12 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         action: Action::Fixed(Command::CheckForUpdate),
     },
     PaletteCommand {
+        name: "keybinds",
+        aliases: &[],
+        doc: "Show the key bindings, one tab per category.",
+        action: Action::Fixed(Command::OpenKeybinds),
+    },
+    PaletteCommand {
         name: "quit",
         aliases: &["q"],
         doc: "Exit the application.",

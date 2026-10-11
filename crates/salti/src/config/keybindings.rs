@@ -2,134 +2,203 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::command::Command;
 
-struct Binding {
+pub(crate) struct Binding {
+    // unsure if to add keybinds config file - if so name will be useful/needed
+    #[allow(dead_code)]
+    name: &'static str,
     code: KeyCode,
     modifiers: KeyModifiers,
-    action: Command,
-    #[allow(dead_code)]
-    help: &'static str,
+    command: Command,
+    pub(crate) category: Category,
+    pub(crate) description: &'static str,
 }
 
-const KEY_BINDINGS: &[Binding] = &[
+impl Binding {
+    pub(crate) fn key(&self) -> String {
+        if self.modifiers.is_empty() {
+            self.code.to_string()
+        } else {
+            format!("{}+{}", self.modifiers, self.code)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::Display, strum::VariantArray)]
+pub(crate) enum Category {
+    #[default]
+    General,
+    Navigation,
+    Translation,
+}
+
+pub(crate) const KEY_BINDINGS: &[Binding] = &[
     Binding {
+        name: "quit",
         code: KeyCode::Char('q'),
         modifiers: KeyModifiers::NONE,
-        action: Command::Quit,
-        help: "Quit application",
+        command: Command::Quit,
+        category: Category::General,
+        description: "Quit application",
     },
     Binding {
+        name: "open-palette",
         code: KeyCode::Char(':'),
         modifiers: KeyModifiers::NONE,
-        action: Command::OpenPalette,
-        help: "Open command palette",
+        command: Command::OpenPalette,
+        category: Category::General,
+        description: "Open command palette",
     },
     Binding {
-        code: KeyCode::Char('t'),
+        name: "keybinds",
+        code: KeyCode::Char('?'),
         modifiers: KeyModifiers::NONE,
-        action: Command::ToggleTranslationOverlay,
-        help: "Toggle the translation overlay",
+        command: Command::OpenKeybinds,
+        category: Category::General,
+        description: "Show key bindings",
     },
     Binding {
-        code: KeyCode::Char('T'),
-        modifiers: KeyModifiers::NONE,
-        action: Command::ToggleProteinView,
-        help: "Toggle the protein view",
-    },
-    Binding {
-        code: KeyCode::Char('1'),
-        modifiers: KeyModifiers::ALT,
-        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame1),
-        help: "Set translation frame 1",
-    },
-    Binding {
-        code: KeyCode::Char('2'),
-        modifiers: KeyModifiers::ALT,
-        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2),
-        help: "Set translation frame 2",
-    },
-    Binding {
-        code: KeyCode::Char('3'),
-        modifiers: KeyModifiers::ALT,
-        action: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame3),
-        help: "Set translation frame 3",
-    },
-    Binding {
+        name: "open-minimap",
         code: KeyCode::Char('m'),
         modifiers: KeyModifiers::NONE,
-        action: Command::OpenMinimap,
-        help: "Open minimap",
+        command: Command::OpenMinimap,
+        category: Category::General,
+        description: "Open minimap",
     },
     Binding {
-        code: KeyCode::Down,
-        modifiers: KeyModifiers::NONE,
-        action: Command::ScrollDown { amount: 1 },
-        help: "Scroll down",
-    },
-    Binding {
-        code: KeyCode::Down,
-        modifiers: KeyModifiers::SHIFT,
-        action: Command::ScrollDown { amount: 10 },
-        help: "Fast scroll down",
-    },
-    Binding {
+        name: "scroll-up",
         code: KeyCode::Up,
         modifiers: KeyModifiers::NONE,
-        action: Command::ScrollUp { amount: 1 },
-        help: "Scroll up",
+        command: Command::ScrollUp { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll up",
     },
     Binding {
+        name: "scroll-down",
+        code: KeyCode::Down,
+        modifiers: KeyModifiers::NONE,
+        command: Command::ScrollDown { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll down",
+    },
+    Binding {
+        name: "scroll-left",
+        code: KeyCode::Left,
+        modifiers: KeyModifiers::NONE,
+        command: Command::ScrollLeft { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll left",
+    },
+    Binding {
+        name: "scroll-right",
+        code: KeyCode::Right,
+        modifiers: KeyModifiers::NONE,
+        command: Command::ScrollRight { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll right",
+    },
+    Binding {
+        name: "scroll-up-fast",
         code: KeyCode::Up,
         modifiers: KeyModifiers::SHIFT,
-        action: Command::ScrollUp { amount: 10 },
-        help: "Fast scroll up",
+        command: Command::ScrollUp { amount: 10 },
+        category: Category::Navigation,
+        description: "Fast scroll up",
     },
     Binding {
-        code: KeyCode::Left,
-        modifiers: KeyModifiers::NONE,
-        action: Command::ScrollLeft { amount: 1 },
-        help: "Scroll left",
+        name: "scroll-down-fast",
+        code: KeyCode::Down,
+        modifiers: KeyModifiers::SHIFT,
+        command: Command::ScrollDown { amount: 10 },
+        category: Category::Navigation,
+        description: "Fast scroll down",
     },
     Binding {
+        name: "scroll-left-fast",
         code: KeyCode::Left,
         modifiers: KeyModifiers::SHIFT,
-        action: Command::ScrollLeft { amount: 10 },
-        help: "Fast scroll left",
+        command: Command::ScrollLeft { amount: 10 },
+        category: Category::Navigation,
+        description: "Fast scroll left",
     },
     Binding {
-        code: KeyCode::Right,
-        modifiers: KeyModifiers::NONE,
-        action: Command::ScrollRight { amount: 1 },
-        help: "Scroll right",
-    },
-    Binding {
+        name: "scroll-right-fast",
         code: KeyCode::Right,
         modifiers: KeyModifiers::SHIFT,
-        action: Command::ScrollRight { amount: 10 },
-        help: "Fast scroll right",
+        command: Command::ScrollRight { amount: 10 },
+        category: Category::Navigation,
+        description: "Fast scroll right",
     },
     Binding {
+        name: "scroll-names-left",
         code: KeyCode::Left,
         modifiers: KeyModifiers::ALT,
-        action: Command::ScrollNamesLeft { amount: 1 },
-        help: "Scroll names left",
+        command: Command::ScrollNamesLeft { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll names left",
     },
     Binding {
+        name: "scroll-names-right",
         code: KeyCode::Right,
         modifiers: KeyModifiers::ALT,
-        action: Command::ScrollNamesRight { amount: 1 },
-        help: "Scroll names right",
+        command: Command::ScrollNamesRight { amount: 1 },
+        category: Category::Navigation,
+        description: "Scroll names right",
     },
     Binding {
+        name: "jump-start",
         code: KeyCode::Home,
         modifiers: KeyModifiers::NONE,
-        action: Command::JumpToIndex(0),
-        help: "Jump to start of alignment",
+        command: Command::JumpToIndex(0),
+        category: Category::Navigation,
+        description: "Jump to start of alignment",
     },
     Binding {
+        name: "jump-end",
         code: KeyCode::End,
         modifiers: KeyModifiers::NONE,
-        action: Command::JumpToEnd,
-        help: "Jump to end of alignment",
+        command: Command::JumpToEnd,
+        category: Category::Navigation,
+        description: "Jump to end of alignment",
+    },
+    Binding {
+        name: "toggle-translation-overlay",
+        code: KeyCode::Char('t'),
+        modifiers: KeyModifiers::NONE,
+        command: Command::ToggleTranslationOverlay,
+        category: Category::Translation,
+        description: "Toggle the translation overlay",
+    },
+    Binding {
+        name: "toggle-protein-view",
+        code: KeyCode::Char('T'),
+        modifiers: KeyModifiers::NONE,
+        command: Command::ToggleProteinView,
+        category: Category::Translation,
+        description: "Toggle the protein view",
+    },
+    Binding {
+        name: "set-translation-frame-1",
+        code: KeyCode::Char('1'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame1),
+        category: Category::Translation,
+        description: "Set translation frame 1",
+    },
+    Binding {
+        name: "set-translation-frame-2",
+        code: KeyCode::Char('2'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2),
+        category: Category::Translation,
+        description: "Set translation frame 2",
+    },
+    Binding {
+        name: "set-translation-frame-3",
+        code: KeyCode::Char('3'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame3),
+        category: Category::Translation,
+        description: "Set translation frame 3",
     },
 ];
 
@@ -141,11 +210,13 @@ pub(crate) fn lookup(key: KeyEvent) -> Option<Command> {
     KEY_BINDINGS
         .iter()
         .find(|binding| binding.code == key.code && binding.modifiers == modifiers)
-        .map(|binding| binding.action.clone())
+        .map(|binding| binding.command.clone())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use rstest::rstest;
 
     use super::*;
@@ -154,6 +225,7 @@ mod tests {
     #[case::letter(KeyCode::Char('T'), KeyModifiers::NONE, Command::ToggleProteinView)]
     #[case::shifted_letter(KeyCode::Char('T'), KeyModifiers::SHIFT, Command::ToggleProteinView)]
     #[case::shifted_punctuation(KeyCode::Char(':'), KeyModifiers::SHIFT, Command::OpenPalette)]
+    #[case::shifted_question_mark(KeyCode::Char('?'), KeyModifiers::SHIFT, Command::OpenKeybinds)]
     #[case::arrow(KeyCode::Up, KeyModifiers::NONE, Command::ScrollUp { amount: 1 })]
     #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, Command::ScrollUp { amount: 10 })]
     fn lookup_works(
@@ -169,5 +241,46 @@ mod tests {
     #[case::control(KeyCode::Char('t'), KeyModifiers::CONTROL)]
     fn lookup_rejects(#[case] code: KeyCode, #[case] modifiers: KeyModifiers) {
         assert_eq!(lookup(KeyEvent::new(code, modifiers)), None);
+    }
+
+    #[test]
+    fn key_bindings_are_unique() {
+        let mut names = HashSet::new();
+        let mut keys = HashSet::new();
+        for binding in KEY_BINDINGS {
+            assert!(
+                names.insert(binding.name),
+                "duplicate name {}",
+                binding.name
+            );
+            assert!(
+                keys.insert((binding.code, binding.modifiers)),
+                "duplicate key for {}",
+                binding.name
+            );
+            assert!(
+                !(matches!(binding.code, KeyCode::Char(_))
+                    && binding.modifiers.contains(KeyModifiers::SHIFT)),
+                "{} binds shift on a character",
+                binding.name
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::arrow(KeyCode::Up, KeyModifiers::NONE, "Up")]
+    #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, "Shift+Up")]
+    #[case::letter(KeyCode::Char('T'), KeyModifiers::NONE, "T")]
+    #[case::punctuation(KeyCode::Char('?'), KeyModifiers::NONE, "?")]
+    fn key_works(#[case] code: KeyCode, #[case] modifiers: KeyModifiers, #[case] expected: &str) {
+        let binding = Binding {
+            name: "test",
+            code,
+            modifiers,
+            command: Command::Quit,
+            category: Category::General,
+            description: "",
+        };
+        assert_eq!(binding.key(), expected);
     }
 }

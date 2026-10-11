@@ -6,6 +6,7 @@ pub enum Command {
     OpenPalette,
     ClosePopup,
     OpenMinimap,
+    OpenKeybinds,
     SetTheme(ThemeId),
     ShowNotification(Notification),
     LoadAlignment(String),

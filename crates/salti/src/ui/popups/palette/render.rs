@@ -8,10 +8,12 @@ use ratatui::{
 };
 
 use super::commands::PaletteCommand;
-use crate::{config::theme::ThemeStyles, ui::truncate_label};
+use crate::{
+    config::theme::ThemeStyles,
+    ui::{popups::COLUMN_GAP, truncate_label},
+};
 
 const MAX_LIST_ROWS: usize = 10;
-const COLUMN_GAP: usize = 2;
 
 pub(super) fn rows_above_prompt(
     items: &[String],

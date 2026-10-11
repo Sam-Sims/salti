@@ -1,4 +1,5 @@
 mod fuzzy;
+pub(crate) mod keybinds;
 pub(crate) mod minimap;
 pub(crate) mod palette;
 mod text_input;
@@ -16,15 +17,18 @@ use crate::{
     core::{gff::Gff, session::Session},
     ui::{
         layout::ScreenLayout,
-        popups::{minimap::Minimap, palette::PaletteState},
+        popups::{keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
         state::ThemeState,
     },
 };
+
+const COLUMN_GAP: usize = 2;
 
 #[derive(Debug)]
 pub(crate) enum Popup {
     Palette(PaletteState),
     Minimap(Minimap),
+    Keybinds(Keybinds),
 }
 
 impl Popup {
@@ -66,6 +70,7 @@ impl Popup {
         match self {
             Self::Palette(palette) => palette,
             Self::Minimap(minimap) => minimap,
+            Self::Keybinds(keybinds) => keybinds,
         }
     }
 
@@ -73,6 +78,7 @@ impl Popup {
         match self {
             Self::Palette(palette) => palette,
             Self::Minimap(minimap) => minimap,
+            Self::Keybinds(keybinds) => keybinds,
         }
     }
 }
