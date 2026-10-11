@@ -58,11 +58,7 @@ impl ScreenLayout {
             }
             _ => (0, 0),
         };
-        let app = AppLayout::new(
-            frame.content_area,
-            gff_height,
-            AlignmentHeaderLayout::new(local_feature_rows),
-        );
+        let app = AppLayout::new(frame.content_area, gff_height, local_feature_rows);
 
         let available_sequence_rows = usize::from(app.alignment_pane_sequence_rows.height);
         let pinned = session.map_or(0, |session| session.layout().pinned());
@@ -100,21 +96,6 @@ impl ScreenLayout {
                 names,
             },
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AlignmentHeaderLayout {
-    pub local_feature_rows: u16,
-}
-
-impl AlignmentHeaderLayout {
-    pub(crate) fn new(local_feature_rows: u16) -> Self {
-        Self { local_feature_rows }
-    }
-
-    pub(crate) fn height(self) -> u16 {
-        self.local_feature_rows.saturating_add(RULER_HEIGHT_ROWS)
     }
 }
 
@@ -167,7 +148,7 @@ pub struct AppLayout {
     pub sequence_id_pane: Rect,
     pub alignment_pane: Rect,
     pub alignment_pane_sequence_rows: Rect,
-    pub alignment_header: AlignmentHeaderLayout,
+    pub local_feature_rows: u16,
     pub consensus_sequence_id_pane: Rect,
     pub consensus_alignment_pane: Rect,
     pub gff_info_pane: Rect,
@@ -176,11 +157,7 @@ pub struct AppLayout {
 }
 
 impl AppLayout {
-    pub fn new(
-        content_area: Rect,
-        gff_height: u16,
-        alignment_header: AlignmentHeaderLayout,
-    ) -> Self {
+    pub fn new(content_area: Rect, gff_height: u16, local_feature_rows: u16) -> Self {
         let [gff_area, main_area] =
             content_area.layout(&vertical![==gff_height, *=1].spacing(Spacing::Overlap(1)));
 
@@ -194,7 +171,7 @@ impl AppLayout {
         ] = split_id_pane(consensus_area);
         let inner_alignment_pane = Block::bordered().inner(alignment_pane_area);
         let [_, _, sequence_rows_area] = inner_alignment_pane.layout(&vertical![
-                ==alignment_header.local_feature_rows,
+                ==local_feature_rows,
                 ==RULER_HEIGHT_ROWS,
                 *=1
         ]);
@@ -206,7 +183,7 @@ impl AppLayout {
             sequence_id_pane: sequence_id_pane_area,
             alignment_pane: alignment_pane_area,
             alignment_pane_sequence_rows: sequence_rows_area,
-            alignment_header,
+            local_feature_rows,
             consensus_sequence_id_pane: consensus_sequence_id_pane_area,
             consensus_alignment_pane: consensus_alignment_pane_area,
             gff_info_pane: gff_info_pane_area,
@@ -294,7 +271,7 @@ mod tests {
 
         let screen = ScreenLayout::new(AREA, Some(&session), Some(&gff), &mut position);
 
-        assert_eq!(screen.app.alignment_header.local_feature_rows, expected);
+        assert_eq!(screen.app.local_feature_rows, expected);
     }
 
     #[rstest]

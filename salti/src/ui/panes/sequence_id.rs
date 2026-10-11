@@ -1,6 +1,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    macros::vertical,
     style::Styled,
     text::Line,
     widgets::{Paragraph, Widget},
@@ -9,16 +10,20 @@ use ratatui::{
 use crate::{
     core::session::Session,
     ui::{
-        layout::{AlignmentHeaderLayout, Window, screen_rows},
+        layout::{RULER_HEIGHT_ROWS, Window, screen_rows},
         panes::{render_pane, separator_line},
+        selection::Selection,
         state::ThemeState,
     },
 };
 
+const SELECTION_ALPHA: f32 = 0.3;
+
 pub(crate) struct SequenceIdPane<'a> {
     pub(crate) session: &'a Session,
     pub(crate) window: &'a Window,
-    pub(crate) header: AlignmentHeaderLayout,
+    pub(crate) local_feature_rows: u16,
+    pub(crate) selection: Option<Selection>,
     pub(crate) theme: &'a ThemeState,
 }
 
@@ -27,9 +32,10 @@ impl Widget for SequenceIdPane<'_> {
         let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let (layout, theme) = (self.session.layout(), self.theme);
-        let mut lines = vec![Line::from(" "); usize::from(self.header.height())];
+        let header_height = self.local_feature_rows + RULER_HEIGHT_ROWS;
+        let mut lines = vec![Line::from(" "); usize::from(header_height)];
         if !self.window.pinned.is_empty() {
-            lines[usize::from(self.header.local_feature_rows) + 1] =
+            lines[usize::from(self.local_feature_rows) + 1] =
                 Line::from("Pinned sequences:".set_style(theme.styles.text_muted));
         }
 
@@ -62,6 +68,18 @@ impl Widget for SequenceIdPane<'_> {
         Paragraph::new(lines)
             .style(theme.styles.base_block)
             .render(inner_area, buf);
+
+        if let Some(selection) = self.selection {
+            let [_, rows_area] = inner_area.layout(&vertical![==header_height, *=1]);
+            selection.shade_rows(
+                buf,
+                rows_area,
+                layout,
+                self.window,
+                theme.theme.accent,
+                SELECTION_ALPHA,
+            );
+        }
     }
 }
 
@@ -76,16 +94,17 @@ mod tests {
 
     const CAT: &[u8] = b"CATCATCATCATCATCAT";
 
-    fn render_text(session: &Session, window: &Window, header: AlignmentHeaderLayout) -> String {
+    fn render_text(session: &Session, window: &Window, local_feature_rows: u16) -> String {
         let area = Rect::new(0, 0, 150, 12);
-        let layout = AppLayout::new(area, 0, header);
+        let layout = AppLayout::new(area, 0, local_feature_rows);
         let theme = ThemeState::default();
         let mut buf = Buffer::empty(area);
 
         SequenceIdPane {
             session,
             window,
-            header,
+            local_feature_rows,
+            selection: None,
             theme: &theme,
         }
         .render(layout.sequence_id_pane, &mut buf);
@@ -103,22 +122,14 @@ mod tests {
     fn basic() {
         let session = seqs(3);
 
-        insta::assert_snapshot!(render_text(
-            &session,
-            &full_window(&session),
-            AlignmentHeaderLayout::new(0)
-        ));
+        insta::assert_snapshot!(render_text(&session, &full_window(&session), 0));
     }
 
     #[test]
     fn feature_rows() {
         let session = seqs(3);
 
-        insta::assert_snapshot!(render_text(
-            &session,
-            &full_window(&session),
-            AlignmentHeaderLayout::new(2)
-        ));
+        insta::assert_snapshot!(render_text(&session, &full_window(&session), 2));
     }
 
     #[test]
@@ -132,11 +143,7 @@ mod tests {
             })
             .unwrap();
 
-        insta::assert_snapshot!(render_text(
-            &session,
-            &full_window(&session),
-            AlignmentHeaderLayout::new(0)
-        ));
+        insta::assert_snapshot!(render_text(&session, &full_window(&session), 0));
     }
 
     #[test]
@@ -151,10 +158,6 @@ mod tests {
             ..full_window(&session)
         };
 
-        insta::assert_snapshot!(render_text(
-            &session,
-            &window,
-            AlignmentHeaderLayout::new(0)
-        ));
+        insta::assert_snapshot!(render_text(&session, &window, 0));
     }
 }

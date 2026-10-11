@@ -1,14 +1,15 @@
 use ratatui::{
-    Frame,
+    buffer::Buffer,
     layout::Rect,
     style::{Styled, Stylize},
     text::Line,
+    widgets::Widget,
 };
 
 use crate::{
     core::{gff::Gff, session::Session},
     ui::{
-        bars::{render_frame, render_input_bar},
+        bars::{BottomStatusBar, InputBar, TopStatusBar},
         input_name,
         layout::ScreenLayout,
         panes::{
@@ -19,61 +20,50 @@ use crate::{
         },
         popups::Context,
         render_centred_lines,
-        selection::render_mouse_selection,
-        state::UiState,
+        state::{ThemeState, UiState},
     },
 };
 
-fn render_empty_state_with_ui(f: &mut Frame, area: Rect, ui: &UiState) {
-    let theme = &ui.theme;
-    let lines = match &ui.loading {
-        Some(input) => vec![Line::from(
-            format!("Loading {}", input_name(input)).set_style(theme.styles.text),
-        )],
-        None => vec![
-            Line::from(
-                "salti: A modern MSA browser for the terminal."
-                    .fg(theme.theme.text)
-                    .bold(),
-            ),
-            Line::from(
-                "Use the command palette to open an alignment.".set_style(theme.styles.text),
-            ),
-            Line::from(""),
-            Line::from(
-                "Hint: use :load-alignment <alignment.fasta>"
-                    .fg(theme.theme.text_dim)
-                    .italic(),
-            ),
-        ],
-    };
-    render_centred_lines(lines, theme.styles.base_block, area, f.buffer_mut());
-}
-
 pub fn render(
-    f: &mut Frame,
+    buf: &mut Buffer,
     screen: &ScreenLayout,
     session: Option<&Session>,
     gff: Option<&Gff>,
     ui: &UiState,
 ) {
-    if f.area().height == 0 {
+    if buf.area.height == 0 {
         return;
     }
-    render_frame(f, screen, session, ui);
-    match session {
-        Some(session) => render_panes(f, screen, session, gff, ui),
-        None => render_empty_state_with_ui(f, screen.frame.content_area, ui),
+    let styles = &ui.theme.styles;
+    TopStatusBar {
+        session,
+        window: &screen.window,
+        loading: ui.loading.as_deref(),
+        styles,
     }
-    render_input_bar(
-        f,
-        screen.frame.input_area,
-        ui.notification(),
-        &ui.theme.styles,
-    );
+    .render(screen.frame.top_status_area, buf);
+    BottomStatusBar {
+        session,
+        selection: ui.selection,
+        styles,
+    }
+    .render(screen.frame.bottom_status_area, buf);
+    match session {
+        Some(session) => render_panes(buf, screen, session, gff, ui),
+        None => EmptyState {
+            loading: ui.loading.as_deref(),
+            theme: &ui.theme,
+        }
+        .render(screen.frame.content_area, buf),
+    }
+    InputBar {
+        notification: ui.notification(),
+        styles,
+    }
+    .render(screen.frame.input_area, buf);
     if let Some(popup) = &ui.popup {
         popup.render(
-            f.buffer_mut(),
+            buf,
             &Context {
                 session,
                 gff,
@@ -84,8 +74,41 @@ pub fn render(
     }
 }
 
+struct EmptyState<'a> {
+    loading: Option<&'a str>,
+    theme: &'a ThemeState,
+}
+
+impl Widget for EmptyState<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let theme = self.theme;
+        let lines = match self.loading {
+            Some(input) => vec![Line::from(
+                format!("Loading {}", input_name(input)).set_style(theme.styles.text),
+            )],
+            None => vec![
+                Line::from(
+                    "salti: A modern MSA browser for the terminal."
+                        .fg(theme.theme.text)
+                        .bold(),
+                ),
+                Line::from(
+                    "Use the command palette to open an alignment.".set_style(theme.styles.text),
+                ),
+                Line::from(""),
+                Line::from(
+                    "Hint: use :load-alignment <alignment.fasta>"
+                        .fg(theme.theme.text_dim)
+                        .italic(),
+                ),
+            ],
+        };
+        render_centred_lines(lines, theme.styles.base_block, area, buf);
+    }
+}
+
 fn render_panes(
-    f: &mut Frame,
+    buf: &mut Buffer,
     screen: &ScreenLayout,
     session: &Session,
     gff: Option<&Gff>,
@@ -95,60 +118,49 @@ fn render_panes(
     let columns = session.window_columns(window.columns.clone());
 
     if let Some(gff) = gff {
-        f.render_widget(
-            GffInfoPane {
-                tooltip: ui.gff_tooltip.as_deref(),
-                theme: &ui.theme,
-            },
-            layout.gff_info_pane,
-        );
-        f.render_widget(
-            GffPane {
-                gff,
-                session,
-                window,
-                theme: &ui.theme,
-            },
-            layout.gff_pane,
-        );
+        GffInfoPane {
+            tooltip: ui.gff_tooltip.as_deref(),
+            theme: &ui.theme,
+        }
+        .render(layout.gff_info_pane, buf);
+        GffPane {
+            gff,
+            session,
+            window,
+            theme: &ui.theme,
+        }
+        .render(layout.gff_pane, buf);
     }
 
-    f.render_widget(
-        SequenceIdPane {
-            session,
-            window,
-            header: layout.alignment_header,
-            theme: &ui.theme,
-        },
-        layout.sequence_id_pane,
-    );
-    f.render_widget(
-        AlignmentPane {
-            session,
-            window,
-            columns: &columns,
-            gff,
-            header: layout.alignment_header,
-            theme: &ui.theme,
-        },
-        layout.alignment_pane,
-    );
-    f.render_widget(
-        ConsensusSequenceIdPane {
-            session,
-            theme: &ui.theme,
-        },
-        layout.consensus_sequence_id_pane,
-    );
-    f.render_widget(
-        ConsensusAlignmentPane {
-            session,
-            columns: &columns,
-            theme: &ui.theme,
-        },
-        layout.consensus_alignment_pane,
-    );
-    render_mouse_selection(f.buffer_mut(), screen, session, ui);
+    SequenceIdPane {
+        session,
+        window,
+        local_feature_rows: layout.local_feature_rows,
+        selection: ui.selection,
+        theme: &ui.theme,
+    }
+    .render(layout.sequence_id_pane, buf);
+    AlignmentPane {
+        session,
+        window,
+        columns: &columns,
+        gff,
+        local_feature_rows: layout.local_feature_rows,
+        selection: ui.selection,
+        theme: &ui.theme,
+    }
+    .render(layout.alignment_pane, buf);
+    ConsensusSequenceIdPane {
+        session,
+        theme: &ui.theme,
+    }
+    .render(layout.consensus_sequence_id_pane, buf);
+    ConsensusAlignmentPane {
+        session,
+        columns: &columns,
+        theme: &ui.theme,
+    }
+    .render(layout.consensus_alignment_pane, buf);
 }
 
 #[cfg(test)]
@@ -184,7 +196,7 @@ mod tests {
         let screen = ScreenLayout::new(AREA, session, None, &mut Position::default());
 
         terminal
-            .draw(|frame| render(frame, &screen, session, None, ui))
+            .draw(|frame| render(frame.buffer_mut(), &screen, session, None, ui))
             .unwrap();
 
         buffer_text(terminal.backend().buffer(), AREA)

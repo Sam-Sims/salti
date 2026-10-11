@@ -13,22 +13,27 @@ use crate::{
         session::{DiffMode, Session, WindowColumns},
     },
     ui::{
-        layout::{AlignmentHeaderLayout, RULER_HEIGHT_ROWS, Window, screen_rows},
+        layout::{RULER_HEIGHT_ROWS, Window, screen_rows},
         panes::{
             local_feature_track::LocalFeatureTrack, render_column_scrollbar, render_pane,
             ruler::Ruler, separator_line, stretch,
         },
         render_centred_lines,
+        selection::Selection,
         state::ThemeState,
     },
 };
+
+const SELECTION_ROW_ALPHA: f32 = 0.22;
+const SELECTION_COLUMN_ALPHA: f32 = 0.28;
 
 pub(crate) struct AlignmentPane<'a> {
     pub(crate) session: &'a Session,
     pub(crate) window: &'a Window,
     pub(crate) columns: &'a WindowColumns<'a>,
     pub(crate) gff: Option<&'a Gff>,
-    pub(crate) header: AlignmentHeaderLayout,
+    pub(crate) local_feature_rows: u16,
+    pub(crate) selection: Option<Selection>,
     pub(crate) theme: &'a ThemeState,
 }
 
@@ -37,7 +42,7 @@ impl Widget for AlignmentPane<'_> {
         let inner_area = render_pane(&self.theme.styles, None, area, buf);
 
         let [local_feature_area, ruler_area, sequence_rows_area] = inner_area.layout(&vertical![
-            ==self.header.local_feature_rows,
+            ==self.local_feature_rows,
             ==RULER_HEIGHT_ROWS,
             *=1
         ]);
@@ -121,6 +126,24 @@ impl Widget for AlignmentPane<'_> {
         Paragraph::new(lines)
             .style(theme.styles.base_block)
             .render(sequence_rows_area, buf);
+
+        if let Some(selection) = self.selection {
+            selection.shade_rows(
+                buf,
+                sequence_rows_area,
+                layout,
+                self.window,
+                theme.theme.surface_bg,
+                SELECTION_ROW_ALPHA,
+            );
+            selection.shade_columns(
+                buf,
+                sequence_rows_area,
+                self.window,
+                theme.theme.panel_bg,
+                SELECTION_COLUMN_ALPHA,
+            );
+        }
     }
 }
 
@@ -149,11 +172,10 @@ mod tests {
     }
 
     fn render_text(session: &Session, gff: Option<&Gff>, window: &Window, area: Rect) -> String {
-        let header = gff.map_or(AlignmentHeaderLayout::new(0), |gff| {
-            let rows = local_feature_row_count(gff, session, &window.columns);
-            AlignmentHeaderLayout::new(u16::try_from(rows).unwrap())
+        let local_feature_rows = gff.map_or(0, |gff| {
+            u16::try_from(local_feature_row_count(gff, session, &window.columns)).unwrap()
         });
-        let layout = AppLayout::new(area, 0, header);
+        let layout = AppLayout::new(area, 0, local_feature_rows);
         let columns = session.window_columns(window.columns.clone());
         let theme = ThemeState::default();
         let mut buf = Buffer::empty(area);
@@ -163,7 +185,8 @@ mod tests {
             window,
             columns: &columns,
             gff,
-            header,
+            local_feature_rows,
+            selection: None,
             theme: &theme,
         }
         .render(layout.alignment_pane, &mut buf);

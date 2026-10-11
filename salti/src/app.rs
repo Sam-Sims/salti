@@ -115,7 +115,7 @@ impl App {
 
     pub(crate) fn draw(&self, frame: &mut Frame) {
         render(
-            frame,
+            frame.buffer_mut(),
             &self.screen,
             self.session.as_ref(),
             self.gff.as_ref(),

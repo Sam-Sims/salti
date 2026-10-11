@@ -9,7 +9,7 @@ use crate::{
         session::{Position, Session},
     },
     ui::{
-        layout::{AlignmentHeaderLayout, AppLayout, FrameLayout, ScreenLayout, Window},
+        layout::{AppLayout, FrameLayout, ScreenLayout, Window},
         popups::Context,
         state::{ThemeState, UiState},
     },
@@ -63,11 +63,7 @@ pub(crate) fn screen(area: Rect, gff_height: u16, window: Window) -> ScreenLayou
     ScreenLayout {
         area,
         frame,
-        app: AppLayout::new(
-            frame.content_area,
-            gff_height,
-            AlignmentHeaderLayout::new(0),
-        ),
+        app: AppLayout::new(frame.content_area, gff_height, 0),
         window,
     }
 }
