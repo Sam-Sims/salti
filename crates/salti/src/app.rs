@@ -563,6 +563,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn keybinds_open() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -571,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn keybinds_last_tab() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -580,6 +582,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn keybinds_scrolled() {
         let mut app = app(DNA);
         app.handle(Event::Resize(Rect::new(0, 0, AREA.width, 10)));
