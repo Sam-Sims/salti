@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use crate::{
     command::Command,
@@ -131,12 +131,9 @@ fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, them
             .and_then(|byte| byte_styles[usize::from(byte)].bg)
             .unwrap_or(empty);
 
-        let block_area = Rect::new(block_x, area.y, 1, area.height);
-        for position in block_area.positions() {
-            if let Some(cell) = buffer.cell_mut(position) {
-                cell.set_char(' ');
-                cell.set_bg(block_colour);
-            }
-        }
+        buffer.set_style(
+            Rect::new(block_x, area.y, 1, area.height),
+            Style::new().bg(block_colour),
+        );
     }
 }
