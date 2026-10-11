@@ -23,6 +23,8 @@ use crate::{
     },
 };
 
+const QUOTES: [char; 2] = ['\'', '"'];
+
 #[derive(Debug)]
 pub(crate) struct PaletteState {
     input: TextInput,
@@ -32,9 +34,12 @@ pub(crate) struct PaletteState {
 
 impl PaletteState {
     fn doc_command(&self) -> Option<&'static PaletteCommand> {
-        parse_arguments(self.input.text())
-            .first()
-            .and_then(|name| find_command(name))
+        find_command(split_command(self.input.text()).0)
+    }
+
+    fn selected_is_directory(&self) -> bool {
+        self.selected
+            .is_some_and(|index| self.completions.items[index].ends_with('/'))
     }
 
     fn refresh(&mut self, ctx: &Context) {
@@ -103,8 +108,14 @@ impl PopupContent for PaletteState {
 
     fn handle_key(&mut self, key: KeyEvent, _: Rect, ctx: &Context) -> Vec<Command> {
         match key.code {
-            KeyCode::Tab => self.cycle(true),
+            KeyCode::Tab => {
+                self.cycle(true);
+                if self.completions.items.len() == 1 && self.selected_is_directory() {
+                    self.refresh(ctx);
+                }
+            }
             KeyCode::BackTab => self.cycle(false),
+            KeyCode::Enter if self.selected_is_directory() => self.refresh(ctx),
             KeyCode::Enter => return run_line(self.input.text(), ctx),
             _ => {
                 if self.input.handle_key(key) {
@@ -155,16 +166,19 @@ fn run_line(line: &str, ctx: &Context) -> Vec<Command> {
 }
 
 fn parse_line(line: &str, ctx: &Context) -> Result<Command> {
-    let line = line.trim();
-    let (name, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-    let (name, rest) = if name.bytes().all(|byte| byte.is_ascii_digit()) {
-        ("jump-position", line)
+    let (name, rest) = split_command(line);
+    let arguments: Vec<String> = words(rest.unwrap_or_default())
+        .into_iter()
+        .map(|(_, text)| text)
+        .filter(|text| !text.is_empty())
+        .collect();
+    let (name, arguments) = if name.parse::<usize>().is_ok() && arguments.is_empty() {
+        ("jump-position", vec![name.to_string()])
     } else {
-        (name, rest)
+        (name, arguments)
     };
     let command = find_command(name).with_context(|| format!("no such command: '{name}'"))?;
 
-    let arguments = parse_arguments(rest);
     let count = arguments.len();
     match (&command.action, arguments.as_slice()) {
         (Action::Fixed(fixed), []) => Ok(fixed.clone()),
@@ -179,22 +193,25 @@ fn parse_line(line: &str, ctx: &Context) -> Result<Command> {
 }
 
 fn completions(line: &str, ctx: &Context) -> Completions {
-    let word_start = last_word_start(line);
-    let word = parse_arguments(&line[word_start..])
+    let (name, Some(rest)) = split_command(line) else {
+        return Completions {
+            word_start: 0,
+            quote: None,
+            items: command_names(line),
+        };
+    };
+    let (start, word) = words(rest)
         .pop()
-        .unwrap_or_default();
-    let quote = line[word_start..]
+        .expect("words ends with the word being typed");
+    let quote = rest[start..]
         .chars()
         .next()
-        .filter(|&character| character == '\'' || character == '"');
-    let items = match parse_arguments(&line[..word_start]).first() {
-        None => command_names(&word),
-        Some(name) => find_command(name)
-            .and_then(|command| command.action.completer())
-            .map_or_else(Vec::new, |complete| complete(ctx, &word)),
-    };
+        .filter(|character| QUOTES.contains(character));
+    let items = find_command(name)
+        .and_then(|command| command.action.completer())
+        .map_or_else(Vec::new, |complete| complete(ctx, &word));
     Completions {
-        word_start,
+        word_start: line.len() - rest.len() + start,
         quote,
         items,
     }
@@ -213,31 +230,16 @@ fn find_command(name: &str) -> Option<&'static PaletteCommand> {
         .find(|command| command.name == name || command.aliases.contains(&name))
 }
 
-fn last_word_start(line: &str) -> usize {
-    let mut start = line.len();
-    let mut in_word = false;
-    let mut quote: Option<char> = None;
-    for (index, character) in line.char_indices() {
-        match quote {
-            Some(open) if character == open => quote = None,
-            Some(_) => {}
-            None if character.is_whitespace() => in_word = false,
-            None => {
-                if !in_word {
-                    start = index;
-                    in_word = true;
-                }
-                if character == '\'' || character == '"' {
-                    quote = Some(character);
-                }
-            }
-        }
-    }
-    if in_word { start } else { line.len() }
+fn split_command(line: &str) -> (&str, Option<&str>) {
+    line.split_once(char::is_whitespace)
+        .map_or((line, None), |(name, rest)| (name, Some(rest)))
 }
 
 fn quoted(completion: &str, quote: Option<char>) -> String {
-    if quote.is_none() && !completion.contains(char::is_whitespace) {
+    if quote.is_none()
+        && !completion.contains(char::is_whitespace)
+        && !completion.starts_with(QUOTES)
+    {
         return completion.to_string();
     }
     let quote = match quote {
@@ -248,27 +250,26 @@ fn quoted(completion: &str, quote: Option<char>) -> String {
     format!("{quote}{completion}{quote}")
 }
 
-fn parse_arguments(input: &str) -> Vec<String> {
-    let mut arguments = Vec::new();
-    let mut current = String::new();
-    let mut quote: Option<char> = None;
-
-    for character in input.chars() {
+fn words(line: &str) -> Vec<(usize, String)> {
+    let mut words = Vec::new();
+    let mut current: Option<(usize, String)> = None;
+    let mut quote = None;
+    for (index, character) in line.char_indices() {
         match quote {
             Some(open) if character == open => quote = None,
-            None if character == '"' || character == '\'' => quote = Some(character),
-            None if character.is_whitespace() => {
-                if !current.is_empty() {
-                    arguments.push(std::mem::take(&mut current));
-                }
+            None if character.is_whitespace() => words.extend(current.take()),
+            None if current.is_none() && QUOTES.contains(&character) => {
+                current = Some((index, String::new()));
+                quote = Some(character);
             }
-            _ => current.push(character),
+            _ => current
+                .get_or_insert_with(|| (index, String::new()))
+                .1
+                .push(character),
         }
     }
-    if !current.is_empty() {
-        arguments.push(current);
-    }
-    arguments
+    words.push(current.unwrap_or((line.len(), String::new())));
+    words
 }
 
 fn row_named(session: &Session, rows: &[usize], name: &str) -> Result<usize> {
@@ -286,6 +287,8 @@ fn names(session: &Session, rows: &[usize]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use rstest::rstest;
 
     use super::*;
@@ -305,7 +308,8 @@ mod tests {
     #[case::optional_without_argument("filter-rows", Command::SetRowFilter(None))]
     #[case::optional_with_argument("filter-rows s0", Command::SetRowFilter(Some("s0".to_string())))]
     #[case::quoted_argument("filter-rows 's 0'", Command::SetRowFilter(Some("s 0".to_string())))]
-    #[case::surrounding_space("  quit  ", Command::Quit)]
+    #[case::trailing_space("quit  ", Command::Quit)]
+    #[case::apostrophe_in_word("filter-rows it's", Command::SetRowFilter(Some("it's".to_string())))]
     #[case::reads_session("jump-sequence s2", Command::JumpToSequence(2))]
     fn run_line_works(#[case] line: &str, #[case] expected: Command) {
         assert_eq!(run(line), vec![Command::ClosePopup, expected]);
@@ -318,6 +322,7 @@ mod tests {
 
     #[rstest]
     #[case::unknown_command("nope")]
+    #[case::leading_space(" quit")]
     #[case::partial_name("jump-pos 3")]
     #[case::argument_to_fixed("quit now")]
     #[case::two_arguments_to_optional("filter-rows a b")]
@@ -341,16 +346,24 @@ mod tests {
     }
 
     #[rstest]
-    #[case::empty("", &[])]
-    #[case::words("a b", &["a", "b"])]
-    #[case::extra_whitespace("  a   b ", &["a", "b"])]
-    #[case::single_quoted("'a b' c", &["a b", "c"])]
-    #[case::double_quoted_with_single_quote("\"it's\"", &["it's"])]
-    #[case::quote_inside_word("a'b c'd", &["ab cd"])]
-    #[case::unterminated_quote("'a b", &["a b"])]
-    #[case::empty_quotes("''", &[])]
-    fn parse_arguments_works(#[case] input: &str, #[case] expected: &[&str]) {
-        assert_eq!(parse_arguments(input), expected);
+    #[case::empty("", &[(0, "")])]
+    #[case::words("a b", &[(0, "a"), (2, "b")])]
+    #[case::trailing_space("a ", &[(0, "a"), (2, "")])]
+    #[case::extra_whitespace("  a   b ", &[(2, "a"), (6, "b"), (8, "")])]
+    #[case::single_quoted("'a b' c", &[(0, "a b"), (6, "c")])]
+    #[case::double_quoted_with_single_quote("\"it's\"", &[(0, "it's")])]
+    #[case::quote_inside_word_is_literal("it's a'b", &[(0, "it's"), (5, "a'b")])]
+    #[case::text_after_closing_quote_joins("'a b'c", &[(0, "a bc")])]
+    #[case::unterminated_quote("ab 'c d", &[(0, "ab"), (3, "c d")])]
+    #[case::after_closed_quote("ab 'c d' ", &[(0, "ab"), (3, "c d"), (9, "")])]
+    #[case::empty_quotes("''", &[(0, "")])]
+    fn words_works(#[case] line: &str, #[case] expected: &[(usize, &str)]) {
+        let expected: Vec<(usize, String)> = expected
+            .iter()
+            .map(|&(start, text)| (start, text.to_string()))
+            .collect();
+
+        assert_eq!(words(line), expected);
     }
 
     fn complete(line: &str) -> (usize, Vec<String>) {
@@ -401,19 +414,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case::empty("", 0)]
-    #[case::first_word("ab", 0)]
-    #[case::leading_space("  ab", 2)]
-    #[case::after_space("ab ", 3)]
-    #[case::second_word("ab cd", 3)]
-    #[case::open_quote("ab 'c d", 3)]
-    #[case::after_closed_quote("ab 'c d' ", 9)]
-    fn last_word_start_works(#[case] line: &str, #[case] expected: usize) {
-        assert_eq!(last_word_start(line), expected);
-    }
-
-    #[rstest]
     #[case::plain("s0", None, "s0")]
+    #[case::leading_quote("'abc", None, "\"'abc\"")]
     #[case::whitespace("my seq", None, "'my seq'")]
     #[case::single_quote_inside("it's x", None, "\"it's x\"")]
     #[case::user_opened_quote("s0", Some('"'), "\"s0\"")]
@@ -453,6 +455,38 @@ mod tests {
     #[case::up_ignored("quit", &[KeyCode::Up], ":quit")]
     fn handle_key_works(#[case] typed: &str, #[case] keys: &[KeyCode], #[case] expected: &str) {
         assert_eq!(prompt_after(typed, keys), expected);
+    }
+
+    #[rstest]
+    #[case::tab_opens_only_directory(&["inner/a.fa"], &[KeyCode::Tab, KeyCode::Tab], "inner/a.fa")]
+    #[case::enter_opens_selected_directory(
+        &["inner/a.fa", "other/b.fa"],
+        &[KeyCode::Tab, KeyCode::Enter, KeyCode::Tab],
+        "inner/a.fa"
+    )]
+    #[case::tab_keeps_siblings(&["inner/a.fa", "other/b.fa"], &[KeyCode::Tab, KeyCode::Tab], "other/")]
+    fn handle_key_opens_directory(
+        #[case] files: &[&str],
+        #[case] keys: &[KeyCode],
+        #[case] expected: &str,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        for file in files {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "").unwrap();
+        }
+        let typed = format!("load-alignment {}/", dir.path().display());
+
+        let line = with_context(None, None, |ctx| {
+            let mut palette = PaletteState::default();
+            for code in typed.chars().map(KeyCode::Char).chain(keys.iter().copied()) {
+                palette.handle_key(KeyEvent::from(code), Rect::default(), ctx);
+            }
+            palette.input.text().to_string()
+        });
+
+        assert_eq!(line, typed + expected);
     }
 
     #[test]
