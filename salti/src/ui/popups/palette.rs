@@ -16,7 +16,6 @@ use ratatui::{
 use self::commands::{Action, COMMANDS, PaletteCommand};
 use crate::{
     command::Command,
-    core::session::Session,
     ui::{
         bars::{Notification, NotificationLevel},
         popups::{Context, PopupContent, PopupFrame, fuzzy::fuzzy_match, text_input::TextInput},
@@ -270,13 +269,6 @@ fn words(line: &str) -> Vec<(usize, String)> {
     }
     words.push(current.unwrap_or((line.len(), String::new())));
     words
-}
-
-fn row_named(session: &Session, rows: &[usize], name: &str) -> Result<usize> {
-    rows.iter()
-        .copied()
-        .find(|&row| session.base_alignment().id(row) == name)
-        .with_context(|| format!("no sequence named '{name}'"))
 }
 
 #[cfg(test)]

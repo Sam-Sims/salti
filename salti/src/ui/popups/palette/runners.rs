@@ -4,8 +4,7 @@ use std::{num::NonZeroUsize, str::FromStr};
 
 use anyhow::{Context as _, Result, format_err};
 
-use super::row_named;
-use crate::{command::Command, ui::popups::Context};
+use crate::{command::Command, core::session::Session, ui::popups::Context};
 
 pub(super) fn jump_position(_: &Context, argument: &str) -> Result<Command> {
     let position = argument
@@ -99,6 +98,13 @@ pub(super) fn load_gff(_: &Context, argument: &str) -> Result<Command> {
     Ok(Command::LoadGff {
         path: argument.to_string(),
     })
+}
+
+fn row_named(session: &Session, rows: &[usize], name: &str) -> Result<usize> {
+    rows.iter()
+        .copied()
+        .find(|&row| session.base_alignment().id(row) == name)
+        .with_context(|| format!("no sequence named '{name}'"))
 }
 
 fn parse_choice<T: FromStr>(argument: &str, what: &str) -> Result<T> {
