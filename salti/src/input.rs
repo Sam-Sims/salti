@@ -1,4 +1,3 @@
 mod mouse;
-pub(crate) mod movement;
 
-pub(crate) use mouse::{MouseTracker, handle_mouse_event};
+pub(crate) use mouse::{MouseTracker, centre_on_pointer, handle_mouse_event};

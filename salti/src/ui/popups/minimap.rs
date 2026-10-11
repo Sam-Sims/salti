@@ -7,7 +7,7 @@ use crate::{
     command::Command,
     config::{keybindings, theme::Theme},
     core::session::Session,
-    input::movement::centre_on_pointer,
+    input::centre_on_pointer,
     ui::{
         popups::{Context, PopupContent, PopupFrame},
         state::ThemeState,
