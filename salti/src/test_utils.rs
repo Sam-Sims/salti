@@ -16,20 +16,13 @@ use crate::{
 };
 
 pub(crate) fn session(sequences: &[&[u8]]) -> Session {
-    Session::new(
-        libmsa::Alignment::new(
-            sequences
-                .iter()
-                .enumerate()
-                .map(|(i, residues)| libmsa::Sequence {
-                    id: format!("s{i}"),
-                    residues: residues.to_vec(),
-                })
-                .collect(),
-        )
-        .unwrap(),
-        "test.fasta".to_string(),
-    )
+    let ids: Vec<String> = (0..sequences.len()).map(|i| format!("s{i}")).collect();
+    session_from(&ids, sequences)
+}
+
+pub(crate) fn session_with_numbered_ids(sequences: &[&[u8]]) -> Session {
+    let ids: Vec<String> = (1..=sequences.len()).map(|i| format!("seq{i}")).collect();
+    session_from(&ids, sequences)
 }
 
 pub(crate) fn session_with_ids(sequences: &[(&str, &[u8])]) -> Session {
@@ -139,4 +132,13 @@ pub(crate) fn buffer_text(buffer: &Buffer, area: Rect) -> String {
         })
         .collect();
     lines.join("\n").trim_end().to_string()
+}
+
+fn session_from(ids: &[String], sequences: &[&[u8]]) -> Session {
+    let sequences: Vec<(&str, &[u8])> = ids
+        .iter()
+        .map(String::as_str)
+        .zip(sequences.iter().copied())
+        .collect();
+    session_with_ids(&sequences)
 }

@@ -172,7 +172,7 @@ mod tests {
     use super::*;
     use crate::{
         core::session::{DiffMode, Position, ViewState},
-        test_utils::{buffer_text, session_with_ids, ui_state},
+        test_utils::{buffer_text, session_with_numbered_ids, ui_state},
         ui::{
             bars::{Notification, NotificationLevel},
             selection::Selection,
@@ -180,16 +180,6 @@ mod tests {
     };
 
     const AREA: Rect = Rect::new(0, 0, 100, 24);
-
-    fn seqs(sequences: &[&[u8]]) -> Session {
-        let ids: Vec<String> = (1..=sequences.len()).map(|i| format!("seq{i}")).collect();
-        let sequences: Vec<(&str, &[u8])> = ids
-            .iter()
-            .map(String::as_str)
-            .zip(sequences.iter().copied())
-            .collect();
-        session_with_ids(&sequences)
-    }
 
     fn render_text(session: Option<&Session>, ui: &UiState) -> String {
         let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
@@ -227,7 +217,7 @@ mod tests {
 
     #[test]
     fn loaded() {
-        let session = seqs(&[
+        let session = session_with_numbered_ids(&[
             b"CATCATCATCATCATCAT",
             b"CATCATGATCATCATCAT",
             b"CATCATCATCATGATCAT",
@@ -239,7 +229,7 @@ mod tests {
 
     #[test]
     fn selection_status() {
-        let session = seqs(&[
+        let session = session_with_numbered_ids(&[
             b"CATCATCATCATCATCAT",
             b"CATCATGATCATCATCAT",
             b"CATCATCATCATGATCAT",
@@ -253,7 +243,7 @@ mod tests {
 
     #[test]
     fn translated() {
-        let mut session = seqs(&[
+        let mut session = session_with_numbered_ids(&[
             b"CATCATCATCATCATCAT",
             b"CATCATGATCATCATCAT",
             b"CATCATCATCATGATCAT",
@@ -271,7 +261,7 @@ mod tests {
 
     #[test]
     fn notification() {
-        let session = seqs(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
+        let session = session_with_numbered_ids(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
         let mut ui = ui_state();
         ui.notify(Notification {
             level: NotificationLevel::Info,

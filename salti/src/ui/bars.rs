@@ -213,7 +213,7 @@ mod tests {
     use super::*;
     use crate::{
         core::session::{Position, ViewState},
-        test_utils::{full_window, session_with_ids},
+        test_utils::{full_window, session_with_numbered_ids},
         ui::state::ThemeState,
     };
 
@@ -246,21 +246,11 @@ mod tests {
         )
     }
 
-    fn seqs(sequences: &[&[u8]]) -> Session {
-        let ids: Vec<String> = (1..=sequences.len()).map(|i| format!("seq{i}")).collect();
-        let sequences: Vec<(&str, &[u8])> = ids
-            .iter()
-            .map(String::as_str)
-            .zip(sequences.iter().copied())
-            .collect();
-        session_with_ids(&sequences)
-    }
-
     fn changed(
         sequences: &[&[u8]],
         change: impl FnOnce(&mut ViewState) -> anyhow::Result<()>,
     ) -> Session {
-        let mut session = seqs(sequences);
+        let mut session = session_with_numbered_ids(sequences);
         session.update(Position::default(), change).unwrap();
         session
     }
@@ -279,7 +269,7 @@ mod tests {
 
     #[test]
     fn top_loaded() {
-        let session = seqs(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
+        let session = session_with_numbered_ids(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
         let window = Window {
             columns: 0..5,
             ..full_window(&session)
@@ -290,7 +280,7 @@ mod tests {
 
     #[test]
     fn top_loading_another() {
-        let session = seqs(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
+        let session = session_with_numbered_ids(&[b"ACGTACGT", b"ACGTAC-T", b"ACGTACGA"]);
 
         insta::assert_snapshot!(top(
             &session,
@@ -323,14 +313,14 @@ mod tests {
 
     #[test]
     fn bottom_cell() {
-        let session = seqs(&[b"ACGTACGT", b"ACGTACGT"]);
+        let session = session_with_numbered_ids(&[b"ACGTACGT", b"ACGTACGT"]);
 
         insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 5..=5));
     }
 
     #[test]
     fn bottom_range() {
-        let session = seqs(&[b"ACGTACGTAC", b"ACGTACGTAC"]);
+        let session = session_with_numbered_ids(&[b"ACGTACGTAC", b"ACGTACGTAC"]);
 
         insta::assert_snapshot!(bottom_with_selection(&session, 0..=0, 2..=8));
     }
@@ -357,7 +347,7 @@ mod tests {
 
     #[test]
     fn bottom_rows() {
-        let session = seqs(&[b"ACGTACGT", b"ACGTACGT", b"ACGTACGT"]);
+        let session = session_with_numbered_ids(&[b"ACGTACGT", b"ACGTACGT", b"ACGTACGT"]);
 
         insta::assert_snapshot!(bottom_with_selection(&session, 0..=2, 1..=4));
     }
