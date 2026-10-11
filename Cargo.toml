@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "libmsa",
-    "salti",
+    "crates/libmsa",
+    "crates/salti",
 ]
 resolver = "3"
-default-members = ["salti"]
+default-members = ["crates/salti"]
 
 [workspace.lints.clippy]
 pedantic = "warn"
