@@ -170,11 +170,16 @@ mod tests {
     #[case::dot_prefix_matches_hidden(&[".hidden", "a.fa"], ".", &[".hidden"])]
     #[case::space_inside_name(&["my file.fa", "my.fa"], "my ", &["my file.fa"])]
     #[case::leading_space_in_name(&[" a.fa", "a.fa"], " ", &[" a.fa"])]
-    #[case::trailing_space_in_name(&["a.fa ", "a.fasta"], "a.fa ", &["a.fa "])]
     #[case::quote_in_name(&["it's.fa"], "it'", &["it's.fa"])]
     #[case::multibyte_name(&["é.fa", "e.fa"], "é", &["é.fa"])]
     fn filename_works(#[case] entries: &[&str], #[case] word: &str, #[case] expected: &[&str]) {
         assert_eq!(filenames(entries, word), expected);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn filename_keeps_trailing_space_in_name() {
+        assert_eq!(filenames(&["a.fa ", "a.fasta"], "a.fa "), ["a.fa "]);
     }
 
     #[rstest]
