@@ -200,9 +200,10 @@ fn anchor_at(
     mouse_x: u16,
     mouse_y: u16,
 ) -> Option<Selection> {
-    if !sequence_rows_area.contains((mouse_x, mouse_y).into()) {
-        return None;
-    }
+    debug_assert!(
+        sequence_rows_area.contains((mouse_x, mouse_y).into()),
+        "pointer should be inside the sequence rows"
+    );
 
     let row = screen_rows(session.layout(), window)
         .nth(usize::from(mouse_y - sequence_rows_area.y))
@@ -320,7 +321,6 @@ mod tests {
     #[case::divider(10, 6, None)]
     #[case::past_window_rows(10, 9, None)]
     #[case::past_window_columns(18, 5, None)]
-    #[case::left_of_area(9, 5, None)]
     fn anchor_at_works(#[case] x: u16, #[case] y: u16, #[case] expected: Option<Selection>) {
         let session = pinned_session(6, &[3]);
         let window = Window {
