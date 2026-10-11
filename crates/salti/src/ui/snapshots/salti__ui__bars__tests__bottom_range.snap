@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/bars.rs
+source: crates/salti/src/ui/bars.rs
 expression: "bottom_with_selection(&session, 0..=0, 2..=8)"
 ---
 Selected: seq1 @ 3-9

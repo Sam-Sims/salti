@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/bars.rs
-expression: "status_text(&build_top_status_bar(Some(&session), &full_window(&session),\n&ui))"
+source: crates/salti/src/ui/bars.rs
+expression: "top(&session, &full_window(&session), Some(\"/data/next.fasta\"))"
 ---
 File: test.fasta | Loading next.fasta | 3 alignments | Length: 8 | Positions: 1-8

@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/panes/alignment.rs
+source: crates/salti/src/ui/panes/alignment.rs
 expression: "render_text(&session, None, &window, Rect::new(0, 0, 60, 12))"
 ---
 ┌───────────────────────────────────────────────┐

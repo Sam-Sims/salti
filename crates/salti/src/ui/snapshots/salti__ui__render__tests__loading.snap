@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/render.rs
+source: crates/salti/src/ui/render.rs
 expression: "render_text(None, &ui)"
 ---
                  File: Unknown | Loading alignment.fasta | 0 alignments | Length: 0 | Positions: 0-0

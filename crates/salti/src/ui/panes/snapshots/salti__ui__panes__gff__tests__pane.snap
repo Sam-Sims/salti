@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/panes/gff.rs
+source: crates/salti/src/ui/panes/gff.rs
 expression: "buffer_text(&buf, area)"
 ---
 ┌────────────────────────────────────────┐

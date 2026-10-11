@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/panes/consensus.rs
+source: crates/salti/src/ui/panes/consensus.rs
 expression: "consensus_text(&[CAT, CAT], |state|\n{ state.set_reference(Some(0)); state.toggle_translation_overlay() })"
 ---
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐

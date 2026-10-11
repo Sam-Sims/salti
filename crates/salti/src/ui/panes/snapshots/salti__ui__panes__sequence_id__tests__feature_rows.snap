@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/panes/sequence_id.rs
+source: crates/salti/src/ui/panes/sequence_id.rs
 expression: "render_text(&session, &full_window(&session), 2)"
 ---
 ┌────────────────────────────┐

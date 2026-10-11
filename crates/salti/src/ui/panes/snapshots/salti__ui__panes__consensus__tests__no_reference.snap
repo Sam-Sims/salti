@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/panes/consensus.rs
+source: crates/salti/src/ui/panes/consensus.rs
 expression: "consensus_text(&[CAT, CAT], |_| Ok(()))"
 ---
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐

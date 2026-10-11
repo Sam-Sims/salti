@@ -1,5 +1,5 @@
 ---
-source: salti/src/app.rs
+source: crates/salti/src/app.rs
 expression: screen_text(&app)
 ---
  File: test.fasta | Status: Loaded | 3 alignments | Length: 12 | Positions: 1-12

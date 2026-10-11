@@ -1,5 +1,5 @@
 ---
-source: salti/src/ui/bars.rs
-expression: "status_text(&build_bottom_status_bar(Some(&session), &ui_state()))"
+source: crates/salti/src/ui/bars.rs
+expression: "bottom(&session, None)"
 ---
 Filters: [constant: >= 100%] (3 rows) (0 cols)
