@@ -279,12 +279,6 @@ fn row_named(session: &Session, rows: &[usize], name: &str) -> Result<usize> {
         .with_context(|| format!("no sequence named '{name}'"))
 }
 
-fn names(session: &Session, rows: &[usize]) -> Vec<String> {
-    rows.iter()
-        .map(|&row| session.base_alignment().id(row).to_string())
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;

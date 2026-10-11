@@ -1,28 +1,22 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use strum::VariantArray;
 
-use super::names;
-use crate::ui::popups::{Context, fuzzy::fuzzy_match};
+use crate::{
+    core::session::Session,
+    ui::popups::{Context, fuzzy::fuzzy_match},
+};
 
 pub(super) fn sequences(ctx: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, all_names(ctx))
+    fuzzy_match(word, names(ctx, |session| session.layout().rows()))
 }
 
 pub(super) fn main_sequences(ctx: &Context, word: &str) -> Vec<String> {
-    let names = ctx
-        .session
-        .map(|session| names(session, session.layout().main()))
-        .unwrap_or_default();
-    fuzzy_match(word, names)
+    fuzzy_match(word, names(ctx, |session| session.layout().main()))
 }
 
 pub(super) fn pinned_sequences(ctx: &Context, word: &str) -> Vec<String> {
-    let names = ctx
-        .session
-        .map(|session| names(session, session.state().pinned()))
-        .unwrap_or_default();
-    fuzzy_match(word, names)
+    fuzzy_match(word, names(ctx, |session| session.state().pinned()))
 }
 
 pub(super) fn features(ctx: &Context, word: &str) -> Vec<String> {
@@ -43,7 +37,7 @@ pub(super) fn choices<T: VariantArray + ToString>(_: &Context, word: &str) -> Ve
 }
 
 pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
-    let names = all_names(ctx);
+    let names = names(ctx, |session| session.layout().rows());
     if word.is_empty() {
         return names;
     }
@@ -56,69 +50,39 @@ pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn filename(_: &Context, arguments: &str) -> Vec<String> {
-    let (dir_prefix, name_prefix) = split_dir_and_prefix(arguments);
-    let base_dir = if dir_prefix.is_empty() {
-        Path::new(".")
-    } else {
-        Path::new(dir_prefix)
-    };
-
-    let Ok(entries) = fs::read_dir(base_dir) else {
+pub(super) fn filename(_: &Context, word: &str) -> Vec<String> {
+    let (dir, prefix) = word
+        .rfind('/')
+        .map_or(("", word), |index| word.split_at(index + 1));
+    let Ok(entries) = fs::read_dir(if dir.is_empty() { "." } else { dir }) else {
         return Vec::new();
     };
-
-    let mut matches = Vec::new();
-
-    for entry in entries.flatten() {
-        let entry_name = entry.file_name();
-        let entry_name = entry_name.to_string_lossy();
-
-        if !entry_name.starts_with(name_prefix) {
-            continue;
-        }
-
-        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-        let mut label = join_display_path(dir_prefix, &entry_name);
-        if is_dir {
-            label.push('/');
-        }
-        matches.push((!is_dir, label));
-    }
-
+    let mut matches: Vec<(bool, String)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with(prefix) {
+                return None;
+            }
+            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            let slash = if is_dir { "/" } else { "" };
+            Some((!is_dir, format!("{dir}{name}{slash}")))
+        })
+        .collect();
     matches.sort();
     matches.into_iter().map(|(_, label)| label).collect()
 }
 
-fn all_names(ctx: &Context) -> Vec<String> {
+fn names(ctx: &Context, rows: fn(&Session) -> &[usize]) -> Vec<String> {
     ctx.session
-        .map(|session| names(session, session.layout().rows()))
+        .map(|session| {
+            rows(session)
+                .iter()
+                .map(|&row| session.base_alignment().id(row).to_string())
+                .collect()
+        })
         .unwrap_or_default()
-}
-
-fn split_dir_and_prefix(query: &str) -> (&str, &str) {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return ("", "");
-    }
-
-    if let Some(index) = trimmed.rfind('/') {
-        let (dir, rest) = trimmed.split_at(index + 1);
-        return (dir, rest);
-    }
-
-    ("", trimmed)
-}
-
-fn join_display_path(dir_prefix: &str, name: &str) -> String {
-    if dir_prefix.is_empty() {
-        return name.to_string();
-    }
-
-    let mut joined = String::with_capacity(dir_prefix.len() + name.len());
-    joined.push_str(dir_prefix);
-    joined.push_str(name);
-    joined
 }
 
 #[cfg(test)]
