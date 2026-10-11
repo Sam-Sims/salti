@@ -35,6 +35,7 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
 human-panic = "2"
 noodles-gff = "0.56.0"
 strum = { version = "0.28", features = ["derive"] }
+tachyonfx = { version = "0.25.2", default-features = false, features = ["std-duration"] }
 
 [dev-dependencies]
 insta = "1.46.3"
