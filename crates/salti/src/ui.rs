@@ -2,6 +2,7 @@
 
 pub(crate) mod bars;
 pub(crate) mod layout;
+pub(crate) mod notification;
 pub(crate) mod panes;
 pub(crate) mod popups;
 pub(crate) mod render;

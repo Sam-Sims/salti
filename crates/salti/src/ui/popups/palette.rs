@@ -17,7 +17,7 @@ use self::commands::{Action, COMMANDS, PaletteCommand};
 use crate::{
     command::Command,
     ui::{
-        bars::Notification,
+        notification::Notification,
         popups::{Context, PopupContent, PopupFrame, fuzzy::fuzzy_match, text_input::TextInput},
     },
 };
@@ -276,7 +276,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{buffer_text, pinned_session, session_with_ids, with_context},
-        ui::bars::NotificationLevel,
+        ui::notification::NotificationLevel,
     };
 
     fn run(line: &str) -> Vec<Command> {
@@ -320,8 +320,13 @@ mod tests {
 
         assert!(matches!(
             commands.as_slice(),
-            [Command::ClosePopup, Command::ShowNotification(notification)]
-                if notification.level() == NotificationLevel::Error
+            [
+                Command::ClosePopup,
+                Command::ShowNotification(Notification {
+                    level: NotificationLevel::Error,
+                    ..
+                })
+            ]
         ));
     }
 

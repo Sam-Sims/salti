@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -29,7 +31,8 @@ pub fn render(
     screen: &ScreenLayout,
     session: Option<&Session>,
     gff: Option<&Gff>,
-    ui: &UiState,
+    ui: &mut UiState,
+    delta: Duration,
 ) {
     if buf.area.height == 0 {
         return;
@@ -57,10 +60,12 @@ pub fn render(
         .render(screen.frame.content_area, buf),
     }
     InputBar {
-        notification: ui.notification(),
+        notification: ui.notifications.shown(),
         styles,
     }
     .render(screen.frame.input_area, buf);
+    ui.notifications
+        .advance(delta, buf, screen.frame.input_area);
     if let Some(popup) = &ui.popup {
         popup.render(
             buf,
@@ -173,17 +178,26 @@ mod tests {
     use crate::{
         core::session::{DiffMode, Position, ViewState},
         test_utils::{buffer_text, session_with_numbered_ids, ui_state},
-        ui::{bars::Notification, selection::Selection},
+        ui::{notification::Notification, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 100, 24);
 
-    fn render_text(session: Option<&Session>, ui: &UiState) -> String {
+    fn render_text(session: Option<&Session>, mut ui: UiState) -> String {
         let mut terminal = Terminal::new(TestBackend::new(AREA.width, AREA.height)).unwrap();
         let screen = ScreenLayout::new(AREA, session, None, &mut Position::default());
 
         terminal
-            .draw(|frame| render(frame.buffer_mut(), &screen, session, None, ui))
+            .draw(|frame| {
+                render(
+                    frame.buffer_mut(),
+                    &screen,
+                    session,
+                    None,
+                    &mut ui,
+                    Duration::ZERO,
+                );
+            })
             .unwrap();
 
         buffer_text(terminal.backend().buffer(), AREA)
@@ -201,7 +215,7 @@ mod tests {
 
     #[test]
     fn idle() {
-        insta::assert_snapshot!(render_text(None, &ui_state()));
+        insta::assert_snapshot!(render_text(None, ui_state()));
     }
 
     #[test]
@@ -209,7 +223,7 @@ mod tests {
         let mut ui = ui_state();
         ui.loading = Some("/data/alignment.fasta".to_string());
 
-        insta::assert_snapshot!(render_text(None, &ui));
+        insta::assert_snapshot!(render_text(None, ui));
     }
 
     #[test]
@@ -221,7 +235,7 @@ mod tests {
             b"CATCATCATCATCATCAT",
         ]);
 
-        insta::assert_snapshot!(render_text(Some(&session), &ui_state()));
+        insta::assert_snapshot!(render_text(Some(&session), ui_state()));
     }
 
     #[test]
@@ -235,7 +249,7 @@ mod tests {
         let mut ui = ui_state();
         ui.selection = Some(selection(1..=2, 2..=8));
 
-        insta::assert_snapshot!(render_text(Some(&session), &ui));
+        insta::assert_snapshot!(render_text(Some(&session), ui));
     }
 
     #[test]
@@ -253,7 +267,7 @@ mod tests {
             .unwrap();
         session.set_diff_mode(DiffMode::Reference).unwrap();
 
-        insta::assert_snapshot!(render_text(Some(&session), &ui_state()));
+        insta::assert_snapshot!(render_text(Some(&session), ui_state()));
     }
 
     #[test]
@@ -262,6 +276,6 @@ mod tests {
         let mut ui = ui_state();
         ui.notify(Notification::info("Loaded alignment"));
 
-        insta::assert_snapshot!(render_text(Some(&session), &ui));
+        insta::assert_snapshot!(render_text(Some(&session), ui));
     }
 }

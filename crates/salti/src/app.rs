@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use crossterm::event::{KeyEvent, MouseEvent};
@@ -16,9 +16,9 @@ use crate::{
     input::{self, MouseTracker},
     jobs::{JobEvent, Jobs},
     ui::{
-        bars::Notification,
         input_name,
         layout::ScreenLayout,
+        notification::Notification,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
         render::render,
         state::UiState,
@@ -62,7 +62,6 @@ impl App {
     pub(crate) fn handle(&mut self, event: Event) {
         match event {
             Event::Key(key) => {
-                self.ui.clear_notification();
                 let commands = match &mut self.ui.popup {
                     Some(popup) => popup.handle_key(
                         key,
@@ -111,14 +110,19 @@ impl App {
         self.jobs.next().await
     }
 
-    pub(crate) fn draw(&self, frame: &mut Frame) {
+    pub(crate) fn draw(&mut self, frame: &mut Frame, delta: Duration) {
         render(
             frame.buffer_mut(),
             &self.screen,
             self.session.as_ref(),
             self.gff.as_ref(),
-            &self.ui,
+            &mut self.ui,
+            delta,
         );
+    }
+
+    pub(crate) fn is_animating(&self) -> bool {
+        self.ui.notifications.is_animating()
     }
 
     pub(crate) fn should_quit(&self) -> bool {
@@ -293,7 +297,13 @@ impl App {
             }
             Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
             Command::SetDiffMode(mode) => self.session_mut()?.set_diff_mode(mode)?,
-            Command::CycleDiffMode => self.session_mut()?.cycle_diff_mode(),
+            Command::CycleDiffMode => {
+                let session = self.session_mut()?;
+                session.cycle_diff_mode();
+                let mode = session.diff_mode();
+                self.ui
+                    .notify(Notification::info(format!("Diff mode: {mode}")));
+            }
         }
 
         Ok(())
@@ -348,7 +358,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{buffer_text, session},
-        ui::{bars::NotificationLevel, selection::Selection},
+        ui::{notification::NotificationLevel, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
@@ -415,7 +425,10 @@ mod tests {
 
         assert_eq!(app.ui.position.column, 3);
         assert_eq!(
-            app.ui.notification().map(Notification::level),
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
             Some(NotificationLevel::Error)
         );
     }
@@ -483,7 +496,10 @@ mod tests {
         assert_eq!(app.session.as_ref().unwrap().source(), "test.fasta");
         assert_eq!(app.ui.loading, None);
         assert_eq!(
-            app.ui.notification().map(Notification::level),
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
             Some(NotificationLevel::Error)
         );
     }
@@ -497,7 +513,10 @@ mod tests {
         app.finish_update_check(result, requested);
 
         assert_eq!(
-            app.ui.notification().map(Notification::level),
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
             Some(NotificationLevel::Info)
         );
     }
@@ -513,7 +532,44 @@ mod tests {
 
         app.finish_update_check(result, requested);
 
-        assert_eq!(app.ui.notification().map(Notification::level), None);
+        assert_eq!(
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
+            None
+        );
+    }
+
+    #[test]
+    fn cycle_diff_mode_notifies() {
+        let mut app = app(DNA);
+
+        press(&mut app, [KeyCode::Char('d')]);
+
+        assert_eq!(
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
+            Some(NotificationLevel::Info)
+        );
+    }
+
+    #[test]
+    fn handle_key_keeps_notification() {
+        let mut app = app(DNA);
+        app.ui.notify(Notification::info("shown"));
+
+        press(&mut app, [KeyCode::Down]);
+
+        assert_eq!(
+            app.ui
+                .notifications
+                .shown()
+                .map(|notification| notification.level),
+            Some(NotificationLevel::Info)
+        );
     }
 
     fn press(app: &mut App, codes: impl IntoIterator<Item = KeyCode>) {
@@ -526,10 +582,12 @@ mod tests {
         press(app, text.chars().map(KeyCode::Char));
     }
 
-    fn screen_text(app: &App) -> String {
+    fn screen_text(app: &mut App) -> String {
         let area = app.screen.area;
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal
+            .draw(|frame| app.draw(frame, Duration::ZERO))
+            .unwrap();
         buffer_text(terminal.backend().buffer(), area)
     }
 
@@ -538,7 +596,7 @@ mod tests {
         let mut app = app(DNA);
         type_text(&mut app, ":");
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 
     #[test]
@@ -546,7 +604,7 @@ mod tests {
         let mut app = app(DNA);
         type_text(&mut app, ":jump-sequence ");
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 
     #[test]
@@ -555,7 +613,7 @@ mod tests {
         type_text(&mut app, ":jump-sequence ");
         press(&mut app, [KeyCode::Tab]);
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 
     #[test]
@@ -564,7 +622,7 @@ mod tests {
         let mut app = app(DNA);
         type_text(&mut app, "?");
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 
     #[test]
@@ -574,7 +632,7 @@ mod tests {
         type_text(&mut app, "?");
         press(&mut app, [KeyCode::Right; 3]);
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 
     #[test]
@@ -586,6 +644,6 @@ mod tests {
         press(&mut app, [KeyCode::Right]);
         press(&mut app, [KeyCode::Down; 12]);
 
-        insta::assert_snapshot!(screen_text(&app));
+        insta::assert_snapshot!(screen_text(&mut app));
     }
 }
