@@ -16,6 +16,7 @@ use ratatui::{
 use self::commands::{Action, COMMANDS, PaletteCommand};
 use crate::{
     command::Command,
+    config::theme::ThemeChoice,
     ui::{
         notification::Notification,
         popups::{Context, PopupContent, PopupFrame, fuzzy::fuzzy_match, text_input::TextInput},
@@ -29,9 +30,15 @@ pub(crate) struct PaletteState {
     input: TextInput,
     completions: Completions,
     selected: Option<usize>,
+    /// The theme the line sets when it parses as `set-theme <choice>`.
+    preview: Option<ThemeChoice>,
 }
 
 impl PaletteState {
+    pub(super) fn theme_preview(&self) -> Option<ThemeChoice> {
+        self.preview
+    }
+
     fn doc_command(&self) -> Option<&'static PaletteCommand> {
         find_command(split_command(self.input.text()).0)
     }
@@ -80,6 +87,7 @@ impl Default for PaletteState {
                 items: command_names(""),
             },
             selected: None,
+            preview: None,
         }
     }
 }
@@ -122,6 +130,10 @@ impl PopupContent for PaletteState {
                 }
             }
         }
+        self.preview = match parse_line(self.input.text(), ctx) {
+            Ok(Command::SetTheme(choice)) => Some(choice),
+            _ => None,
+        };
         Vec::new()
     }
 
@@ -275,6 +287,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        config::theme::ThemeName,
         test_utils::{buffer_text, pinned_session, session_with_ids, with_context},
         ui::notification::NotificationLevel,
     };
@@ -409,13 +422,18 @@ mod tests {
         assert_eq!(quoted(completion, quote), expected);
     }
 
+    fn palette_after(typed: &str, keys: &[KeyCode], ctx: &Context) -> PaletteState {
+        let mut palette = PaletteState::default();
+        for code in typed.chars().map(KeyCode::Char).chain(keys.iter().copied()) {
+            palette.handle_key(KeyEvent::from(code), Rect::default(), ctx);
+        }
+        palette
+    }
+
     fn prompt_after(typed: &str, keys: &[KeyCode]) -> String {
         let session = session_with_ids(&[("s0", b"A"), ("my seq", b"A"), ("it's x", b"A")]);
         with_context(Some(&session), None, |ctx| {
-            let mut palette = PaletteState::default();
-            for code in typed.chars().map(KeyCode::Char).chain(keys.iter().copied()) {
-                palette.handle_key(KeyEvent::from(code), Rect::default(), ctx);
-            }
+            let palette = palette_after(typed, keys, ctx);
             let area = Rect::new(0, 0, 60, 1);
             let mut buffer = Buffer::empty(area);
             palette.render(area, &mut buffer, ctx);
@@ -464,11 +482,7 @@ mod tests {
         let typed = format!("load-alignment {}/", dir.path().display());
 
         let line = with_context(None, None, |ctx| {
-            let mut palette = PaletteState::default();
-            for code in typed.chars().map(KeyCode::Char).chain(keys.iter().copied()) {
-                palette.handle_key(KeyEvent::from(code), Rect::default(), ctx);
-            }
-            palette.input.text().to_string()
+            palette_after(&typed, keys, ctx).input.text().to_string()
         });
 
         assert_eq!(line, typed + expected);
@@ -478,17 +492,44 @@ mod tests {
     fn handle_key_enter_runs_line() {
         let session = pinned_session(2, &[]);
         let commands = with_context(Some(&session), None, |ctx| {
-            let mut palette = PaletteState::default();
-            for character in "quit".chars() {
-                palette.handle_key(
-                    KeyEvent::from(KeyCode::Char(character)),
-                    Rect::default(),
-                    ctx,
-                );
-            }
-            palette.handle_key(KeyEvent::from(KeyCode::Enter), Rect::default(), ctx)
+            palette_after("quit", &[], ctx).handle_key(
+                KeyEvent::from(KeyCode::Enter),
+                Rect::default(),
+                ctx,
+            )
         });
 
         assert_eq!(commands, vec![Command::ClosePopup, Command::Quit]);
+    }
+
+    fn preview_after(typed: &str, keys: &[KeyCode]) -> Option<ThemeChoice> {
+        with_context(None, None, |ctx| {
+            palette_after(typed, keys, ctx).theme_preview()
+        })
+    }
+
+    #[rstest]
+    #[case::typed("set-theme tokyo-night", &[], ThemeChoice::Named(ThemeName::TokyoNight))]
+    #[case::first_completion("set-theme ", &[KeyCode::Tab], ThemeChoice::Auto)]
+    #[case::next_completion(
+        "set-theme ",
+        &[KeyCode::Tab, KeyCode::Tab],
+        ThemeChoice::Named(ThemeName::EverforestDark)
+    )]
+    #[case::shift_tab("set-theme ", &[KeyCode::BackTab], ThemeChoice::Named(ThemeName::Ansi))]
+    fn handle_key_previews_theme(
+        #[case] typed: &str,
+        #[case] keys: &[KeyCode],
+        #[case] expected: ThemeChoice,
+    ) {
+        assert_eq!(preview_after(typed, keys), Some(expected));
+    }
+
+    #[rstest]
+    #[case::partial_name("set-theme tok", &[])]
+    #[case::backspaced_to_partial("set-theme tokyo-night", &[KeyCode::Backspace; 6])]
+    #[case::other_command("jump-position 3", &[])]
+    fn handle_key_doesnt_preview(#[case] typed: &str, #[case] keys: &[KeyCode]) {
+        assert_eq!(preview_after(typed, keys), None);
     }
 }

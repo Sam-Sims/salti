@@ -15,7 +15,7 @@ use crate::{
             gff::{GffInfoPane, GffPane},
             sequence_id::SequenceIdPane,
         },
-        popups::Context,
+        popups::{Context, Popup},
         render_centred_lines,
         state::UiState,
     },
@@ -32,30 +32,36 @@ pub fn render(
     if buf.area.height == 0 {
         return;
     }
+    let preview = ui
+        .popup
+        .as_ref()
+        .and_then(Popup::theme_preview)
+        .map(|choice| Theme::builtin(choice.resolve(ui.auto_theme)));
+    let theme = preview.as_ref().unwrap_or(&ui.theme);
     TopStatusBar {
         session,
         window: &screen.window,
         loading: ui.loading.as_deref(),
-        theme: &ui.theme,
+        theme,
     }
     .render(screen.frame.top_status_area, buf);
     BottomStatusBar {
         session,
         selection: ui.selection,
-        theme: &ui.theme,
+        theme,
     }
     .render(screen.frame.bottom_status_area, buf);
     match session {
-        Some(session) => render_panes(buf, screen, session, gff, ui),
+        Some(session) => render_panes(buf, screen, session, gff, ui, theme),
         None => EmptyState {
             loading: ui.loading.as_deref(),
-            theme: &ui.theme,
+            theme,
         }
         .render(screen.frame.content_area, buf),
     }
     InputBar {
         notification: ui.notifications.shown(),
-        theme: &ui.theme,
+        theme,
     }
     .render(screen.frame.input_area, buf);
     ui.notifications
@@ -66,7 +72,7 @@ pub fn render(
             &Context {
                 session,
                 gff,
-                theme: &ui.theme,
+                theme,
                 screen,
             },
         );
@@ -107,6 +113,7 @@ fn render_panes(
     session: &Session,
     gff: Option<&Gff>,
     ui: &UiState,
+    theme: &Theme,
 ) {
     let (layout, window) = (&screen.app, &screen.window);
     let columns = session.window_columns(window.columns.clone());
@@ -114,14 +121,14 @@ fn render_panes(
     if let Some(gff) = gff {
         GffInfoPane {
             tooltip: ui.gff_tooltip.as_deref(),
-            theme: &ui.theme,
+            theme,
         }
         .render(layout.gff_info_pane, buf);
         GffPane {
             gff,
             session,
             window,
-            theme: &ui.theme,
+            theme,
         }
         .render(layout.gff_pane, buf);
     }
@@ -131,7 +138,7 @@ fn render_panes(
         window,
         local_feature_rows: layout.local_feature_rows,
         selection: ui.selection,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.sequence_id_pane, buf);
     AlignmentPane {
@@ -141,18 +148,14 @@ fn render_panes(
         gff,
         local_feature_rows: layout.local_feature_rows,
         selection: ui.selection,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.alignment_pane, buf);
-    ConsensusSequenceIdPane {
-        session,
-        theme: &ui.theme,
-    }
-    .render(layout.consensus_sequence_id_pane, buf);
+    ConsensusSequenceIdPane { session, theme }.render(layout.consensus_sequence_id_pane, buf);
     ConsensusAlignmentPane {
         session,
         columns: &columns,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.consensus_alignment_pane, buf);
 }

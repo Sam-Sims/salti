@@ -14,7 +14,7 @@ use ratatui::{
 
 use crate::{
     command::Command,
-    config::theme::Theme,
+    config::theme::{Theme, ThemeChoice},
     core::{gff::Gff, session::Session},
     ui::{
         layout::ScreenLayout,
@@ -59,6 +59,13 @@ impl Popup {
         Clear.render(area, buf);
         block.render(area, buf);
         content.render(inner, buf, ctx);
+    }
+
+    pub(super) fn theme_preview(&self) -> Option<ThemeChoice> {
+        match self {
+            Self::Palette(palette) => palette.theme_preview(),
+            Self::Minimap(_) | Self::Keybinds(_) => None,
+        }
     }
 
     fn inner(&self, ctx: &Context) -> Rect {
