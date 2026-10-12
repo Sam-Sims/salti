@@ -1,3 +1,4 @@
+mod ansi;
 mod everforest_dark;
 mod solarized_light;
 mod tokyo_night;
@@ -41,6 +42,7 @@ impl Theme {
             ThemeName::EverforestDark => everforest_dark::THEME,
             ThemeName::SolarizedLight => solarized_light::THEME,
             ThemeName::TokyoNight => tokyo_night::THEME,
+            ThemeName::Ansi => ansi::THEME,
         }
     }
 }
@@ -68,6 +70,7 @@ pub enum ThemeName {
     EverforestDark,
     SolarizedLight,
     TokyoNight,
+    Ansi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
