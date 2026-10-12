@@ -1,6 +1,7 @@
 mod ansi;
 mod everforest_dark;
 mod everforest_light;
+mod solarized_dark;
 mod solarized_light;
 mod tokyo_night;
 
@@ -42,6 +43,7 @@ impl Theme {
         match name {
             ThemeName::EverforestDark => everforest_dark::THEME,
             ThemeName::EverforestLight => everforest_light::THEME,
+            ThemeName::SolarizedDark => solarized_dark::THEME,
             ThemeName::SolarizedLight => solarized_light::THEME,
             ThemeName::TokyoNight => tokyo_night::THEME,
             ThemeName::Ansi => ansi::THEME,
@@ -71,6 +73,7 @@ pub enum ThemeName {
     #[default]
     EverforestDark,
     EverforestLight,
+    SolarizedDark,
     SolarizedLight,
     TokyoNight,
     Ansi,
