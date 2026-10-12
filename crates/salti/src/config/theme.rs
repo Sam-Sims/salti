@@ -1,5 +1,6 @@
 mod ansi;
 mod everforest_dark;
+mod everforest_light;
 mod solarized_light;
 mod tokyo_night;
 
@@ -40,6 +41,7 @@ impl Theme {
     pub fn builtin(name: ThemeName) -> Self {
         match name {
             ThemeName::EverforestDark => everforest_dark::THEME,
+            ThemeName::EverforestLight => everforest_light::THEME,
             ThemeName::SolarizedLight => solarized_light::THEME,
             ThemeName::TokyoNight => tokyo_night::THEME,
             ThemeName::Ansi => ansi::THEME,
@@ -68,6 +70,7 @@ impl Default for Theme {
 pub enum ThemeName {
     #[default]
     EverforestDark,
+    EverforestLight,
     SolarizedLight,
     TokyoNight,
     Ansi,
