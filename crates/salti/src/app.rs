@@ -39,7 +39,11 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn new(startup: StartupState) -> Self {
-        let mut ui = UiState::default();
+        let mut ui = UiState {
+            theme: startup.theme,
+            auto_theme: startup.auto_theme,
+            ..UiState::default()
+        };
         let screen = ScreenLayout::new(Rect::default(), None, None, &mut ui.position);
         let mut app = Self {
             session: None,
@@ -357,6 +361,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        config::theme::Theme,
         test_utils::{buffer_text, session},
         ui::{notification::NotificationLevel, selection::Selection},
     };
@@ -368,6 +373,8 @@ mod tests {
         let mut app = App::new(StartupState {
             file_path: None,
             update_check: false,
+            theme: Theme::default(),
+            auto_theme: None,
         });
         app.session = Some(session(sequences));
         app.handle(Event::Resize(AREA));

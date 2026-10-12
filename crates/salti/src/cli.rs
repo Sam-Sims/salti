@@ -1,10 +1,17 @@
-use clap::{Parser, builder::FalseyValueParser};
+use clap::{
+    Parser,
+    builder::{FalseyValueParser, PossibleValuesParser, TypedValueParser},
+};
+
+use crate::config::theme::{self, Theme, ThemeChoice, ThemeName};
 
 #[derive(Debug)]
 pub struct StartupState {
     /// Input source (file path, URL, or SSH path)
     pub file_path: Option<String>,
     pub update_check: bool,
+    pub theme: Theme,
+    pub auto_theme: Option<ThemeName>,
 }
 
 #[derive(Parser, Debug)]
@@ -25,13 +32,25 @@ pub struct Cli {
     /// Don't check crates.io for a newer version at startup
     #[arg(long, env = "SALTI_SKIP_UPDATE_CHECK", value_parser = FalseyValueParser::new())]
     pub skip_update_check: bool,
+
+    /// Theme to start with: `auto` picks a light or dark theme to match the terminal
+    #[arg(long, env = "SALTI_THEME", default_value = "auto", value_parser = theme_parser())]
+    pub theme: ThemeChoice,
 }
 
 impl Cli {
     pub fn startup_state(self) -> StartupState {
+        let auto_theme = theme::auto_theme(self.theme);
         StartupState {
             file_path: self.file,
             update_check: !self.skip_update_check,
+            theme: Theme::builtin(self.theme.resolve(auto_theme)),
+            auto_theme,
         }
     }
+}
+
+fn theme_parser() -> impl TypedValueParser<Value = ThemeChoice> {
+    PossibleValuesParser::new(ThemeChoice::names())
+        .map(|name| name.parse().expect("possible values are theme choices"))
 }

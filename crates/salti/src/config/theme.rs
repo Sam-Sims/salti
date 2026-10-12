@@ -9,6 +9,8 @@ use std::{iter, str::FromStr};
 
 use ratatui::style::{Color, Style};
 use strum::VariantArray;
+use terminal_colorsaurus::{QueryOptions, ThemeMode};
+use tracing::warn;
 
 use super::residues::ResidueStyles;
 
@@ -106,5 +108,20 @@ impl FromStr for ThemeChoice {
             "auto" => Ok(Self::Auto),
             name => name.parse().map(Self::Named),
         }
+    }
+}
+
+pub fn auto_theme(choice: ThemeChoice) -> Option<ThemeName> {
+    match choice {
+        ThemeChoice::Auto => terminal_colorsaurus::theme_mode(QueryOptions::default())
+            .inspect_err(|error_value| {
+                warn!(error = ?error_value, "Failed to detect the terminal theme mode");
+            })
+            .ok()
+            .map(|mode| match mode {
+                ThemeMode::Dark => ThemeName::EverforestDark,
+                ThemeMode::Light => ThemeName::EverforestLight,
+            }),
+        ThemeChoice::Named(_) => None,
     }
 }
