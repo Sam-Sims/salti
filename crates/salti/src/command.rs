@@ -1,4 +1,4 @@
-use crate::{config::theme::ThemeId, core::session::DiffMode, ui::notification::Notification};
+use crate::{config::theme::ThemeChoice, core::session::DiffMode, ui::notification::Notification};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -7,7 +7,7 @@ pub enum Command {
     ClosePopup,
     OpenMinimap,
     OpenKeybinds,
-    SetTheme(ThemeId),
+    SetTheme(ThemeChoice),
     ShowNotification(Notification),
     LoadAlignment(String),
     CheckForUpdate,

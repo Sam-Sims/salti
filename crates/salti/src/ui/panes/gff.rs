@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::{
+    config::theme::Theme,
     core::{
         gff::{Feature, Gff},
         session::Session,
@@ -19,7 +20,6 @@ use crate::{
             features::{DisplayFeature, PlacedFeature, display_features, render_features},
             render_column_scrollbar, render_pane,
         },
-        state::ThemeState,
     },
 };
 
@@ -27,12 +27,12 @@ pub(crate) struct GffPane<'a> {
     pub(crate) gff: &'a Gff,
     pub(crate) session: &'a Session,
     pub(crate) window: &'a Window,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for GffPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let inner_area = render_pane(self.theme, None, area, buf);
 
         let track =
             FeatureTrack::for_alignment(self.gff, self.session, usize::from(inner_area.width));
@@ -58,8 +58,7 @@ impl Widget for GffPane<'_> {
         render_features(&track.placed_features, feature_rows, self.theme, buf);
 
         render_column_scrollbar(
-            "▁",
-            self.theme.styles.accent,
+            self.theme,
             track.total_columns,
             &self.window.columns,
             navigation_row,
@@ -70,16 +69,14 @@ impl Widget for GffPane<'_> {
 
 pub(crate) struct GffInfoPane<'a> {
     pub(crate) tooltip: Option<&'a str>,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for GffInfoPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = render_pane(
-            &self.theme.styles,
-            Some(Line::from(
-                "Feature Info".set_style(self.theme.styles.text_muted),
-            )),
+            self.theme,
+            Some(Line::from("Feature Info".set_style(self.theme.text_muted))),
             area,
             buf,
         );
@@ -90,15 +87,15 @@ impl Widget for GffInfoPane<'_> {
         let lines: Vec<Line<'_>> = match self.tooltip {
             Some(tooltip) => tooltip
                 .lines()
-                .map(|line| Line::from(line.set_style(self.theme.styles.text)))
+                .map(|line| Line::from(line.set_style(self.theme.text)))
                 .collect(),
             None => vec![Line::from(
-                "Hover over a feature".set_style(self.theme.styles.text_muted),
+                "Hover over a feature".set_style(self.theme.text_muted),
             )],
         };
 
         Paragraph::new(lines)
-            .style(self.theme.styles.base_block)
+            .style(self.theme.base)
             .render(inner_area, buf);
     }
 }
@@ -354,7 +351,7 @@ mod tests {
             columns: 0..10,
             ..Window::default()
         };
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         let area = Rect::new(0, 0, 42, 6);
         let mut buf = Buffer::empty(area);
 

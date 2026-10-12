@@ -192,7 +192,7 @@ impl App {
             }
             Command::OpenKeybinds => self.ui.popup = Some(Popup::Keybinds(Keybinds::default())),
             Command::ClosePopup => self.ui.popup = None,
-            Command::SetTheme(theme_id) => self.ui.set_theme(theme_id),
+            Command::SetTheme(choice) => self.ui.set_theme(choice),
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {

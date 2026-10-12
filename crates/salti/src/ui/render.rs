@@ -1,14 +1,9 @@
 use std::time::Duration;
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Styled, Stylize},
-    text::Line,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Styled, text::Line, widgets::Widget};
 
 use crate::{
+    config::theme::Theme,
     core::{gff::Gff, session::Session},
     ui::{
         bars::{BottomStatusBar, InputBar, TopStatusBar},
@@ -22,7 +17,7 @@ use crate::{
         },
         popups::Context,
         render_centred_lines,
-        state::{ThemeState, UiState},
+        state::UiState,
     },
 };
 
@@ -37,18 +32,17 @@ pub fn render(
     if buf.area.height == 0 {
         return;
     }
-    let styles = &ui.theme.styles;
     TopStatusBar {
         session,
         window: &screen.window,
         loading: ui.loading.as_deref(),
-        styles,
+        theme: &ui.theme,
     }
     .render(screen.frame.top_status_area, buf);
     BottomStatusBar {
         session,
         selection: ui.selection,
-        styles,
+        theme: &ui.theme,
     }
     .render(screen.frame.bottom_status_area, buf);
     match session {
@@ -61,7 +55,7 @@ pub fn render(
     }
     InputBar {
         notification: ui.notifications.shown(),
-        styles,
+        theme: &ui.theme,
     }
     .render(screen.frame.input_area, buf);
     ui.notifications
@@ -81,7 +75,7 @@ pub fn render(
 
 struct EmptyState<'a> {
     loading: Option<&'a str>,
-    theme: &'a ThemeState,
+    theme: &'a Theme,
 }
 
 impl Widget for EmptyState<'_> {
@@ -89,26 +83,21 @@ impl Widget for EmptyState<'_> {
         let theme = self.theme;
         let lines = match self.loading {
             Some(input) => vec![Line::from(
-                format!("Loading {}", input_name(input)).set_style(theme.styles.text),
+                format!("Loading {}", input_name(input)).set_style(theme.text),
             )],
             None => vec![
                 Line::from(
-                    "salti: A modern MSA browser for the terminal."
-                        .fg(theme.theme.text)
-                        .bold(),
+                    "salti: A modern MSA browser for the terminal.".set_style(theme.text.bold()),
                 ),
-                Line::from(
-                    "Use the command palette to open an alignment.".set_style(theme.styles.text),
-                ),
+                Line::from("Use the command palette to open an alignment.".set_style(theme.text)),
                 Line::from(""),
                 Line::from(
                     "Hint: use :load-alignment <alignment.fasta>"
-                        .fg(theme.theme.text_dim)
-                        .italic(),
+                        .set_style(theme.text_dim.italic()),
                 ),
             ],
         };
-        render_centred_lines(lines, theme.styles.base_block, area, buf);
+        render_centred_lines(lines, theme.base, area, buf);
     }
 }
 

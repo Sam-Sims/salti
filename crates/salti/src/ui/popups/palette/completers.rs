@@ -3,6 +3,7 @@ use std::fs;
 use strum::VariantArray;
 
 use crate::{
+    config::theme::ThemeChoice,
     core::session::Session,
     ui::popups::{Context, fuzzy::fuzzy_match},
 };
@@ -34,6 +35,10 @@ pub(super) fn constant_percentages(_: &Context, word: &str) -> Vec<String> {
 
 pub(super) fn choices<T: VariantArray + ToString>(_: &Context, word: &str) -> Vec<String> {
     fuzzy_match(word, T::VARIANTS.iter().map(ToString::to_string))
+}
+
+pub(super) fn theme(_: &Context, word: &str) -> Vec<String> {
+    fuzzy_match(word, ThemeChoice::names().map(str::to_string))
 }
 
 pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {

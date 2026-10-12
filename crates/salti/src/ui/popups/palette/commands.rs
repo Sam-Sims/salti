@@ -2,9 +2,7 @@ use anyhow::Result;
 use libmsa::{AlignmentType, ConsensusMethod, ReadingFrame};
 
 use super::{completers, runners};
-use crate::{
-    command::Command, config::theme::ThemeId, core::session::DiffMode, ui::popups::Context,
-};
+use crate::{command::Command, core::session::DiffMode, ui::popups::Context};
 
 pub(super) struct PaletteCommand {
     pub(super) name: &'static str,
@@ -199,10 +197,10 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
         name: "set-theme",
         aliases: &[],
-        doc: "Set the active theme.",
+        doc: "Set the active theme. `auto` picks Everforest light or dark to match the terminal.",
         action: Action::Required {
             run: runners::theme,
-            completer: Some(completers::choices::<ThemeId>),
+            completer: Some(completers::theme),
         },
     },
     PaletteCommand {

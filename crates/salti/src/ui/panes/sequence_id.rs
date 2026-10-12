@@ -7,12 +7,12 @@ use ratatui::{
 };
 
 use crate::{
+    config::theme::Theme,
     core::session::Session,
     ui::{
         layout::{Window, screen_rows, split_alignment_header},
         panes::{render_pane, separator_line},
         selection::Selection,
-        state::ThemeState,
     },
 };
 
@@ -23,12 +23,12 @@ pub(crate) struct SequenceIdPane<'a> {
     pub(crate) window: &'a Window,
     pub(crate) local_feature_rows: u16,
     pub(crate) selection: Option<Selection>,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let inner_area = render_pane(self.theme, None, area, buf);
         let [_, ruler_area, rows_area] =
             split_alignment_header(inner_area, self.local_feature_rows);
 
@@ -36,7 +36,7 @@ impl Widget for SequenceIdPane<'_> {
         if !self.window.pinned.is_empty() {
             Paragraph::new(vec![
                 Line::default(),
-                Line::from("Pinned sequences:".set_style(theme.styles.text_muted)),
+                Line::from("Pinned sequences:".set_style(theme.text_muted)),
             ])
             .render(ruler_area, buf);
         }
@@ -47,9 +47,9 @@ impl Widget for SequenceIdPane<'_> {
                 Some(pos) => {
                     let row = layout.rows()[pos];
                     let style = if pos < layout.pinned() {
-                        theme.styles.accent
+                        theme.accent
                     } else {
-                        theme.styles.text
+                        theme.text
                     };
 
                     let id: String = self
@@ -61,15 +61,15 @@ impl Widget for SequenceIdPane<'_> {
                         .take(names.len())
                         .collect();
                     Line::from(vec![
-                        format!("{} ", row + 1).set_style(theme.styles.success),
+                        format!("{} ", row + 1).set_style(theme.success),
                         id.set_style(style),
                     ])
                 }
-                None => separator_line(rows_area.width, &theme.styles),
+                None => separator_line(rows_area.width, theme),
             })
             .collect();
         Paragraph::new(lines)
-            .style(theme.styles.base_block)
+            .style(theme.base)
             .render(rows_area, buf);
 
         if let Some(selection) = self.selection {
@@ -78,7 +78,7 @@ impl Widget for SequenceIdPane<'_> {
                 rows_area,
                 layout,
                 self.window,
-                theme.theme.accent,
+                theme.selection_ids,
                 SELECTION_ALPHA,
             );
         }
@@ -99,7 +99,7 @@ mod tests {
     fn render_text(session: &Session, window: &Window, local_feature_rows: u16) -> String {
         let area = Rect::new(0, 0, 150, 12);
         let layout = AppLayout::new(area, 0, local_feature_rows);
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         let mut buf = Buffer::empty(area);
 
         SequenceIdPane {

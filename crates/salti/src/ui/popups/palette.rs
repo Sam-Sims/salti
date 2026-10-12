@@ -126,19 +126,19 @@ impl PopupContent for PaletteState {
     }
 
     fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context) {
-        let styles = &ctx.theme.styles;
+        let theme = ctx.theme;
         let items = &self.completions.items;
         let [above, prompt_row] = inner.layout(&vertical![*=1, ==1]);
         let list_rows = render::list_rows(items, above.width).min(above.height);
         let [doc_area, list_area] = above.layout(&vertical![*=1, ==list_rows]);
         if let Some(command) = self.doc_command() {
-            render::draw_doc(doc_area, buf, command, styles);
+            render::draw_doc(doc_area, buf, command, theme);
         }
-        render::draw_list(list_area, buf, items, self.selected, styles);
+        render::draw_list(list_area, buf, items, self.selected, theme);
 
         let [prompt, line] = prompt_row.layout(&horizontal![==1, *=1]);
-        Span::styled(":", styles.warning).render(prompt, buf);
-        self.input.render(line, buf, styles.warning);
+        Span::styled(":", theme.warning).render(prompt, buf);
+        self.input.render(line, buf, theme.warning);
     }
 }
 
