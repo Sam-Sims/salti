@@ -9,7 +9,7 @@ use ratatui::{
 
 use super::commands::PaletteCommand;
 use crate::{
-    config::theme::ThemeStyles,
+    config::theme::Theme,
     ui::{popups::COLUMN_GAP, truncate_label},
 };
 
@@ -37,7 +37,7 @@ pub(super) fn draw_list(
     buf: &mut Buffer,
     items: &[String],
     selected: Option<usize>,
-    styles: &ThemeStyles,
+    theme: &Theme,
 ) {
     let (columns, _) = grid(items, area.width);
     let rows = usize::from(area.height);
@@ -56,9 +56,9 @@ pub(super) fn draw_list(
                     return None;
                 }
                 let style = if selected == Some(index) {
-                    styles.selection
+                    theme.highlight
                 } else {
-                    styles.text
+                    theme.text
                 };
                 let (label, padding) = pad_label(&items[index], label_width);
                 Some([
@@ -72,28 +72,23 @@ pub(super) fn draw_list(
     Paragraph::new(lines).render(area, buf);
 }
 
-pub(super) fn draw_doc(
-    area: Rect,
-    buf: &mut Buffer,
-    command: &PaletteCommand,
-    styles: &ThemeStyles,
-) {
+pub(super) fn draw_doc(area: Rect, buf: &mut Buffer, command: &PaletteCommand, theme: &Theme) {
     if area.height < 3 {
         return;
     }
     let block = Block::bordered()
-        .border_style(styles.border)
-        .style(styles.panel_block_dim);
+        .border_style(theme.border)
+        .style(theme.popup_inset);
     let inner = block.inner(area);
     block.render(area, buf);
     let (doc, aliases) = doc_text(command, area.width);
     let lines: Vec<Line> = doc
         .into_iter()
-        .map(|line| Line::styled(line, styles.text))
+        .map(|line| Line::styled(line, theme.text))
         .chain(
             aliases
                 .into_iter()
-                .map(|line| Line::styled(line, styles.text_muted)),
+                .map(|line| Line::styled(line, theme.text_muted)),
         )
         .collect();
     Paragraph::new(lines).render(inner, buf);

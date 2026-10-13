@@ -4,6 +4,7 @@ use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
+    config::theme::Theme,
     core::{
         gff::{Feature, FeatureType, Gff, Strand},
         session::{Position, Session},
@@ -11,7 +12,7 @@ use crate::{
     ui::{
         layout::{AppLayout, FrameLayout, ScreenLayout, Window},
         popups::Context,
-        state::{ThemeState, UiState},
+        state::UiState,
     },
 };
 
@@ -94,7 +95,7 @@ pub(crate) fn with_context<T>(
     gff: Option<&Gff>,
     check: impl FnOnce(&Context) -> T,
 ) -> T {
-    let theme = ThemeState::default();
+    let theme = Theme::default();
     let screen = ScreenLayout::new(Rect::default(), session, gff, &mut Position::default());
     check(&Context {
         session,

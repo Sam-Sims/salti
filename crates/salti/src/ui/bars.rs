@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    config::theme::ThemeStyles,
+    config::theme::Theme,
     core::session::{Session, ViewMode},
     ui::{
         input_name,
@@ -27,18 +27,18 @@ pub(crate) struct TopStatusBar<'a> {
     pub(crate) session: Option<&'a Session>,
     pub(crate) window: &'a Window,
     pub(crate) loading: Option<&'a str>,
-    pub(crate) styles: &'a ThemeStyles,
+    pub(crate) theme: &'a Theme,
 }
 
 impl TopStatusBar<'_> {
     fn spans(&self) -> Vec<Span<'static>> {
-        let styles = self.styles;
+        let theme = self.theme;
         let session = self.session;
         let file_name = session.map_or("Unknown", |session| input_name(session.source()));
         let loading_status = match (self.loading, session) {
-            (Some(input), _) => format!("Loading {}", input_name(input)).set_style(styles.text_dim),
-            (None, Some(_)) => Span::styled("Status: Loaded", styles.success),
-            (None, None) => Span::styled("Status: Idle", styles.text_dim),
+            (Some(input), _) => format!("Loading {}", input_name(input)).set_style(theme.text_dim),
+            (None, Some(_)) => Span::styled("Status: Loaded", theme.success),
+            (None, None) => Span::styled("Status: Idle", theme.text_dim),
         };
 
         let layout = session.map(Session::layout);
@@ -53,15 +53,15 @@ impl TopStatusBar<'_> {
         };
 
         vec![
-            format!("File: {file_name}").set_style(styles.text_dim),
+            format!("File: {file_name}").set_style(theme.text_dim),
             Span::raw(" | "),
             loading_status,
             Span::raw(" | "),
-            format!("{alignment_count} alignments").set_style(styles.text),
+            format!("{alignment_count} alignments").set_style(theme.text),
             Span::raw(" | "),
-            format!("Length: {alignment_length}").set_style(styles.text),
+            format!("Length: {alignment_length}").set_style(theme.text),
             Span::raw(" | "),
-            position_range.set_style(styles.text),
+            position_range.set_style(theme.text),
         ]
     }
 }
@@ -69,7 +69,7 @@ impl TopStatusBar<'_> {
 impl Widget for TopStatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(Line::from(self.spans()).right_aligned())
-            .style(self.styles.panel_block)
+            .style(self.theme.bar)
             .render(area, buf);
     }
 }
@@ -77,7 +77,7 @@ impl Widget for TopStatusBar<'_> {
 pub(crate) struct BottomStatusBar<'a> {
     pub(crate) session: Option<&'a Session>,
     pub(crate) selection: Option<Selection>,
-    pub(crate) styles: &'a ThemeStyles,
+    pub(crate) theme: &'a Theme,
 }
 
 impl BottomStatusBar<'_> {
@@ -85,7 +85,7 @@ impl BottomStatusBar<'_> {
         let Some(session) = self.session else {
             return Vec::new();
         };
-        let styles = self.styles;
+        let theme = self.theme;
         let (state, layout) = (session.state(), session.layout());
         let filter = state.mode().filter();
         let mut parts = Vec::new();
@@ -105,11 +105,11 @@ impl BottomStatusBar<'_> {
             if filter.is_active() {
                 let _ = write!(text, " ({} cols)", layout.columns().len());
             }
-            parts.push(text.set_style(styles.warning));
+            parts.push(text.set_style(theme.warning));
         }
 
         if !matches!(state.mode(), ViewMode::Plain { .. }) {
-            parts.push(format!("Translation frame: {}", state.frame).set_style(styles.text));
+            parts.push(format!("Translation frame: {}", state.frame).set_style(theme.text));
         }
 
         if let Some(selection) = self.selection {
@@ -137,7 +137,7 @@ impl BottomStatusBar<'_> {
             } else {
                 format!("{count} sequence(s) selected @ {columns}")
             };
-            parts.push(text.set_style(styles.text));
+            parts.push(text.set_style(theme.text));
         }
 
         parts
@@ -151,14 +151,14 @@ impl BottomStatusBar<'_> {
 impl Widget for BottomStatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(Line::from(self.spans()).right_aligned())
-            .style(self.styles.panel_block)
+            .style(self.theme.bar)
             .render(area, buf);
     }
 }
 
 pub(crate) struct InputBar<'a> {
     pub(crate) notification: Option<&'a Notification>,
-    pub(crate) styles: &'a ThemeStyles,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for InputBar<'_> {
@@ -166,14 +166,14 @@ impl Widget for InputBar<'_> {
         let line = self
             .notification
             .map_or_else(Line::default, |notification| {
-                let (prefix, style) = notification_prefix(notification.level, self.styles);
+                let (prefix, style) = notification_prefix(notification.level, self.theme);
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(notification.message.as_str(), style),
                 ])
             });
         Paragraph::new(line)
-            .style(self.styles.base_block)
+            .style(self.theme.base)
             .render(area, buf);
     }
 }
@@ -190,11 +190,11 @@ fn range_label(start: usize, end: usize) -> String {
     }
 }
 
-fn notification_prefix(level: NotificationLevel, styles: &ThemeStyles) -> (&'static str, Style) {
+fn notification_prefix(level: NotificationLevel, theme: &Theme) -> (&'static str, Style) {
     match level {
-        NotificationLevel::Error => ("Error: ", styles.error),
-        NotificationLevel::Warning => ("Warning: ", styles.warning),
-        NotificationLevel::Info => ("", styles.success),
+        NotificationLevel::Error => ("Error: ", theme.error),
+        NotificationLevel::Warning => ("Warning: ", theme.warning),
+        NotificationLevel::Info => ("", theme.success),
     }
 }
 
@@ -206,7 +206,6 @@ mod tests {
     use crate::{
         core::session::{Position, ViewState},
         test_utils::{full_window, session_with_numbered_ids},
-        ui::state::ThemeState,
     };
 
     fn status_text(spans: &[Span<'_>]) -> String {
@@ -214,25 +213,25 @@ mod tests {
     }
 
     fn top(session: &Session, window: &Window, loading: Option<&str>) -> String {
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         status_text(
             &TopStatusBar {
                 session: Some(session),
                 window,
                 loading,
-                styles: &theme.styles,
+                theme: &theme,
             }
             .spans(),
         )
     }
 
     fn bottom(session: &Session, selection: Option<Selection>) -> String {
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         status_text(
             &BottomStatusBar {
                 session: Some(session),
                 selection,
-                styles: &theme.styles,
+                theme: &theme,
             }
             .spans(),
         )

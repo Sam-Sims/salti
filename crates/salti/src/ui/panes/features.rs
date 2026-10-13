@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use libmsa::AlignmentType;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -7,11 +8,11 @@ use ratatui::{
 };
 
 use crate::{
+    config::theme::Theme,
     core::{
         gff::{Feature, Gff, Strand},
         session::Session,
     },
-    ui::state::ThemeState,
 };
 
 const MIN_LABEL_WIDTH: usize = 2;
@@ -52,33 +53,24 @@ pub(super) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<Displ
 pub(super) fn render_features(
     placed_features: &[PlacedFeature<'_>],
     area: Rect,
-    theme: &ThemeState,
+    theme: &Theme,
     buf: &mut Buffer,
 ) {
     Clear.render(area, buf);
-    buf.set_style(area, theme.styles.base_block);
+    buf.set_style(area, theme.base);
     let width = usize::from(area.width);
-    let dna = theme.theme.sequence.dna;
 
     for placed in placed_features {
         let span = placed.span.start.min(width)..placed.span.end.min(width);
         if usize::from(area.height) <= placed.row || span.is_empty() {
             continue;
         }
-        let colour = match placed.colour_idx % 4 {
-            0 => dna.a,
-            1 => dna.t,
-            2 => dna.c,
-            _ => dna.g,
-        };
-        let background = theme.styles.base_block.bg(colour);
-        let text = background.fg(theme.theme.sequence.foreground);
+        let style = theme
+            .residues
+            .style(AlignmentType::Dna, b"ATCG"[placed.colour_idx % 4]);
         let y = area.y + placed.row as u16;
         let x = |offset: usize| area.x + offset as u16;
-        buf.set_style(
-            Rect::new(x(span.start), y, span.len() as u16, 1),
-            background,
-        );
+        buf.set_style(Rect::new(x(span.start), y, span.len() as u16, 1), style);
 
         let (label, arrow) = match placed.feature.strand {
             Strand::Forward => (span.start..span.end - 1, Some((span.end - 1, "→"))),
@@ -86,12 +78,12 @@ pub(super) fn render_features(
             Strand::Unknown => (span.clone(), None),
         };
         if let Some((at, arrow)) = arrow {
-            buf.set_string(x(at), y, arrow, text);
+            buf.set_string(x(at), y, arrow, style);
         }
         if MIN_LABEL_WIDTH <= label.len() {
             let name: String = placed.feature.name.chars().take(label.len()).collect();
             let offset = (label.len() - name.chars().count()) / 2;
-            buf.set_string(x(label.start + offset), y, name, text);
+            buf.set_string(x(label.start + offset), y, name, style);
         }
     }
 }

@@ -8,10 +8,7 @@ use crate::{
     config::{keybindings, theme::Theme},
     core::session::Session,
     input::centre_on_pointer,
-    ui::{
-        popups::{Context, PopupContent, PopupFrame},
-        state::ThemeState,
-    },
+    ui::popups::{Context, PopupContent, PopupFrame},
 };
 
 /// maximum height of the minimap in rows
@@ -74,7 +71,7 @@ impl PopupContent for Minimap {
         if let Some(window_box) =
             highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
         {
-            shade_highlight_box(buf, window_box, &ctx.theme.theme);
+            shade_highlight_box(buf, window_box, ctx.theme.minimap_window);
         }
     }
 }
@@ -83,11 +80,11 @@ fn sample(index: usize, samples: usize, len: usize) -> usize {
     (2 * index + 1) * len / (2 * samples)
 }
 
-fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, theme: &Theme) {
+fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, style: Style) {
     for position in viewport_box.positions() {
         if let Some(cell) = buffer.cell_mut(position) {
             cell.set_char('▒');
-            cell.set_fg(theme.selection_bg);
+            cell.set_style(style);
         }
     }
 }
@@ -112,18 +109,17 @@ fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -
     ))
 }
 
-fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, theme: &ThemeState) {
+fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, theme: &Theme) {
     let layout = session.layout();
     let grid = session.grid();
     let (shown_rows, shown_columns) = (layout.rows(), layout.columns());
-    let empty = theme.theme.panel_bg_dim;
+    let empty = theme.minimap_empty;
 
     let row_samples = shown_rows.len().min(MINIMAP_ROW_SAMPLES);
     let rows: Vec<usize> = (0..row_samples)
         .map(|index| shown_rows[sample(index, row_samples, shown_rows.len())])
         .collect();
     let column_samples = usize::from(area.width) * MINIMAP_COLUMN_SAMPLES_PER_CELL;
-    let byte_styles = theme.sequence.for_type(grid.alignment_type());
 
     for (block_index, block_x) in (area.x..area.right()).enumerate() {
         let first = block_index * MINIMAP_COLUMN_SAMPLES_PER_CELL;
@@ -132,7 +128,7 @@ fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, them
             .collect();
         let block_colour = grid
             .consensus(&rows, &columns, session.consensus_method)
-            .and_then(|byte| byte_styles[usize::from(byte)].bg)
+            .and_then(|byte| theme.residues.style(grid.alignment_type(), byte).bg)
             .unwrap_or(empty);
 
         buffer.set_style(

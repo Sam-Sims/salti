@@ -36,6 +36,7 @@ human-panic = "2"
 noodles-gff = "0.56.0"
 strum = { version = "0.28", features = ["derive"] }
 tachyonfx = { version = "0.25.2", default-features = false, features = ["std-duration"] }
+terminal-colorsaurus = "1"
 
 [dev-dependencies]
 insta = "1.46.3"

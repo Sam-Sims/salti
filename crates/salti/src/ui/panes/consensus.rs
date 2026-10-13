@@ -1,17 +1,15 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Styled, Stylize},
+    style::Styled,
     text::Line,
     widgets::{Paragraph, Widget},
 };
 
 use crate::{
+    config::theme::Theme,
     core::session::{Session, WindowColumns},
-    ui::{
-        panes::{render_pane, stretch},
-        state::ThemeState,
-    },
+    ui::panes::{render_pane, stretch},
 };
 
 const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -19,19 +17,19 @@ const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "
 pub(crate) struct ConsensusAlignmentPane<'a> {
     pub(crate) session: &'a Session,
     pub(crate) columns: &'a WindowColumns<'a>,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for ConsensusAlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let inner_area = render_pane(self.theme, None, area, buf);
 
         let (columns, theme) = (self.columns, self.theme);
         let reference = self.session.state().reference().map_or_else(
-            || Line::from("No reference selected.".fg(theme.theme.text_dim).italic()),
+            || Line::from("No reference selected.".set_style(theme.text_dim.italic())),
             |row| {
                 let bytes: Vec<u8> = columns.grid.cells(row, &columns.columns).collect();
-                Line::from(stretch(columns, &bytes, None, &theme.sequence))
+                Line::from(stretch(columns, &bytes, None, theme))
             },
         );
 
@@ -43,7 +41,7 @@ impl Widget for ConsensusAlignmentPane<'_> {
 
         let mut lines = vec![
             reference,
-            Line::from(stretch(columns, &consensus, None, &theme.sequence)),
+            Line::from(stretch(columns, &consensus, None, theme)),
         ];
 
         if shows_conservation_line(self.session) {
@@ -52,23 +50,23 @@ impl Widget for ConsensusAlignmentPane<'_> {
                 .iter()
                 .map(|cell| cell.map_or(" ", |cell| spark(&columns.summaries[cell.index])))
                 .collect();
-            lines.push(Line::from(sparks).set_style(theme.styles.accent_alt));
+            lines.push(Line::from(sparks).set_style(theme.accent_alt));
         }
 
         Paragraph::new(lines)
-            .style(theme.styles.base_block)
+            .style(theme.base)
             .render(inner_area, buf);
     }
 }
 
 pub(crate) struct ConsensusSequenceIdPane<'a> {
     pub(crate) session: &'a Session,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for ConsensusSequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let inner_area = render_pane(self.theme, None, area, buf);
 
         // keep Conservation at end of array
         let labels = [
@@ -83,11 +81,11 @@ impl Widget for ConsensusSequenceIdPane<'_> {
         };
         let lines: Vec<Line> = labels[..shown]
             .iter()
-            .map(|&label| Line::from(label.set_style(self.theme.styles.accent)))
+            .map(|&label| Line::from(label.set_style(self.theme.accent)))
             .collect();
 
         Paragraph::new(lines)
-            .style(self.theme.styles.base_block)
+            .style(self.theme.base)
             .render(inner_area, buf);
     }
 }
@@ -123,7 +121,7 @@ mod tests {
     fn render_text(session: &Session, area: Rect) -> String {
         let layout = AppLayout::new(area, 0, 0);
         let columns = session.window_columns(full_window(session).columns);
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         let mut buf = Buffer::empty(area);
 
         ConsensusSequenceIdPane {

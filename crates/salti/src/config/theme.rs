@@ -1,319 +1,22 @@
-#![allow(clippy::unreadable_literal)]
+mod ansi;
+mod everforest_dark;
+mod everforest_light;
+mod solarized_dark;
+mod solarized_light;
+mod tokyo_night;
 
-use libmsa::{AlignmentType, residue};
+use std::{iter, str::FromStr};
+
 use ratatui::style::{Color, Style};
+use strum::VariantArray;
+use terminal_colorsaurus::{QueryOptions, ThemeMode};
+use tracing::warn;
 
-// Generated from iwanthue
-// TODO: explore palette crate and maybe build.rs for compile time nicer generated palettes?
-const FULL_ASCII_COLOURS: [Color; 94] = [
-    Color::from_u32(0x914d5a),
-    Color::from_u32(0x52c95a),
-    Color::from_u32(0x924ac9),
-    Color::from_u32(0x8ebe39),
-    Color::from_u32(0x7475f2),
-    Color::from_u32(0x469e2d),
-    Color::from_u32(0xbf209e),
-    Color::from_u32(0x3bce80),
-    Color::from_u32(0xeb50bd),
-    Color::from_u32(0x3fcc97),
-    Color::from_u32(0xee3f91),
-    Color::from_u32(0x3ea866),
-    Color::from_u32(0xb85bd2),
-    Color::from_u32(0xb2b831),
-    Color::from_u32(0x3659cb),
-    Color::from_u32(0xcfb746),
-    Color::from_u32(0x7452c2),
-    Color::from_u32(0x85c570),
-    Color::from_u32(0xd978eb),
-    Color::from_u32(0x3d8136),
-    Color::from_u32(0xa13c9f),
-    Color::from_u32(0x829c3a),
-    Color::from_u32(0x5886f1),
-    Color::from_u32(0xe5a43e),
-    Color::from_u32(0x554baa),
-    Color::from_u32(0xa8952a),
-    Color::from_u32(0x5762be),
-    Color::from_u32(0xe47f2e),
-    Color::from_u32(0x356db5),
-    Color::from_u32(0xdf5628),
-    Color::from_u32(0x44d2dd),
-    Color::from_u32(0xd12a47),
-    Color::from_u32(0x5bd5bc),
-    Color::from_u32(0xd42273),
-    Color::from_u32(0x70cb92),
-    Color::from_u32(0xc93892),
-    Color::from_u32(0x577e26),
-    Color::from_u32(0xb083e6),
-    Color::from_u32(0x757913),
-    Color::from_u32(0x8474d3),
-    Color::from_u32(0xb97e27),
-    Color::from_u32(0x5d94e1),
-    Color::from_u32(0xb23821),
-    Color::from_u32(0x26b09d),
-    Color::from_u32(0xec476f),
-    Color::from_u32(0x33a27e),
-    Color::from_u32(0xc42e64),
-    Color::from_u32(0x3b8556),
-    Color::from_u32(0xe273cb),
-    Color::from_u32(0x516615),
-    Color::from_u32(0x834ca7),
-    Color::from_u32(0x92b167),
-    Color::from_u32(0xa62771),
-    Color::from_u32(0x74b68d),
-    Color::from_u32(0xe7699f),
-    Color::from_u32(0x2f6633),
-    Color::from_u32(0xab4c8d),
-    Color::from_u32(0x476025),
-    Color::from_u32(0x6b4fa0),
-    Color::from_u32(0x937b2c),
-    Color::from_u32(0x505099),
-    Color::from_u32(0xbdb26f),
-    Color::from_u32(0x7e4990),
-    Color::from_u32(0x828136),
-    Color::from_u32(0xae75bf),
-    Color::from_u32(0x5b5b10),
-    Color::from_u32(0xb0a5e8),
-    Color::from_u32(0x815a16),
-    Color::from_u32(0x55aede),
-    Color::from_u32(0xe95e57),
-    Color::from_u32(0x36b0b8),
-    Color::from_u32(0xaf3f58),
-    Color::from_u32(0x328b7c),
-    Color::from_u32(0xe398d4),
-    Color::from_u32(0x226a4d),
-    Color::from_u32(0xee8f6f),
-    Color::from_u32(0x475993),
-    Color::from_u32(0xa55b23),
-    Color::from_u32(0x4382af),
-    Color::from_u32(0xca6a58),
-    Color::from_u32(0x6f64a6),
-    Color::from_u32(0x705d18),
-    Color::from_u32(0x8381c0),
-    Color::from_u32(0x667f42),
-    Color::from_u32(0xc17bab),
-    Color::from_u32(0x62612c),
-    Color::from_u32(0x925a88),
-    Color::from_u32(0x89834d),
-    Color::from_u32(0x9d476e),
-    Color::from_u32(0xd59d6a),
-    Color::from_u32(0x7f4569),
-    Color::from_u32(0x956d3c),
-    Color::from_u32(0xe18291),
-    Color::from_u32(0x965d39),
-];
+use super::residues::ResidueStyles;
 
-pub const EVERFOREST_DARK: Theme = Theme {
-    base_bg: Color::from_u32(0x2d353b),
-    surface_bg: Color::from_u32(0x343f44),
-    panel_bg: Color::from_u32(0x3d484d),
-    panel_bg_dim: Color::from_u32(0x323b3f),
-    border: Color::from_u32(0x7a8478),
-    text: Color::from_u32(0xd3c6aa),
-    text_muted: Color::from_u32(0x859289),
-    text_dim: Color::from_u32(0x7a8478),
-    accent: Color::from_u32(0x83c092),
-    accent_alt: Color::from_u32(0x7fbbb3),
-    success: Color::from_u32(0xa7c080),
-    warning: Color::from_u32(0xdbbc7f),
-    error: Color::from_u32(0xe67e80),
-    selection_bg: Color::from_u32(0x7fbbb3),
-    selection_fg: Color::from_u32(0x2d353b),
-    sequence: SequenceTheme {
-        foreground: Color::from_u32(0x2d353b),
-        dna: DnaPalette {
-            a: Color::from_u32(0xa7c080),
-            t: Color::from_u32(0xe67e80),
-            c: Color::from_u32(0x7fbbb3),
-            g: Color::from_u32(0xdbbc7f),
-            n: Color::from_u32(0x859289),
-            ambiguity: Color::from_u32(0xd699b6),
-            gap: Color::from_u32(0x7a8478),
-        },
-        amino_acid: AminoAcidPalette {
-            hydrophobic: Color::from_u32(0x7fbbb3),
-            positive: Color::from_u32(0xe67e80),
-            negative: Color::from_u32(0xd699b6),
-            polar: Color::from_u32(0xa7c080),
-            glycine: Color::from_u32(0xe69875),
-            proline: Color::from_u32(0xdbbc7f),
-            aromatic: Color::from_u32(0x83c092),
-            special: Color::from_u32(0x9da9a0),
-        },
-        diff_match: Color::from_u32(0x7a8478),
-    },
-};
-
-pub const SOLARIZED_LIGHT: Theme = Theme {
-    base_bg: Color::from_u32(0xfdf6e3),
-    surface_bg: Color::from_u32(0xeee8d5),
-    panel_bg: Color::from_u32(0xeee8d5),
-    panel_bg_dim: Color::from_u32(0xdddbcc),
-    border: Color::from_u32(0x93a1a1),
-    text: Color::from_u32(0x586e75),
-    text_muted: Color::from_u32(0x93a1a1),
-    text_dim: Color::from_u32(0x657b83),
-    accent: Color::from_u32(0x268bd2),
-    accent_alt: Color::from_u32(0x6c71c4),
-    success: Color::from_u32(0x859900),
-    warning: Color::from_u32(0xcb4b16),
-    error: Color::from_u32(0xdc322f),
-    selection_bg: Color::from_u32(0xc5c8bd),
-    selection_fg: Color::from_u32(0x586e75),
-    sequence: SequenceTheme {
-        foreground: Color::from_u32(0x002b36),
-        dna: DnaPalette {
-            a: Color::from_u32(0x859900),
-            t: Color::from_u32(0xdc322f),
-            c: Color::from_u32(0x2aa198),
-            g: Color::from_u32(0xb58900),
-            n: Color::from_u32(0x93a1a1),
-            ambiguity: Color::from_u32(0x6c71c4),
-            gap: Color::from_u32(0x839496),
-        },
-        amino_acid: AminoAcidPalette {
-            hydrophobic: Color::from_u32(0x268bd2),
-            positive: Color::from_u32(0xdc322f),
-            negative: Color::from_u32(0xd33682),
-            polar: Color::from_u32(0x859900),
-            glycine: Color::from_u32(0xcb4b16),
-            proline: Color::from_u32(0xb58900),
-            aromatic: Color::from_u32(0x6c71c4),
-            special: Color::from_u32(0x93a1a1),
-        },
-        diff_match: Color::from_u32(0x93a1a1),
-    },
-};
-
-pub const TOKYO_NIGHT: Theme = Theme {
-    base_bg: Color::from_u32(0x1a1b26),
-    surface_bg: Color::from_u32(0x292e42),
-    panel_bg: Color::from_u32(0x16161e),
-    panel_bg_dim: Color::from_u32(0x343a55),
-    border: Color::from_u32(0x15161e),
-    text: Color::from_u32(0xc0caf5),
-    text_muted: Color::from_u32(0x565f89),
-    text_dim: Color::from_u32(0x3b4261),
-    accent: Color::from_u32(0x7dcfff),
-    accent_alt: Color::from_u32(0x7aa2f7),
-    success: Color::from_u32(0x9ece6a),
-    warning: Color::from_u32(0xe0af68),
-    error: Color::from_u32(0xdb4b4b),
-    selection_bg: Color::from_u32(0x283457),
-    selection_fg: Color::from_u32(0xc0caf5),
-    sequence: SequenceTheme {
-        foreground: Color::from_u32(0x1a1b26),
-        dna: DnaPalette {
-            a: Color::from_u32(0x9ece6a),
-            t: Color::from_u32(0xf7768e),
-            c: Color::from_u32(0x7dcfff),
-            g: Color::from_u32(0xe0af68),
-            n: Color::from_u32(0x737aa2),
-            ambiguity: Color::from_u32(0xbb9af7),
-            gap: Color::from_u32(0x3b4261),
-        },
-        amino_acid: AminoAcidPalette {
-            hydrophobic: Color::from_u32(0x7aa2f7),
-            positive: Color::from_u32(0xf7768e),
-            negative: Color::from_u32(0xbb9af7),
-            polar: Color::from_u32(0x73daca),
-            glycine: Color::from_u32(0xff9e64),
-            proline: Color::from_u32(0xe0af68),
-            aromatic: Color::from_u32(0x2ac3de),
-            special: Color::from_u32(0x565f89),
-        },
-        diff_match: Color::from_u32(0x6183bb),
-    },
-};
-
-pub const TERMINAL_DEFAULT: Theme = Theme {
-    base_bg: Color::Reset,
-    surface_bg: Color::Black,
-    panel_bg: Color::Black,
-    panel_bg_dim: Color::DarkGray,
-    border: Color::DarkGray,
-    text: Color::Reset,
-    text_muted: Color::Gray,
-    text_dim: Color::DarkGray,
-    accent: Color::Cyan,
-    accent_alt: Color::Blue,
-    success: Color::Green,
-    warning: Color::Yellow,
-    error: Color::Red,
-    selection_bg: Color::Blue,
-    selection_fg: Color::Black,
-    sequence: SequenceTheme {
-        foreground: Color::Black,
-        dna: DnaPalette {
-            a: Color::Green,
-            t: Color::Red,
-            c: Color::Blue,
-            g: Color::Yellow,
-            n: Color::Gray,
-            ambiguity: Color::Magenta,
-            gap: Color::DarkGray,
-        },
-        amino_acid: AminoAcidPalette {
-            hydrophobic: Color::Blue,
-            positive: Color::Red,
-            negative: Color::Magenta,
-            polar: Color::Green,
-            glycine: Color::Cyan,
-            proline: Color::Yellow,
-            aromatic: Color::LightGreen,
-            special: Color::Gray,
-        },
-        diff_match: Color::DarkGray,
-    },
-};
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::EnumString, strum::VariantArray,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum ThemeId {
-    EverforestDark,
-    SolarizedLight,
-    TokyoNight,
-    TerminalDefault,
-}
-
-impl ThemeId {
-    pub fn theme(self) -> Theme {
-        match self {
-            ThemeId::EverforestDark => EVERFOREST_DARK,
-            ThemeId::SolarizedLight => SOLARIZED_LIGHT,
-            ThemeId::TokyoNight => TOKYO_NIGHT,
-            ThemeId::TerminalDefault => TERMINAL_DEFAULT,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Theme {
-    pub base_bg: Color,
-    pub surface_bg: Color,
-    pub panel_bg: Color,
-    pub panel_bg_dim: Color,
-    pub border: Color,
-    pub text: Color,
-    pub text_muted: Color,
-    pub text_dim: Color,
-    pub accent: Color,
-    pub accent_alt: Color,
-    pub success: Color,
-    pub warning: Color,
-    pub error: Color,
-    pub selection_bg: Color,
-    pub selection_fg: Color,
-    pub sequence: SequenceTheme,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ThemeStyles {
-    pub base_block: Style,
-    pub panel_block: Style,
-    pub panel_block_dim: Style,
-    pub border: Style,
+    pub base: Style,
     pub text: Style,
     pub text_muted: Style,
     pub text_dim: Style,
@@ -322,159 +25,103 @@ pub struct ThemeStyles {
     pub success: Style,
     pub warning: Style,
     pub error: Style,
-    pub selection: Style,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DnaPalette {
-    pub a: Color,
-    pub t: Color,
-    pub c: Color,
-    pub g: Color,
-    pub n: Color,
-    pub ambiguity: Color,
-    pub gap: Color,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct AminoAcidPalette {
-    pub hydrophobic: Color,
-    pub positive: Color,
-    pub negative: Color,
-    pub polar: Color,
-    pub glycine: Color,
-    pub proline: Color,
-    pub aromatic: Color,
-    pub special: Color,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct SequenceTheme {
-    pub foreground: Color,
-    pub dna: DnaPalette,
-    pub amino_acid: AminoAcidPalette,
-    pub diff_match: Color,
-}
-
-pub type ByteStyles = [Style; 256];
-
-#[derive(Debug, Clone)]
-pub struct SequenceStyles {
-    dna: ByteStyles,
-    protein: ByteStyles,
-    generic: ByteStyles,
     pub diff_match: Style,
+    pub border: Style,
+    pub scrollbar: Style,
+    pub bar: Style,
+    pub popup: Style,
+    pub popup_inset: Style,
+    pub highlight: Style,
+    pub selection_rows: Color,
+    pub selection_columns: Color,
+    pub selection_ids: Color,
+    pub minimap_window: Style,
+    pub minimap_empty: Color,
+    pub residues: ResidueStyles,
 }
 
-impl SequenceStyles {
-    pub fn new(sequence: &SequenceTheme) -> Self {
-        let residue_style = |colour| Style::new().bg(colour).fg(sequence.foreground);
-
-        Self {
-            dna: build_dna_styles(&sequence.dna, residue_style),
-            protein: build_protein_styles(&sequence.amino_acid, residue_style),
-            generic: build_generic_styles(residue_style),
-            diff_match: Style::new().fg(sequence.diff_match),
-        }
-    }
-
-    pub fn for_type(&self, alignment_type: AlignmentType) -> &ByteStyles {
-        match alignment_type {
-            AlignmentType::Dna => &self.dna,
-            AlignmentType::Protein => &self.protein,
-            AlignmentType::Generic => &self.generic,
-        }
-    }
-}
-
-fn fill(table: &mut ByteStyles, bytes: &[u8], style: Style) {
-    for &byte in bytes {
-        table[usize::from(byte.to_ascii_uppercase())] = style;
-        table[usize::from(byte.to_ascii_lowercase())] = style;
-    }
-}
-
-fn fill_where(table: &mut ByteStyles, predicate: impl Fn(u8) -> bool, style: Style) {
-    for byte in 0..=u8::MAX {
-        if predicate(byte) {
-            table[usize::from(byte)] = style;
+impl Theme {
+    pub fn builtin(name: ThemeName) -> Self {
+        match name {
+            ThemeName::EverforestDark => everforest_dark::THEME,
+            ThemeName::EverforestLight => everforest_light::THEME,
+            ThemeName::SolarizedDark => solarized_dark::THEME,
+            ThemeName::SolarizedLight => solarized_light::THEME,
+            ThemeName::TokyoNight => tokyo_night::THEME,
+            ThemeName::Ansi => ansi::THEME,
         }
     }
 }
 
-fn build_dna_styles(dna: &DnaPalette, style: impl Fn(Color) -> Style) -> ByteStyles {
-    let mut table = [Style::new(); 256];
-
-    fill(&mut table, b"RYMKSWHBVD", style(dna.ambiguity));
-    let bases = [dna.a, dna.t, dna.c, dna.g];
-    for byte in 0..=u8::MAX {
-        if let Some(index) = residue::nucleotide_index(byte) {
-            table[usize::from(byte)] = style(bases[index]);
-        }
+impl Default for Theme {
+    fn default() -> Self {
+        Self::builtin(ThemeName::default())
     }
-    fill_where(
-        &mut table,
-        |byte| residue::is_unknown(byte, AlignmentType::Dna),
-        style(dna.n),
-    );
-    fill_where(&mut table, residue::is_gap, style(dna.gap));
-
-    table
 }
 
-// colours from clustal default
-// http://www.jalview.org/help/html/colourSchemes/clustal.html
-fn build_protein_styles(
-    amino_acid: &AminoAcidPalette,
-    style: impl Fn(Color) -> Style,
-) -> ByteStyles {
-    let mut table = [Style::new(); 256];
-
-    fill(&mut table, b"AVLIMFWC", style(amino_acid.hydrophobic));
-    fill(&mut table, b"YH", style(amino_acid.aromatic));
-    fill(&mut table, b"STNQ", style(amino_acid.polar));
-    fill(&mut table, b"KR", style(amino_acid.positive));
-    fill(&mut table, b"DE", style(amino_acid.negative));
-    fill(&mut table, b"G", style(amino_acid.glycine));
-    fill(&mut table, b"P", style(amino_acid.proline));
-    fill_where(
-        &mut table,
-        |byte| residue::is_gap(byte) || residue::is_unknown(byte, AlignmentType::Protein),
-        style(amino_acid.special),
-    );
-
-    table
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    strum::EnumString,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum ThemeName {
+    #[default]
+    EverforestDark,
+    EverforestLight,
+    SolarizedDark,
+    SolarizedLight,
+    TokyoNight,
+    Ansi,
 }
 
-fn build_generic_styles(style: impl Fn(Color) -> Style) -> ByteStyles {
-    let mut table = [Style::new(); 256];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeChoice {
+    Auto,
+    Named(ThemeName),
+}
 
-    for (byte, &colour) in (33..).zip(FULL_ASCII_COLOURS.iter()) {
-        table[byte] = style(colour);
+impl ThemeChoice {
+    pub fn names() -> impl Iterator<Item = &'static str> {
+        iter::once("auto").chain(ThemeName::VARIANTS.iter().map(|&name| name.into()))
     }
 
-    table
+    pub fn resolve(self, auto: Option<ThemeName>) -> ThemeName {
+        match self {
+            Self::Named(name) => name,
+            Self::Auto => auto.unwrap_or_default(),
+        }
+    }
 }
 
-impl ThemeStyles {
-    pub fn new(theme: &Theme) -> Self {
-        Self {
-            base_block: Style::new().bg(theme.base_bg).fg(theme.text),
-            panel_block: Style::new().bg(theme.panel_bg).fg(theme.text),
-            panel_block_dim: Style::new().bg(theme.panel_bg_dim).fg(theme.text),
-            border: Style::new().fg(theme.border),
-            text: Style::new().fg(theme.text),
-            text_muted: Style::new().fg(theme.text_muted),
-            text_dim: Style::new().fg(theme.text_dim),
-            accent: Style::new().fg(theme.accent).bold(),
-            accent_alt: Style::new().fg(theme.accent_alt),
-            success: Style::new().fg(theme.success).bold(),
-            warning: Style::new().fg(theme.warning).bold(),
-            error: Style::new().fg(theme.error).bold(),
-            selection: Style::new()
-                .bg(theme.selection_bg)
-                .fg(theme.selection_fg)
-                .bold(),
+impl FromStr for ThemeChoice {
+    type Err = strum::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Auto),
+            name => name.parse().map(Self::Named),
         }
+    }
+}
+
+pub fn auto_theme(choice: ThemeChoice) -> Option<ThemeName> {
+    match choice {
+        ThemeChoice::Auto => terminal_colorsaurus::theme_mode(QueryOptions::default())
+            .inspect_err(|error_value| {
+                warn!(error = ?error_value, "Failed to detect the terminal theme mode");
+            })
+            .ok()
+            .map(|mode| match mode {
+                ThemeMode::Dark => ThemeName::EverforestDark,
+                ThemeMode::Light => ThemeName::EverforestLight,
+            }),
+        ThemeChoice::Named(_) => None,
     }
 }

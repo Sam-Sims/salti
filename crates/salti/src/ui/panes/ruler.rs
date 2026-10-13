@@ -6,15 +6,12 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::{
-    core::session::Session,
-    ui::{layout::Window, state::ThemeState},
-};
+use crate::{config::theme::Theme, core::session::Session, ui::layout::Window};
 
 pub(crate) struct Ruler<'a> {
     pub(crate) session: &'a Session,
     pub(crate) window: &'a Window,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for Ruler<'_> {
@@ -34,7 +31,7 @@ impl Widget for Ruler<'_> {
             self.theme,
         );
         Paragraph::new(vec![number_line, marker_line])
-            .style(self.theme.styles.base_block)
+            .style(self.theme.base)
             .render(area, buf);
     }
 }
@@ -43,7 +40,7 @@ fn add_number_to_ruler(
     number_line: &mut [Span<'static>],
     centre_pos: usize,
     number: usize,
-    theme: &ThemeState,
+    theme: &Theme,
 ) -> bool {
     let number_string = number.to_string();
     let number_length = number_string.len();
@@ -63,7 +60,7 @@ fn add_number_to_ruler(
 
     for (offset, digit) in number_string.chars().enumerate() {
         if let Some(cell) = number_line.get_mut(start_idx + offset) {
-            *cell = digit.to_string().set_style(theme.styles.accent);
+            *cell = digit.to_string().set_style(theme.accent);
         }
     }
 
@@ -170,7 +167,7 @@ fn build_ruler(
     absolute_columns: &[usize],
     filtered_leading: bool,
     filtered_trailing: bool,
-    theme: &ThemeState,
+    theme: &Theme,
 ) -> (Line<'static>, Line<'static>) {
     let width = absolute_columns.len();
     if width == 0 {
@@ -195,9 +192,9 @@ fn build_ruler(
         if display_pos == 1 || display_pos.is_multiple_of(5) {
             let is_major_tick = display_pos.is_multiple_of(10);
             *marker_span = if is_major_tick {
-                "|".set_style(theme.styles.accent)
+                "|".set_style(theme.accent)
             } else {
-                ".".set_style(theme.styles.text_dim)
+                ".".set_style(theme.text_dim)
             };
 
             if is_run_start {
@@ -224,12 +221,12 @@ fn build_ruler(
             BreakMarker::Leading => "‹",
             BreakMarker::Trailing => "›",
         };
-        marker_line[position] = symbol.set_style(theme.styles.warning);
+        marker_line[position] = symbol.set_style(theme.warning);
     }
 
     for (start, end) in dense_spans {
         for marker in marker_line.iter_mut().take(end + 1).skip(start) {
-            *marker = "~".set_style(theme.styles.warning);
+            *marker = "~".set_style(theme.warning);
         }
     }
 
@@ -275,7 +272,7 @@ mod tests {
             columns,
             filtered_leading,
             filtered_trailing,
-            &ThemeState::default(),
+            &Theme::default(),
         );
 
         assert_eq!(
@@ -354,7 +351,7 @@ mod tests {
         Ruler {
             session: &session,
             window: &window,
-            theme: &ThemeState::default(),
+            theme: &Theme::default(),
         }
         .render(area, &mut buf);
 

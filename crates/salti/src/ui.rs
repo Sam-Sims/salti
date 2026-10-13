@@ -26,6 +26,7 @@ pub(crate) fn input_name(input: &str) -> &str {
 
 fn render_centred_lines(lines: Vec<Line<'_>>, style: Style, area: Rect, buf: &mut Buffer) {
     let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    buf.set_style(area, style);
     Paragraph::new(lines)
         .alignment(HorizontalAlignment::Center)
         .style(style)

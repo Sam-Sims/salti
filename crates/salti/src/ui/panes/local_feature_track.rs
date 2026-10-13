@@ -3,11 +3,11 @@ use std::ops::Range;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::{
+    config::theme::Theme,
     core::{gff::Gff, session::Session},
     ui::{
         layout::Window,
         panes::features::{DisplayFeature, PlacedFeature, display_features, render_features},
-        state::ThemeState,
     },
 };
 
@@ -17,7 +17,7 @@ pub(crate) struct LocalFeatureTrack<'a> {
     pub(crate) gff: &'a Gff,
     pub(crate) session: &'a Session,
     pub(crate) window: &'a Window,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for LocalFeatureTrack<'_> {

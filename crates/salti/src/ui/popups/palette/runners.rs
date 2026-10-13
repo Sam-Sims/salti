@@ -128,7 +128,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        config::theme::ThemeId,
+        config::theme::{ThemeChoice, ThemeName},
         core::session::DiffMode,
         test_utils::{genes, pinned_session, with_context},
     };
@@ -163,7 +163,12 @@ mod tests {
         "2",
         Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2)
     )]
-    #[case::theme(theme, "tokyo-night", Command::SetTheme(ThemeId::TokyoNight))]
+    #[case::theme_named(
+        theme,
+        "tokyo-night",
+        Command::SetTheme(ThemeChoice::Named(ThemeName::TokyoNight))
+    )]
+    #[case::theme_auto(theme, "auto", Command::SetTheme(ThemeChoice::Auto))]
     #[case::sequence_type(
         sequence_type,
         "protein",

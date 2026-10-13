@@ -70,12 +70,12 @@ impl PopupContent for Keybinds {
     }
 
     fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context) {
-        let styles = &ctx.theme.styles;
+        let theme = ctx.theme;
         let [tabs_area, list_area] = inner.layout(&vertical![==1, *=1]);
         Tabs::new(Category::VARIANTS.iter().map(ToString::to_string))
             .select(self.tab as usize)
-            .style(styles.text_muted)
-            .highlight_style(styles.selection)
+            .style(theme.text_muted)
+            .highlight_style(theme.highlight)
             .render(tabs_area, buf);
 
         let column_width = key_width() + COLUMN_GAP;
@@ -84,8 +84,8 @@ impl PopupContent for Keybinds {
             .skip(scroll)
             .map(|binding| {
                 Line::from(vec![
-                    Span::styled(format!("{:column_width$}", binding.key()), styles.accent),
-                    Span::styled(binding.description, styles.text),
+                    Span::styled(format!("{:column_width$}", binding.key()), theme.accent),
+                    Span::styled(binding.description, theme.text),
                 ])
             })
             .collect();

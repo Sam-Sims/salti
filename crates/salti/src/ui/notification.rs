@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use ratatui::{buffer::Buffer, layout::Rect, style::Color};
-use tachyonfx::{Effect, fx};
+use tachyonfx::{ColorSpace, Effect, fx};
 
 const FADE: Duration = Duration::from_secs(2);
 
@@ -59,7 +59,7 @@ impl Notifications {
             return;
         }
         let out = match bg {
-            Color::Rgb(..) => fx::fade_to_fg(bg, FADE),
+            Color::Rgb(..) => fx::fade_to_fg(bg, FADE).with_color_space(ColorSpace::Rgb),
             _ => fx::dissolve(FADE),
         };
         self.shown = Some(Shown {

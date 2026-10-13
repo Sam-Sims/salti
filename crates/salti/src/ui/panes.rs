@@ -11,14 +11,14 @@ use std::ops::Range;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style, Styled},
+    style::Styled,
     symbols::merge::MergeStrategy,
     text::{Line, Span},
     widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
 use crate::{
-    config::theme::{SequenceStyles, ThemeStyles},
+    config::theme::Theme,
     core::session::{Cell, WindowColumns},
 };
 
@@ -49,9 +49,9 @@ fn stretch(
     columns: &WindowColumns<'_>,
     bytes: &[u8],
     diff: Option<&[u8]>,
-    styles: &SequenceStyles,
+    theme: &Theme,
 ) -> Vec<Span<'static>> {
-    let letters = styles.for_type(columns.grid.alignment_type());
+    let alignment_type = columns.grid.alignment_type();
     columns
         .cells
         .iter()
@@ -61,10 +61,10 @@ fn stretch(
             };
             let byte = bytes[index];
             let matches = diff.is_some_and(|diff| diff[index] == byte);
-            let style = letters[usize::from(byte)];
+            let style = theme.residues.style(alignment_type, byte);
             match (matches, centre) {
                 // diff mode rendering
-                (true, true) => Span::styled(".", styles.diff_match),
+                (true, true) => Span::styled(".", theme.diff_match),
                 (true, false) => Span::raw(" "),
                 (false, true) => Span::styled(BYTE_TO_CHAR[usize::from(byte)], style),
                 // translation overlay rendering
@@ -75,8 +75,7 @@ fn stretch(
 }
 
 fn render_column_scrollbar(
-    thumb: &str,
-    thumb_style: Style,
+    theme: &Theme,
     total: usize,
     window: &Range<usize>,
     area: Rect,
@@ -90,8 +89,8 @@ fn render_column_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(None)
-        .thumb_symbol(thumb)
-        .thumb_style(thumb_style)
+        .thumb_symbol("▬")
+        .thumb_style(theme.scrollbar)
         .render(
             area,
             buf,
@@ -101,15 +100,10 @@ fn render_column_scrollbar(
         );
 }
 
-fn render_pane(
-    styles: &ThemeStyles,
-    title: Option<Line<'_>>,
-    area: Rect,
-    buf: &mut Buffer,
-) -> Rect {
+fn render_pane(theme: &Theme, title: Option<Line<'_>>, area: Rect, buf: &mut Buffer) -> Rect {
     let mut block = Block::bordered()
-        .border_style(styles.border)
-        .style(styles.base_block)
+        .border_style(theme.border)
+        .style(theme.base)
         .merge_borders(MergeStrategy::Exact);
     if let Some(title) = title {
         block = block.title(title);
@@ -119,8 +113,8 @@ fn render_pane(
     inner_area
 }
 
-fn separator_line(width: u16, styles: &ThemeStyles) -> Line<'static> {
-    Line::from("─".repeat(usize::from(width)).set_style(styles.border))
+fn separator_line(width: u16, theme: &Theme) -> Line<'static> {
+    Line::from("─".repeat(usize::from(width)).set_style(theme.border))
 }
 
 #[cfg(test)]
@@ -128,7 +122,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{test_utils::session, ui::state::ThemeState};
+    use crate::test_utils::session;
 
     fn stretched(cell: Option<Cell>, byte: u8, diff: Option<u8>) -> String {
         let session = session(&[b"A"]);
@@ -140,15 +134,10 @@ mod tests {
         };
         let diff = diff.map(|byte| vec![byte]);
 
-        stretch(
-            &columns,
-            &[byte],
-            diff.as_deref(),
-            &ThemeState::default().sequence,
-        )
-        .into_iter()
-        .map(|span| span.content.into_owned())
-        .collect()
+        stretch(&columns, &[byte], diff.as_deref(), &Theme::default())
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect()
     }
 
     const CENTRE: Option<Cell> = Some(Cell {
@@ -196,15 +185,10 @@ mod tests {
             summaries: Vec::new(),
         };
 
-        let text: String = stretch(
-            &columns,
-            b"AC",
-            Some(b"AG"),
-            &ThemeState::default().sequence,
-        )
-        .into_iter()
-        .map(|span| span.content.into_owned())
-        .collect();
+        let text: String = stretch(&columns, b"AC", Some(b"AG"), &Theme::default())
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
 
         assert_eq!(text, "C.");
     }

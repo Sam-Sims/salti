@@ -1,12 +1,13 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
-    style::{Style, Styled},
+    style::Styled,
     text::Line,
     widgets::{Paragraph, Widget},
 };
 
 use crate::{
+    config::theme::Theme,
     core::{
         gff::Gff,
         session::{DiffMode, Session, WindowColumns},
@@ -19,7 +20,6 @@ use crate::{
         },
         render_centred_lines,
         selection::Selection,
-        state::ThemeState,
     },
 };
 
@@ -33,12 +33,12 @@ pub(crate) struct AlignmentPane<'a> {
     pub(crate) gff: Option<&'a Gff>,
     pub(crate) local_feature_rows: u16,
     pub(crate) selection: Option<Selection>,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
 }
 
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(&self.theme.styles, None, area, buf);
+        let inner_area = render_pane(self.theme, None, area, buf);
 
         let [local_feature_area, ruler_area, sequence_rows_area] =
             split_alignment_header(inner_area, self.local_feature_rows);
@@ -62,12 +62,7 @@ impl Widget for AlignmentPane<'_> {
         let (session, columns, theme) = (self.session, self.columns, self.theme);
         let layout = session.layout();
         render_column_scrollbar(
-            "▬",
-            Style {
-                fg: Some(theme.theme.accent_alt),
-                bg: theme.styles.border.fg,
-                ..Style::default()
-            },
+            theme,
             layout.columns().len(),
             &self.window.columns,
             area.inner(Margin::new(1, 0)),
@@ -83,8 +78,8 @@ impl Widget for AlignmentPane<'_> {
         };
         if let Some(message) = empty_message {
             render_centred_lines(
-                vec![Line::from(message.set_style(theme.styles.error))],
-                theme.styles.base_block,
+                vec![Line::from(message.set_style(theme.error))],
+                theme.base,
                 sequence_rows_area,
                 buf,
             );
@@ -114,13 +109,13 @@ impl Widget for AlignmentPane<'_> {
                     columns,
                     &bytes(layout.rows()[pos]),
                     diff.as_deref(),
-                    &theme.sequence,
+                    theme,
                 )),
-                None => separator_line(sequence_rows_area.width, &theme.styles),
+                None => separator_line(sequence_rows_area.width, theme),
             })
             .collect();
         Paragraph::new(lines)
-            .style(theme.styles.base_block)
+            .style(theme.base)
             .render(sequence_rows_area, buf);
 
         if let Some(selection) = self.selection {
@@ -129,14 +124,14 @@ impl Widget for AlignmentPane<'_> {
                 sequence_rows_area,
                 layout,
                 self.window,
-                theme.theme.surface_bg,
+                theme.selection_rows,
                 SELECTION_ROW_ALPHA,
             );
             selection.shade_columns(
                 buf,
                 sequence_rows_area,
                 self.window,
-                theme.theme.panel_bg,
+                theme.selection_columns,
                 SELECTION_COLUMN_ALPHA,
             );
         }
@@ -173,7 +168,7 @@ mod tests {
         });
         let layout = AppLayout::new(area, 0, local_feature_rows);
         let columns = session.window_columns(window.columns.clone());
-        let theme = ThemeState::default();
+        let theme = Theme::default();
         let mut buf = Buffer::empty(area);
 
         AlignmentPane {

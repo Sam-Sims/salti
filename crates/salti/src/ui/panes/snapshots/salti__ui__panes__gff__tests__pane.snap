@@ -6,5 +6,5 @@ expression: "buffer_text(&buf, area)"
 │  alpha   →                      gamma  │
 │              ←     beta        delta → │
 │                                        │
-│▁▁▁▁▁▁▁▁▁▁                              │
+│▬▬▬▬▬▬▬▬▬▬                              │
 └────────────────────────────────────────┘

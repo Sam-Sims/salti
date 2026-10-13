@@ -1,14 +1,9 @@
 use std::time::Duration;
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Styled, Stylize},
-    text::Line,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Styled, text::Line, widgets::Widget};
 
 use crate::{
+    config::theme::Theme,
     core::{gff::Gff, session::Session},
     ui::{
         bars::{BottomStatusBar, InputBar, TopStatusBar},
@@ -20,9 +15,9 @@ use crate::{
             gff::{GffInfoPane, GffPane},
             sequence_id::SequenceIdPane,
         },
-        popups::Context,
+        popups::{Context, Popup},
         render_centred_lines,
-        state::{ThemeState, UiState},
+        state::UiState,
     },
 };
 
@@ -37,31 +32,36 @@ pub fn render(
     if buf.area.height == 0 {
         return;
     }
-    let styles = &ui.theme.styles;
+    let preview = ui
+        .popup
+        .as_ref()
+        .and_then(Popup::theme_preview)
+        .map(|choice| Theme::builtin(choice.resolve(ui.auto_theme)));
+    let theme = preview.as_ref().unwrap_or(&ui.theme);
     TopStatusBar {
         session,
         window: &screen.window,
         loading: ui.loading.as_deref(),
-        styles,
+        theme,
     }
     .render(screen.frame.top_status_area, buf);
     BottomStatusBar {
         session,
         selection: ui.selection,
-        styles,
+        theme,
     }
     .render(screen.frame.bottom_status_area, buf);
     match session {
-        Some(session) => render_panes(buf, screen, session, gff, ui),
+        Some(session) => render_panes(buf, screen, session, gff, ui, theme),
         None => EmptyState {
             loading: ui.loading.as_deref(),
-            theme: &ui.theme,
+            theme,
         }
         .render(screen.frame.content_area, buf),
     }
     InputBar {
         notification: ui.notifications.shown(),
-        styles,
+        theme,
     }
     .render(screen.frame.input_area, buf);
     ui.notifications
@@ -72,7 +72,7 @@ pub fn render(
             &Context {
                 session,
                 gff,
-                theme: &ui.theme,
+                theme,
                 screen,
             },
         );
@@ -81,7 +81,7 @@ pub fn render(
 
 struct EmptyState<'a> {
     loading: Option<&'a str>,
-    theme: &'a ThemeState,
+    theme: &'a Theme,
 }
 
 impl Widget for EmptyState<'_> {
@@ -89,26 +89,21 @@ impl Widget for EmptyState<'_> {
         let theme = self.theme;
         let lines = match self.loading {
             Some(input) => vec![Line::from(
-                format!("Loading {}", input_name(input)).set_style(theme.styles.text),
+                format!("Loading {}", input_name(input)).set_style(theme.text),
             )],
             None => vec![
                 Line::from(
-                    "salti: A modern MSA browser for the terminal."
-                        .fg(theme.theme.text)
-                        .bold(),
+                    "salti: A modern MSA browser for the terminal.".set_style(theme.text.bold()),
                 ),
-                Line::from(
-                    "Use the command palette to open an alignment.".set_style(theme.styles.text),
-                ),
+                Line::from("Use the command palette to open an alignment.".set_style(theme.text)),
                 Line::from(""),
                 Line::from(
                     "Hint: use :load-alignment <alignment.fasta>"
-                        .fg(theme.theme.text_dim)
-                        .italic(),
+                        .set_style(theme.text_dim.italic()),
                 ),
             ],
         };
-        render_centred_lines(lines, theme.styles.base_block, area, buf);
+        render_centred_lines(lines, theme.base, area, buf);
     }
 }
 
@@ -118,6 +113,7 @@ fn render_panes(
     session: &Session,
     gff: Option<&Gff>,
     ui: &UiState,
+    theme: &Theme,
 ) {
     let (layout, window) = (&screen.app, &screen.window);
     let columns = session.window_columns(window.columns.clone());
@@ -125,14 +121,14 @@ fn render_panes(
     if let Some(gff) = gff {
         GffInfoPane {
             tooltip: ui.gff_tooltip.as_deref(),
-            theme: &ui.theme,
+            theme,
         }
         .render(layout.gff_info_pane, buf);
         GffPane {
             gff,
             session,
             window,
-            theme: &ui.theme,
+            theme,
         }
         .render(layout.gff_pane, buf);
     }
@@ -142,7 +138,7 @@ fn render_panes(
         window,
         local_feature_rows: layout.local_feature_rows,
         selection: ui.selection,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.sequence_id_pane, buf);
     AlignmentPane {
@@ -152,18 +148,14 @@ fn render_panes(
         gff,
         local_feature_rows: layout.local_feature_rows,
         selection: ui.selection,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.alignment_pane, buf);
-    ConsensusSequenceIdPane {
-        session,
-        theme: &ui.theme,
-    }
-    .render(layout.consensus_sequence_id_pane, buf);
+    ConsensusSequenceIdPane { session, theme }.render(layout.consensus_sequence_id_pane, buf);
     ConsensusAlignmentPane {
         session,
         columns: &columns,
-        theme: &ui.theme,
+        theme,
     }
     .render(layout.consensus_alignment_pane, buf);
 }

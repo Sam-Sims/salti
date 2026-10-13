@@ -56,26 +56,22 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     }
 }
 
+/// Returns true if `byte` is an IUPAC ambiguity code for two or more bases, case-insensitive
+///
+/// `R`, `Y`, `S`, `W`, `K`, `M`, `B`, `D`, `H` and `V`. `N` is the unknown symbol (see [`is_unknown`])
 #[inline]
-pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
+pub const fn is_ambiguous_nucleotide(byte: u8) -> bool {
     matches!(
         byte.to_ascii_uppercase(),
-        b'A' | b'C'
-            | b'G'
-            | b'T'
-            | b'U'
-            | b'R'
-            | b'Y'
-            | b'S'
-            | b'W'
-            | b'K'
-            | b'M'
-            | b'B'
-            | b'D'
-            | b'H'
-            | b'V'
-            | b'N'
+        b'R' | b'Y' | b'S' | b'W' | b'K' | b'M' | b'B' | b'D' | b'H' | b'V'
     )
+}
+
+#[inline]
+pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
+    nucleotide_index(byte).is_some()
+        || is_ambiguous_nucleotide(byte)
+        || is_unknown(byte, AlignmentType::Dna)
 }
 
 #[inline]
@@ -106,8 +102,8 @@ mod tests {
     use rstest::rstest;
 
     use super::{
-        UNKNOWN_AMINO_ACID, is_detection_nucleotide, is_detection_protein, is_gap, is_unknown,
-        nucleotide_index,
+        UNKNOWN_AMINO_ACID, is_ambiguous_nucleotide, is_detection_nucleotide, is_detection_protein,
+        is_gap, is_unknown, nucleotide_index,
     };
     use crate::alignment_type::AlignmentType;
 
@@ -162,6 +158,24 @@ mod tests {
     #[case::non_ascii(0x80)]
     fn nucleotide_index_is_none(#[case] byte: u8) {
         assert_eq!(nucleotide_index(byte), None);
+    }
+
+    #[rstest]
+    #[case::two_bases(b'R')]
+    #[case::three_bases(b'V')]
+    #[case::lowercase(b'k')]
+    fn is_ambiguous_nucleotide_works(#[case] byte: u8) {
+        assert!(is_ambiguous_nucleotide(byte));
+    }
+
+    #[rstest]
+    #[case::base(b'A')]
+    #[case::rna(b'U')]
+    #[case::unknown(b'N')]
+    #[case::gap(b'-')]
+    #[case::protein_only(b'E')]
+    fn is_ambiguous_nucleotide_rejects(#[case] byte: u8) {
+        assert!(!is_ambiguous_nucleotide(byte));
     }
 
     #[rstest]

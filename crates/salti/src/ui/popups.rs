@@ -14,11 +14,11 @@ use ratatui::{
 
 use crate::{
     command::Command,
+    config::theme::{Theme, ThemeChoice},
     core::{gff::Gff, session::Session},
     ui::{
         layout::ScreenLayout,
         popups::{keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
-        state::ThemeState,
     },
 };
 
@@ -51,14 +51,21 @@ impl Popup {
     pub(crate) fn render(&self, buf: &mut Buffer, ctx: &Context) {
         let content = self.content();
         let area = content.area(ctx);
-        let styles = &ctx.theme.styles;
+        let theme = ctx.theme;
         let block = block(content.frame())
-            .border_style(styles.border)
-            .style(styles.panel_block);
+            .border_style(theme.border)
+            .style(theme.popup);
         let inner = block.inner(area);
         Clear.render(area, buf);
         block.render(area, buf);
         content.render(inner, buf, ctx);
+    }
+
+    pub(super) fn theme_preview(&self) -> Option<ThemeChoice> {
+        match self {
+            Self::Palette(palette) => palette.theme_preview(),
+            Self::Minimap(_) | Self::Keybinds(_) => None,
+        }
     }
 
     fn inner(&self, ctx: &Context) -> Rect {
@@ -102,7 +109,7 @@ enum PopupFrame<'a> {
 pub(crate) struct Context<'a> {
     pub(crate) session: Option<&'a Session>,
     pub(crate) gff: Option<&'a Gff>,
-    pub(crate) theme: &'a ThemeState,
+    pub(crate) theme: &'a Theme,
     pub(crate) screen: &'a ScreenLayout,
 }
 
