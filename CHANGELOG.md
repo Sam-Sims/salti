@@ -7,17 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A `--skip-update-check` flag, which does the same as the `SALTI_SKIP_UPDATE_CHECK` variable.
+  - To always skip the check without setting the variable, use an alias: `alias salti="salti --skip-update-check"`.
+- A keybinds help popup, opened with `?` or the `keybinds` command. It lists every key binding, with one tab per category.
+  - `Left`/`Right` switch tabs.
+- A `d` keybind that cycles the diff mode through off, reference and consensus. Reference is skipped when no reference is set.
+  - The new mode is shown as a notification in the bottom right.
+- An `auto` theme, which is now the default.
+  - At startup it checks whether the terminal uses a light or dark theme, and picks `everforest-light` or `everforest-dark` to match.
+- A `--theme` flag and `SALTI_THEME` variable to always start salti with a given theme.
+  - This skips the startup check of the terminal light/dark mode.
+- Two new themes: `everforest-light` and `solarized-dark`.
+- `set-theme` previews each theme as you type or tab through the names. It is not applied until `Enter` pressed.
+- Typing a bare number in the command palette (`:42`) jumps to that position.
+- Reverse complement translation, with frames `-1`, `-2` and `-3` in `set-translation-frame` and bound to `Alt+4`, `Alt+5` and `Alt+6`.
+
 ### Changed
 
-- Under the hood changes to how residues are handled in `libmsa`.
-- Column stats (Consensus, conservation etc) are now calculated for visible display region only.
-- Consensus, conservation and column filtering are faster, especially for alignments with many sequences.
-- `libmsa` now rejects sequences containing non-ASCII bytes.
-- Consensus ties are no longer broken at random and instead the lowest ASCII byte wins.
+#### Commands
+
+- `toggle-translate` has been renamed to`toggle-translation-overlay`.
+  - The `t` keybind is unchanged.
+- `reload-as-protein` has been renamed to `toggle-protein-view`.
+  - The `Shift+T` keybind is unchanged.
+- `toggle-protein-view` no longer takes a reading frame. Set the frame separately with `set-translation-frame`.
+- `clear-filter` is now `clear-all-filters`, to make clear that it removes every filter.
+
+#### Filters
+
+- Filters that hide everything show an error in alignment pane.
+  - Previously, a column filter that hid every column, or a `filter-rows` regex that matched no sequences left the alignment pane blank.
+  - Now the pane shows `No columns to display` or `No sequences to display`.
+
+#### Translation and protein view
+
+- Forward frames are displayed as `+1`, `+2` and `+3` however `set-translation-frame 1` still works.
+- The protein view (`Shift+T`) no longer keeps a second, translated copy of the alignment in memory.
+  - Previously, turning it on translated every sequence and stored both copies. Changing the reading frame translated everything again. In practice this was still very fast, but used extra memory, especially on large alignments.
+  - Now it only translates the columns on screen as you scroll, the same way the translation overlay (`t`) does.
+  - On large alignments, switching to the protein view and changing the reading frame are now instant (instead of near-instant), and the protein view uses no extra memory.
+- Leaving the protein view returns to the first nucleotide of the codon at the left edge of the screen.
+- `set-sequence-type` can't be used in the protein view, and can't set a non DNA type while the translation overlay is on.
+- Translating an alignment that isn't DNA shows an error suggesting `set-sequence-type`.
+- Clearer error messages when the translation overlay, the protein view and column filters conflict.
+
+#### Selection and mouse
+
+- The mouse now acts on the pane under the pointer, and an open popup takes all mouse input.
+  - As a consequence mouse interaction intended for inside the alignment rows, only works within the alignment rows pane.
+
+#### Command palette and popups
+
+- The command palette has been reworked to feel more fluid:
+  - The cursor can now be moved with shell editing keys:
+    - `Left`/`Right` move the cursor one character.
+    - `Home`/`Ctrl+A` move to the start of the line, and `End`/`Ctrl+E` to the end.
+    - `Ctrl+U` deletes everything before the cursor, and `Ctrl+K` everything after it.
+    - `Ctrl+W` deletes the word before the cursor.
+  - Completed names that contain spaces are quoted automatically.
+  - Completing a file path with directories is more fluid with `Tab` on the only matching directory listing its contents straight away.
+    - Alternatively use `Enter` on a selected directory to list contents.
+  - Commands given too many arguments now show an error, instead of using the first one and ignoring the rest.
+  - `set-theme` previews themes live (see Added).
+- A `filter-rows` regex containing spaces must now be quoted (`filter-rows 'a b'`), because the line is now split into arguments the same way for every command.
+- Popups (the command palette, the minimap and the new keybinds help) now share one system, which changes how they handle input:
+  - An open popup takes all keyboard and mouse input.
+  - `Esc` closes any popup, including the minimap.
+  - Other global keys do nothing while a popup is open. For example, with the minimap open, `q` no longer quits and `:` no longer opens the palette.
+  - Clicks outside a popup are ignored.
+  - `m` opens the minimap but no longer closes it.
+  - In the minimap, arrow keys (with or without `Shift`) still scroll the alignment, but `Alt+Left`/`Alt+Right` no longer scroll the sequence names.
+
+#### Loading and status bar
+
+- Fasta files are now validated off of the UI thread.
+- Invalid GFF files will fail to load with an error.
+- A failed alignment load is shown as an error notification naming the file, and any alignment already open stays open.
+
+#### Notifications
+
+- Notifications now clear themselves after a few seconds, instead of staying until the next key press.
+  - Errors show for 3s and fade out, other notifications for 1s, then fade out.
+
+#### Themes and colours
+
+- `terminal-default` is now `ansi`, and has been tweaked to stay readable on both light and dark terminals.
+- Protein colours now fully follow Clustal's groups: cysteine (C) has its own colour instead of the hydrophobic one.
+- The GFF pane's scrollbar now looks the same as the alignment's.
+- Scrollbars no longer draw a background.
+- The minimap now colours each block by the consensus of the columns it covers, using the current consensus method.
+  - Previously it used the most common character in a sample of 10 sequences, with gaps always counted.
+  - With the default `majority-non-gap` method, gappy regions now show the most common residue instead of the gap colour. Use `set-consensus-method majority` to see gaps.
+
+#### General
+
+- Internal changes to how `libmsa` handles residues.
+- Column stats (consensus, conservation, etc.) are now only calculated for the part of the alignment on screen.
+- Consensus, conservation and column filtering are faster, especially on alignments with many sequences.
+- Alignments containing non-ASCII characters now fail to load with an error.
+- salti now only redraws when something changes, up to about 60 times a second, instead of always redrawing 120 times a second.
+- `SALTI_SKIP_UPDATE_CHECK` now skips the check for any value except `false`, `no`, `off`, `0` or empty. Previously only `true` worked.
+
+### Removed
+
+- `-p`/`--position`. Use `jump-position` once the alignment has loaded.
 
 ### Fixed
 
-- `U` is now coloured the same as `T` in DNA alignments instead of being left uncoloured.
+- `U` in DNA alignments is now coloured the same as `T`. Previously it had no colour.
+- Pinned sequences now count towards the consensus, conservation and column filters.
+- Pinning a sequence no longer lowers the sequence count in the status bar.
+- Keys no longer sometimes register twice on Windows.
+- `:` now opens the command palette properly on Windows.
+- `filter-rows` with no argument now only clears the row filter.
+  - Previously it did the same as `clear-filter`, so it also removed any `filter-gaps` or `filter-constant` filters.
+- Dragging over sequences now selects exactly the rows you see.
+  - Previously a drag selected rows in file order, so it could include pinned sequences or ones hidden by `filter-rows`.
+  - Now it follows the order on screen, including when you drag from the pinned sequences into the rest.
+- The translation overlay (`t`) now shows a partial codon at the end of a sequence as `X`.
+  - Previously the overlay left the last one or two nucleotides blank, while the protein view showed an `X`.
+- `set-diff-mode reference` now shows an error when no reference is set, and clearing the reference turns the reference diff off.
+- `pin-sequence` and `jump-sequence` no longer suggest pinned sequences when autocompleting.
+- `jump-position` now shows an error when there is no visible column at or after the position.
+- Changing filters, the sequence type or the reading frame now clears the selection.
+  - Previously the selection was kept, even when a filter hid the rows or columns it covered.
+- The minimap no longer opens when no alignment is loaded.
+- Quitting stops a running alignment load straight away instead of waiting for it to finish.
+- While an error is shown, other notifications (such as the update notice) no longer replace it. Only a new error does.
+- Notifications stay visible while the minimap is open.
+- Protein gaps and unknown residues (`X`) now use the same colours as DNA gaps and `N`, so gaps and `X` look different from each other.
+- Consensus ties are no longer broken at random. The residue with the lowest ASCII value now wins.
+- salti now exits if its terminal input closes, instead of hanging.
 
 ## [0.9.0] - 2026-05-13
 
