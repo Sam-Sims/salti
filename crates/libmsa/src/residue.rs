@@ -10,6 +10,7 @@ const INVALID_NUCLEOTIDE: u8 = 4;
 
 const NUCLEOTIDE_INDEX_TABLE: [u8; 256] = build_nucleotide_index_table();
 
+// reverse complement translation relies on being able to XOR this so never change the order
 const fn build_nucleotide_index_table() -> [u8; 256] {
     let mut table = [INVALID_NUCLEOTIDE; 256];
 

@@ -14,4 +14,4 @@ pub use error::AlignmentError;
 pub use grid::Grid;
 pub use metrics::{ColumnFilter, ColumnSummary, ConsensusMethod};
 pub use model::{Alignment, Sequence};
-pub use translation::ReadingFrame;
+pub use translation::{ReadingFrame, Strand};

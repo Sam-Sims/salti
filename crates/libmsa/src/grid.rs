@@ -42,10 +42,9 @@ impl Grid<'_> {
                 cols.iter()
                     .map(move |&col| *residues.get(col).expect("col id should be below the width")),
             ),
-            Some(frame) => Either::Right(
-                cols.iter()
-                    .map(move |&protein_col| codon_at(residues, frame.nt_range(protein_col))),
-            ),
+            Some(frame) => Either::Right(cols.iter().map(move |&protein_col| {
+                codon_at(residues, frame.nt_range(protein_col), frame.strand())
+            })),
         }
     }
 
@@ -116,6 +115,7 @@ mod tests {
     #[case::raw_unsorted_repeated(None, &[3, 0, 3], b"CAC")]
     #[case::translated(Some(ReadingFrame::Frame1), &[0, 1, 2], b"MP*")]
     #[case::translated_unsorted_repeated(Some(ReadingFrame::Frame1), &[2, 0, 0], b"*MM")]
+    #[case::translated_reverse(Some(ReadingFrame::Frame1Reverse), &[0, 1, 2], b"HGL")]
     fn cells_works(
         #[case] frame: Option<ReadingFrame>,
         #[case] cols: &[usize],
