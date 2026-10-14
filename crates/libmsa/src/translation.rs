@@ -18,11 +18,11 @@ const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
     Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::VariantArray,
 )]
 pub enum ReadingFrame {
-    #[strum(serialize = "1")]
+    #[strum(serialize = "+1", serialize = "1")]
     Frame1,
-    #[strum(serialize = "2")]
+    #[strum(serialize = "+2", serialize = "2")]
     Frame2,
-    #[strum(serialize = "3")]
+    #[strum(serialize = "+3", serialize = "3")]
     Frame3,
     #[strum(serialize = "-1")]
     Frame1Reverse,
@@ -43,7 +43,7 @@ impl ReadingFrame {
     }
 
     /// Returns the strand the codons are read on
-    pub const fn strand(self) -> Strand {
+    pub(crate) const fn strand(self) -> Strand {
         match self {
             Self::Frame1 | Self::Frame2 | Self::Frame3 => Strand::Forward,
             Self::Frame1Reverse | Self::Frame2Reverse | Self::Frame3Reverse => Strand::Reverse,
@@ -97,7 +97,7 @@ impl ReadingFrame {
 
 /// The strand a reading frame translates
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Strand {
+pub(crate) enum Strand {
     Forward,
     Reverse,
 }
