@@ -1,6 +1,6 @@
 ---
 source: crates/salti/src/ui/render.rs
-expression: "render_text(Some(&session), &ui_state())"
+expression: "render_text(Some(&session), ui_state())"
 ---
                      File: test.fasta | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
@@ -24,4 +24,4 @@ expression: "render_text(Some(&session), &ui_state())"
 │Consensus Sequence│ H  H  D  H  D  H                                                              │
 │Conservation:     │██████▆▆▆███▆▆▆███                                                             │
 └──────────────────┴───────────────────────────────────────────────────────────────────────────────┘
-                                                                                Translation frame: 1
+                                                                               Translation frame: +1

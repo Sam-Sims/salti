@@ -2,4 +2,4 @@
 source: crates/salti/src/ui/bars.rs
 expression: "bottom_with_selection(&session, 0..=0, 0..=8)"
 ---
-Translation frame: 1 | Selected: seq1 @ 1-3
+Translation frame: +1 | Selected: seq1 @ 1-3
