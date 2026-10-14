@@ -190,7 +190,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         modifiers: KeyModifiers::ALT,
         command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame1),
         category: Category::Translation,
-        description: "Set translation frame 1",
+        description: "Set translation frame +1",
     },
     Binding {
         name: "set-translation-frame-2",
@@ -198,7 +198,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         modifiers: KeyModifiers::ALT,
         command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2),
         category: Category::Translation,
-        description: "Set translation frame 2",
+        description: "Set translation frame +2",
     },
     Binding {
         name: "set-translation-frame-3",
@@ -206,7 +206,31 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         modifiers: KeyModifiers::ALT,
         command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame3),
         category: Category::Translation,
-        description: "Set translation frame 3",
+        description: "Set translation frame +3",
+    },
+    Binding {
+        name: "set-translation-frame-reverse-1",
+        code: KeyCode::Char('4'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame1Reverse),
+        category: Category::Translation,
+        description: "Set translation frame -1",
+    },
+    Binding {
+        name: "set-translation-frame-reverse-2",
+        code: KeyCode::Char('5'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2Reverse),
+        category: Category::Translation,
+        description: "Set translation frame -2",
+    },
+    Binding {
+        name: "set-translation-frame-reverse-3",
+        code: KeyCode::Char('6'),
+        modifiers: KeyModifiers::ALT,
+        command: Command::SetTranslationFrame(libmsa::ReadingFrame::Frame3Reverse),
+        category: Category::Translation,
+        description: "Set translation frame -3",
     },
 ];
 
