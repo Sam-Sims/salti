@@ -1,15 +1,15 @@
 ---
-source: crates/salti/src/ui/render.rs
-expression: "render_text(Some(&session), &ui)"
+source: crates/salti/src/ui.rs
+expression: "render_text(Some(&session), ui)"
 ---
-                     File: test.fasta | Status: Loaded | 4 alignments | Length: 18 | Positions: 1-18
+                     File: test.fasta | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
 │                  │1       10                                                                     │
 │                  │.   .    |    .                                                                │
 │1 seq1            │CATCATCATCATCATCAT                                                             │
-│2 seq2            │CATCATGATCATCATCAT                                                             │
-│3 seq3            │CATCATCATCATGATCAT                                                             │
-│4 seq4            │CATCATCATCATCATCAT                                                             │
+│2 seq2            │CATCATCATCATCATCAT                                                             │
+│                  │                                                                               │
+│                  │                                                                               │
 │                  │                                                                               │
 │                  │                                                                               │
 │                  │                                                                               │
@@ -22,6 +22,7 @@ expression: "render_text(Some(&session), &ui)"
 ├──────────────────┼───────────────────────────────────────────────────────────────────────────────┤
 │Reference Sequence│No reference selected.                                                         │
 │Consensus Sequence│CATCATCATCATCATCAT                                                             │
-│Conservation:     │██████▅█████▅█████                                                             │
+│Conservation:     │██████████████████                                                             │
 └──────────────────┴───────────────────────────────────────────────────────────────────────────────┘
-                                                                        2 sequence(s) selected @ 3-9
+
+Loaded alignment

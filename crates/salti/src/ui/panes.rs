@@ -17,9 +17,17 @@ use ratatui::{
     widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
+use self::{
+    alignment::AlignmentPane,
+    consensus::{ConsensusAlignmentPane, ConsensusSequenceIdPane},
+    gff::{GffInfoPane, GffPane},
+    sequence_id::SequenceIdPane,
+};
 use crate::{
     config::theme::Theme,
-    session::{Cell, WindowColumns},
+    gff::Gff,
+    session::{Cell, Session, WindowColumns},
+    ui::{UiState, layout::ScreenLayout},
 };
 
 /// Lookup table that maps each byte value (`0-255`) to a str for display.
@@ -44,6 +52,59 @@ const BYTE_TO_CHAR: [&str; 256] = [
     "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?",
     "?", "?", "?", "?", "?", "?", "?", "?", "?",
 ];
+
+pub(super) fn render(
+    buf: &mut Buffer,
+    screen: &ScreenLayout,
+    session: &Session,
+    gff: Option<&Gff>,
+    ui: &UiState,
+    theme: &Theme,
+) {
+    let (layout, window) = (&screen.app, &screen.window);
+    let columns = session.window_columns(window.columns.clone());
+
+    if let Some(gff) = gff {
+        GffInfoPane {
+            tooltip: ui.gff_tooltip.as_deref(),
+            theme,
+        }
+        .render(layout.gff_info_pane, buf);
+        GffPane {
+            gff,
+            session,
+            window,
+            theme,
+        }
+        .render(layout.gff_pane, buf);
+    }
+
+    SequenceIdPane {
+        session,
+        window,
+        local_feature_rows: layout.local_feature_rows,
+        selection: ui.selection,
+        theme,
+    }
+    .render(layout.sequence_id_pane, buf);
+    AlignmentPane {
+        session,
+        window,
+        columns: &columns,
+        gff,
+        local_feature_rows: layout.local_feature_rows,
+        selection: ui.selection,
+        theme,
+    }
+    .render(layout.alignment_pane, buf);
+    ConsensusSequenceIdPane { session, theme }.render(layout.consensus_sequence_id_pane, buf);
+    ConsensusAlignmentPane {
+        session,
+        columns: &columns,
+        theme,
+    }
+    .render(layout.consensus_alignment_pane, buf);
+}
 
 fn stretch(
     columns: &WindowColumns<'_>,

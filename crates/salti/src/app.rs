@@ -18,7 +18,7 @@ use crate::{
         mouse::{self, MouseTracker},
         notification::Notification,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
-        render::render,
+        render,
     },
     update::{CRATE_VERSION, UpdateResult},
 };

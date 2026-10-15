@@ -1,15 +1,15 @@
 ---
-source: crates/salti/src/ui/render.rs
+source: crates/salti/src/ui.rs
 expression: "render_text(Some(&session), ui_state())"
 ---
-                     File: test.fasta | Status: Loaded | 2 alignments | Length: 18 | Positions: 1-18
+                     File: test.fasta | Status: Loaded | 4 alignments | Length: 18 | Positions: 1-18
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
 │                  │1       10                                                                     │
 │                  │.   .    |    .                                                                │
-│2 seq2            │ .  .  D  .  .  .                                                              │
-│3 seq3            │ .  .  .  .  D  .                                                              │
-│                  │                                                                               │
-│                  │                                                                               │
+│1 seq1            │CATCATCATCATCATCAT                                                             │
+│2 seq2            │CATCATGATCATCATCAT                                                             │
+│3 seq3            │CATCATCATCATGATCAT                                                             │
+│4 seq4            │CATCATCATCATCATCAT                                                             │
 │                  │                                                                               │
 │                  │                                                                               │
 │                  │                                                                               │
@@ -20,8 +20,7 @@ expression: "render_text(Some(&session), ui_state())"
 │                  │                                                                               │
 │                  │                                                                               │
 ├──────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-│Reference Sequence│ H  H  H  H  H  H                                                              │
-│Consensus Sequence│ H  H  D  H  D  H                                                              │
-│Conservation:     │██████▆▆▆███▆▆▆███                                                             │
+│Reference Sequence│No reference selected.                                                         │
+│Consensus Sequence│CATCATCATCATCATCAT                                                             │
+│Conservation:     │██████▅█████▅█████                                                             │
 └──────────────────┴───────────────────────────────────────────────────────────────────────────────┘
-                                                                               Translation frame: +1
