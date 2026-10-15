@@ -1,0 +1,255 @@
+use crate::{AlignmentType, residue};
+
+/// The byte counts of one column of a [`Grid`](crate::Grid)
+#[derive(Debug)]
+pub struct ColumnCounts {
+    /// How often each ASCII byte appears in the column
+    counts: [u32; 128],
+    /// The type of the grid the counts came from, which define what rules apply
+    alignment_type: AlignmentType,
+}
+
+impl ColumnCounts {
+    #[expect(clippy::large_types_passed_by_value)]
+    pub(crate) const fn new(counts: [u32; 128], alignment_type: AlignmentType) -> Self {
+        Self {
+            counts,
+            alignment_type,
+        }
+    }
+
+    /// Returns the most common byte under `method`
+    ///
+    /// `None` when nothing is counted, such as an all-gap column under
+    /// [`ConsensusMethod::MajorityNonGap`]
+    pub fn consensus(&self, method: ConsensusMethod) -> Option<u8> {
+        let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
+        let mut max_count = 0u32;
+        let mut consensus = None;
+
+        for (symbol, count) in self.symbol_counts() {
+            if count > max_count && !(exclude_gap && residue::is_gap(symbol)) {
+                max_count = count;
+                consensus = Some(symbol);
+            }
+        }
+
+        consensus
+    }
+
+    /// Returns how conserved the column is, from 0 to 1
+    ///
+    /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
+    /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
+    /// grids, which have no alphabet
+    pub fn conservation(&self) -> Option<f64> {
+        let max_entropy = f64::from(self.alignment_type.conservation_alphabet_size()?).log2();
+        let mut total = 0u32;
+        let mut gap_count = 0u32;
+        let mut merged_non_gap_counts = [0u32; 128];
+
+        for (symbol, count) in self.symbol_counts() {
+            if count == 0 {
+                continue;
+            }
+
+            total += count;
+            if residue::is_gap(symbol) {
+                gap_count += count;
+            } else {
+                merged_non_gap_counts[usize::from(symbol.to_ascii_uppercase())] += count;
+            }
+        }
+
+        let non_gap_total = total - gap_count;
+        if non_gap_total == 0 {
+            return Some(0.0);
+        }
+
+        let mut entropy = 0.0f64;
+        let non_gap_total_f = f64::from(non_gap_total);
+        for &count in &merged_non_gap_counts {
+            if count == 0 {
+                continue;
+            }
+            let frequency = f64::from(count) / non_gap_total_f;
+            entropy -= frequency * frequency.log2();
+        }
+
+        let gap_fraction = f64::from(gap_count) / f64::from(total);
+        let conservation = (1.0 - entropy / max_entropy).max(0.0);
+        Some(conservation * (1.0 - gap_fraction))
+    }
+
+    pub(crate) fn gap_fraction(&self) -> f64 {
+        let total: u32 = self.counts.iter().sum();
+        let gap_count: u32 = self
+            .symbol_counts()
+            .filter(|&(symbol, _)| residue::is_gap(symbol))
+            .map(|(_, count)| count)
+            .sum();
+
+        if total == 0 {
+            0.0
+        } else {
+            f64::from(gap_count) / f64::from(total)
+        }
+    }
+
+    pub(crate) fn max_counted_symbol_fraction(&self) -> Option<f64> {
+        let mut counted_total = 0u32;
+        let mut max_count = 0u32;
+
+        for (symbol, count) in self.symbol_counts() {
+            if count == 0
+                || residue::is_gap(symbol)
+                || residue::is_unknown(symbol, self.alignment_type)
+            {
+                continue;
+            }
+
+            counted_total += count;
+            max_count = max_count.max(count);
+        }
+
+        (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
+    }
+
+    fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
+        (0..128).zip(self.counts.iter().copied())
+    }
+}
+
+/// How the consensus byte of a column is chosen
+///
+/// # Ties
+///
+/// When several bytes share the highest count, the lowest byte wins.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantArray,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum ConsensusMethod {
+    /// The most common byte, gaps included
+    Majority,
+    /// The most common byte that isn't a gap
+    #[default]
+    MajorityNonGap,
+}
+
+#[cfg(test)]
+#[allow(clippy::float_cmp)]
+mod tests {
+    use rstest::rstest;
+
+    use super::{ColumnCounts, ConsensusMethod};
+    use crate::AlignmentType;
+
+    fn column(alignment_type: AlignmentType, symbols: &[u8]) -> ColumnCounts {
+        let mut counts = [0u32; 128];
+        for &symbol in symbols {
+            counts[usize::from(symbol)] += 1;
+        }
+        ColumnCounts::new(counts, alignment_type)
+    }
+
+    #[rstest]
+    #[case::single(ConsensusMethod::Majority, b"AAAA", b'A')]
+    #[case::majority_counts_gaps(ConsensusMethod::Majority, b"---AT", b'-')]
+    #[case::non_gap_skips_gaps(ConsensusMethod::MajorityNonGap, b"---AAT", b'A')]
+    #[case::higher_count_beats_lower_byte(ConsensusMethod::Majority, b"ACCTTT", b'T')]
+    #[case::tie_picks_lowest_byte(ConsensusMethod::Majority, b"TTCCAA", b'A')]
+    #[case::tie_uppercase_beats_lowercase(ConsensusMethod::Majority, b"aaTT", b'T')]
+    #[case::majority_tie_prefers_gap(ConsensusMethod::Majority, b"--AA", b'-')]
+    #[case::non_gap_tie_ignores_gap(ConsensusMethod::MajorityNonGap, b"---GGTT", b'G')]
+    fn consensus_works(
+        #[case] method: ConsensusMethod,
+        #[case] symbols: &[u8],
+        #[case] expected: u8,
+    ) {
+        assert_eq!(
+            column(AlignmentType::Dna, symbols).consensus(method),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::empty_majority(ConsensusMethod::Majority, b"")]
+    #[case::empty_non_gap(ConsensusMethod::MajorityNonGap, b"")]
+    #[case::all_gaps_non_gap(ConsensusMethod::MajorityNonGap, b"---")]
+    fn consensus_is_none(#[case] method: ConsensusMethod, #[case] symbols: &[u8]) {
+        assert_eq!(column(AlignmentType::Dna, symbols).consensus(method), None);
+    }
+
+    #[rstest]
+    #[case::fully_conserved(b"AAAA", 1.0)]
+    #[case::case_insensitive(b"AaAa", 1.0)]
+    #[case::gap_penalty(b"AA--", 0.5)]
+    #[case::mixed(b"AACT", 0.25)]
+    fn conservation_works(#[case] symbols: &[u8], #[case] expected: f64) {
+        assert_eq!(
+            column(AlignmentType::Dna, symbols).conservation(),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::empty(b"")]
+    #[case::all_gaps(b"----")]
+    #[case::max_entropy(b"ACGT")]
+    #[case::clamped_above_max_entropy(b"ACGTN")]
+    fn conservation_is_zero(#[case] symbols: &[u8]) {
+        assert_eq!(
+            column(AlignmentType::Dna, symbols).conservation(),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn conservation_is_none_for_generic() {
+        assert_eq!(column(AlignmentType::Generic, b"AAAA").conservation(), None);
+    }
+
+    #[rstest]
+    #[case::no_gaps(b"AAAA", 0.0)]
+    #[case::half_gaps(b"AA--", 0.5)]
+    #[case::all_gaps(b"----", 1.0)]
+    #[case::empty(b"", 0.0)]
+    fn gap_fraction_works(#[case] symbols: &[u8], #[case] expected: f64) {
+        assert_eq!(column(AlignmentType::Dna, symbols).gap_fraction(), expected);
+    }
+
+    #[rstest]
+    #[case::dna_ignores_gaps_and_n(AlignmentType::Dna, b"AANn--T", 2.0 / 3.0)]
+    #[case::protein_ignores_gaps_and_x(AlignmentType::Protein, b"MMXx--K", 2.0 / 3.0)]
+    #[case::generic_counts_n(AlignmentType::Generic, b"NN-A", 2.0 / 3.0)]
+    #[case::constant(AlignmentType::Dna, b"AAAA", 1.0)]
+    fn max_counted_symbol_fraction_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] expected: f64,
+    ) {
+        assert_eq!(
+            column(alignment_type, symbols).max_counted_symbol_fraction(),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::empty(b"")]
+    #[case::only_ignored(b"-Nn")]
+    fn max_counted_symbol_fraction_is_none(#[case] symbols: &[u8]) {
+        assert_eq!(
+            column(AlignmentType::Dna, symbols).max_counted_symbol_fraction(),
+            None
+        );
+    }
+}
