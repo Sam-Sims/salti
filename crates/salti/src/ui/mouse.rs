@@ -6,10 +6,10 @@ use crate::{
     gff::Gff,
     session::Session,
     ui::{
+        UiState,
         layout::{ScreenLayout, Window, screen_rows},
         panes::gff,
         selection::Selection,
-        state::UiState,
     },
 };
 

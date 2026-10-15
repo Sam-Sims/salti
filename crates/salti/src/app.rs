@@ -13,13 +13,12 @@ use crate::{
     jobs::{JobEvent, Jobs},
     session::{Position, Session, ViewState},
     ui::{
-        input_name,
+        UiState, input_name,
         layout::ScreenLayout,
         mouse::{self, MouseTracker},
         notification::Notification,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
         render::render,
-        state::UiState,
     },
     update::{CRATE_VERSION, UpdateResult},
 };

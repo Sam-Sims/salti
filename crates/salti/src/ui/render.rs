@@ -7,6 +7,7 @@ use crate::{
     gff::Gff,
     session::Session,
     ui::{
+        UiState,
         bars::{BottomStatusBar, InputBar, TopStatusBar},
         input_name,
         layout::ScreenLayout,
@@ -18,7 +19,6 @@ use crate::{
         },
         popups::{Context, Popup},
         render_centred_lines,
-        state::UiState,
     },
 };
 

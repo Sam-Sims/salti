@@ -8,9 +8,9 @@ use crate::{
     gff::{Feature, FeatureType, Gff, Strand},
     session::{Position, Session},
     ui::{
+        UiState,
         layout::{AppLayout, FrameLayout, ScreenLayout, Window},
         popups::Context,
-        state::UiState,
     },
 };
 
