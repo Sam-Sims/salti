@@ -1,7 +1,6 @@
 mod commands;
 mod completers;
 mod render;
-mod runners;
 
 use anyhow::{Context as _, Result, bail, format_err};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -19,7 +18,7 @@ use crate::{
     config::theme::ThemeChoice,
     ui::{
         notification::Notification,
-        popups::{Context, PopupContent, PopupFrame, fuzzy::fuzzy_match, text_input::TextInput},
+        popups::{Context, PopupContent, PopupFrame, text_input::TextInput},
     },
 };
 
@@ -84,7 +83,7 @@ impl Default for PaletteState {
             completions: Completions {
                 word_start: 0,
                 quote: None,
-                items: command_names(""),
+                items: completers::command_names(""),
             },
             selected: None,
             preview: None,
@@ -204,7 +203,7 @@ fn completions(line: &str, ctx: &Context) -> Completions {
         return Completions {
             word_start: 0,
             quote: None,
-            items: command_names(line),
+            items: completers::command_names(line),
         };
     };
     let (start, word) = words(rest)
@@ -222,13 +221,6 @@ fn completions(line: &str, ctx: &Context) -> Completions {
         quote,
         items,
     }
-}
-
-fn command_names(word: &str) -> Vec<String> {
-    fuzzy_match(word, COMMANDS.iter().map(|command| command.name))
-        .into_iter()
-        .map(str::to_string)
-        .collect()
 }
 
 fn find_command(name: &str) -> Option<&'static PaletteCommand> {
@@ -288,13 +280,19 @@ mod tests {
     use super::*;
     use crate::{
         config::theme::ThemeName,
-        test_utils::{buffer_text, pinned_session, session_with_ids, with_context},
+        session::DiffMode,
+        test_utils::{buffer_text, genes, pinned_session, session_with_ids, with_context},
         ui::notification::NotificationLevel,
     };
 
+    fn with_document<T>(check: impl FnOnce(&Context) -> T) -> T {
+        let session = pinned_session(4, &[1]);
+        let gff = genes(&[0..3, 3..6]);
+        with_context(Some(&session), Some(&gff), check)
+    }
+
     fn run(line: &str) -> Vec<Command> {
-        let session = pinned_session(3, &[1]);
-        with_context(Some(&session), None, |ctx| run_line(line, ctx))
+        with_document(|ctx| run_line(line, ctx))
     }
 
     #[rstest]
@@ -308,7 +306,6 @@ mod tests {
     #[case::quoted_argument("filter-rows 's 0'", Command::SetRowFilter(Some("s 0".to_string())))]
     #[case::trailing_space("quit  ", Command::Quit)]
     #[case::apostrophe_in_word("filter-rows it's", Command::SetRowFilter(Some("it's".to_string())))]
-    #[case::reads_session("jump-sequence s2", Command::JumpToSequence(2))]
     fn run_line_works(#[case] line: &str, #[case] expected: Command) {
         assert_eq!(run(line), vec![Command::ClosePopup, expected]);
     }
@@ -341,6 +338,80 @@ mod tests {
                 })
             ]
         ));
+    }
+
+    fn parse(line: &str) -> Result<Command> {
+        with_document(|ctx| parse_line(line, ctx))
+    }
+
+    #[rstest]
+    #[case::jump_position("jump-position 1", Command::JumpToColumn(0))]
+    #[case::jump_sequence("jump-sequence s2", Command::JumpToSequence(2))]
+    #[case::jump_feature("jump-feature gene1", Command::JumpToFeature(1))]
+    #[case::pin_sequence("pin-sequence s0", Command::PinSequence(0))]
+    #[case::unpin_sequence("unpin-sequence s1", Command::UnpinSequence(1))]
+    #[case::set_reference_main("set-reference s3", Command::SetReference(Some(3)))]
+    #[case::set_reference_pinned("set-reference s1", Command::SetReference(Some(1)))]
+    #[case::filter_gaps("filter-gaps 25", Command::SetGapFilter(Some(0.25)))]
+    #[case::filter_gaps_zero_clears("filter-gaps 0", Command::SetGapFilter(None))]
+    #[case::filter_constant("filter-constant 100", Command::SetConstantFilter(Some(1.0)))]
+    #[case::diff_mode("set-diff-mode reference", Command::SetDiffMode(DiffMode::Reference))]
+    #[case::consensus_method(
+        "set-consensus-method majority",
+        Command::SetConsensusMethod(libmsa::ConsensusMethod::Majority)
+    )]
+    #[case::translation_frame(
+        "set-translation-frame 2",
+        Command::SetTranslationFrame(libmsa::ReadingFrame::Frame2)
+    )]
+    #[case::theme_named(
+        "set-theme tokyo-night",
+        Command::SetTheme(ThemeChoice::Named(ThemeName::TokyoNight))
+    )]
+    #[case::theme_auto("set-theme auto", Command::SetTheme(ThemeChoice::Auto))]
+    #[case::sequence_type(
+        "set-sequence-type protein",
+        Command::SetActiveType(libmsa::AlignmentType::Protein)
+    )]
+    fn parse_line_works(#[case] line: &str, #[case] expected: Command) {
+        assert_eq!(parse(line).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case::jump_position_zero("jump-position 0")]
+    #[case::jump_position_not_a_number("jump-position x")]
+    #[case::jump_sequence_pinned("jump-sequence s1")]
+    #[case::jump_sequence_unknown("jump-sequence nope")]
+    #[case::jump_feature_unknown("jump-feature nope")]
+    #[case::pin_sequence_already_pinned("pin-sequence s1")]
+    #[case::unpin_sequence_not_pinned("unpin-sequence s0")]
+    #[case::filter_gaps_above_range("filter-gaps 101")]
+    #[case::filter_gaps_below_range("filter-gaps -1")]
+    #[case::filter_gaps_not_a_number("filter-gaps NaN")]
+    #[case::unknown_choice("set-diff-mode sideways")]
+    fn parse_line_rejects(#[case] line: &str) {
+        assert!(parse(line).is_err());
+    }
+
+    #[rstest]
+    #[case::jump_sequence("jump-sequence s0")]
+    #[case::pin_sequence("pin-sequence s0")]
+    #[case::unpin_sequence("unpin-sequence s0")]
+    #[case::set_reference("set-reference s0")]
+    fn parse_line_rejects_without_alignment(#[case] line: &str) {
+        let result = with_context(None, None, |ctx| parse_line(line, ctx));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_line_rejects_jump_feature_without_gff() {
+        let session = pinned_session(2, &[]);
+        let result = with_context(Some(&session), None, |ctx| {
+            parse_line("jump-feature gene0", ctx)
+        });
+
+        assert!(result.is_err());
     }
 
     #[rstest]

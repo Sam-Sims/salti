@@ -1,8 +1,14 @@
-use anyhow::Result;
+use std::{num::NonZeroUsize, str::FromStr};
+
+use anyhow::{Context as _, Result, format_err};
 use libmsa::{AlignmentType, ConsensusMethod, ReadingFrame};
 
-use super::{completers, runners};
-use crate::{command::Command, session::DiffMode, ui::popups::Context};
+use super::completers;
+use crate::{
+    command::Command,
+    session::{DiffMode, Session},
+    ui::popups::Context,
+};
 
 pub(super) struct PaletteCommand {
     pub(super) name: &'static str,
@@ -40,7 +46,12 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["jp"],
         doc: "Jump to an alignment position (1 based), skipping forward to the next visible column if needed.",
         action: Action::Required {
-            run: runners::jump_position,
+            run: |_, argument| {
+                let position = argument
+                    .parse::<NonZeroUsize>()
+                    .map_err(|_| format_err!("expected a positive integer, got '{argument}'"))?;
+                Ok(Command::JumpToColumn(position.get() - 1))
+            },
             completer: None,
         },
     },
@@ -49,7 +60,10 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["js"],
         doc: "Jump to a sequence by name.",
         action: Action::Required {
-            run: runners::jump_sequence,
+            run: |ctx, argument| {
+                let row = row_named(ctx, |session| session.layout().main(), argument)?;
+                Ok(Command::JumpToSequence(row))
+            },
             completer: Some(completers::main_sequences),
         },
     },
@@ -58,7 +72,17 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["jf"],
         doc: "Jump to a GFF feature by name.",
         action: Action::Required {
-            run: runners::jump_feature,
+            run: |ctx, argument| {
+                let gff = ctx
+                    .gff
+                    .context("No GFF file is loaded. Load one with load-gff")?;
+                let index = gff
+                    .features
+                    .iter()
+                    .position(|feature| feature.name == argument)
+                    .with_context(|| format!("no feature named '{argument}'"))?;
+                Ok(Command::JumpToFeature(index))
+            },
             completer: Some(completers::features),
         },
     },
@@ -67,7 +91,10 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Pin a sequence to the top of the alignment pane.",
         action: Action::Required {
-            run: runners::pin_sequence,
+            run: |ctx, argument| {
+                let row = row_named(ctx, |session| session.layout().main(), argument)?;
+                Ok(Command::PinSequence(row))
+            },
             completer: Some(completers::main_sequences),
         },
     },
@@ -76,7 +103,10 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Remove a pinned sequence from the pinned group.",
         action: Action::Required {
-            run: runners::unpin_sequence,
+            run: |ctx, argument| {
+                let row = row_named(ctx, |session| session.state().pinned(), argument)?;
+                Ok(Command::UnpinSequence(row))
+            },
             completer: Some(completers::pinned_sequences),
         },
     },
@@ -85,7 +115,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Filter sequences by regular expression.",
         action: Action::Optional {
-            run: runners::filter_rows,
+            run: |_, argument| Ok(Command::SetRowFilter(argument.map(str::to_string))),
             completer: Some(completers::filter_matches),
         },
     },
@@ -100,7 +130,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Hide columns with a gap percentage above the given threshold. Use 0 to disable it.",
         action: Action::Required {
-            run: runners::filter_gaps,
+            run: |_, argument| Ok(Command::SetGapFilter(parse_percentage(argument)?)),
             completer: Some(completers::gap_percentages),
         },
     },
@@ -109,7 +139,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Hide columns when a counted position reaches the given percentage. Gaps and unknowns are ignored. Use 0 to disable it.",
         action: Action::Required {
-            run: runners::filter_constant,
+            run: |_, argument| Ok(Command::SetConstantFilter(parse_percentage(argument)?)),
             completer: Some(completers::constant_percentages),
         },
     },
@@ -118,7 +148,10 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Set the reference sequence used for diffs.",
         action: Action::Required {
-            run: runners::set_reference,
+            run: |ctx, argument| {
+                let row = row_named(ctx, |session| session.layout().rows(), argument)?;
+                Ok(Command::SetReference(Some(row)))
+            },
             completer: Some(completers::sequences),
         },
     },
@@ -163,7 +196,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Set diff highlighting mode.",
         action: Action::Required {
-            run: runners::diff_mode,
+            run: |_, argument| Ok(Command::SetDiffMode(parse_choice(argument, "diff mode")?)),
             completer: Some(completers::choices::<DiffMode>),
         },
     },
@@ -172,7 +205,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["load"],
         doc: "Load an alignment file using a file path argument.",
         action: Action::Required {
-            run: runners::load_alignment,
+            run: |_, argument| Ok(Command::LoadAlignment(argument.to_string())),
             completer: Some(completers::filename),
         },
     },
@@ -181,7 +214,12 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Set the consensus method used for the consensus row.",
         action: Action::Required {
-            run: runners::consensus_method,
+            run: |_, argument| {
+                Ok(Command::SetConsensusMethod(parse_choice(
+                    argument,
+                    "consensus method",
+                )?))
+            },
             completer: Some(completers::choices::<ConsensusMethod>),
         },
     },
@@ -190,7 +228,12 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Set the reading frame used by the translation overlay and the protein view.",
         action: Action::Required {
-            run: runners::translation_frame,
+            run: |_, argument| {
+                Ok(Command::SetTranslationFrame(parse_choice(
+                    argument,
+                    "reading frame",
+                )?))
+            },
             completer: Some(completers::choices::<ReadingFrame>),
         },
     },
@@ -199,7 +242,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Set the active theme. `auto` picks Everforest light or dark to match the terminal.",
         action: Action::Required {
-            run: runners::theme,
+            run: |_, argument| Ok(Command::SetTheme(parse_choice(argument, "theme")?)),
             completer: Some(completers::theme),
         },
     },
@@ -208,7 +251,12 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Override sequence type detection for rendering.",
         action: Action::Required {
-            run: runners::sequence_type,
+            run: |_, argument| {
+                Ok(Command::SetActiveType(parse_choice(
+                    argument,
+                    "sequence type",
+                )?))
+            },
             completer: Some(completers::choices::<AlignmentType>),
         },
     },
@@ -217,8 +265,36 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &[],
         doc: "Load a GFF annotation file to display features above the alignment.",
         action: Action::Required {
-            run: runners::load_gff,
+            run: |_, argument| {
+                Ok(Command::LoadGff {
+                    path: argument.to_string(),
+                })
+            },
             completer: Some(completers::filename),
         },
     },
 ];
+
+fn row_named(ctx: &Context, rows: fn(&Session) -> &[usize], name: &str) -> Result<usize> {
+    let session = ctx.session()?;
+    rows(session)
+        .iter()
+        .copied()
+        .find(|&row| session.base_alignment().id(row) == name)
+        .with_context(|| format!("no sequence named '{name}'"))
+}
+
+fn parse_choice<T: FromStr>(argument: &str, what: &str) -> Result<T> {
+    argument
+        .parse()
+        .map_err(|_| format_err!("unknown {what} '{argument}'"))
+}
+
+fn parse_percentage(argument: &str) -> Result<Option<f64>> {
+    let percent = argument
+        .parse::<f64>()
+        .ok()
+        .filter(|percent| (0.0..=100.0).contains(percent))
+        .with_context(|| format!("expected a percentage from 0 to 100, got '{argument}'"))?;
+    Ok((percent != 0.0).then_some(percent / 100.0))
+}

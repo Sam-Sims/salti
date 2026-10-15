@@ -2,11 +2,19 @@ use std::fs;
 
 use strum::VariantArray;
 
+use super::commands::COMMANDS;
 use crate::{
     config::theme::ThemeChoice,
     session::Session,
     ui::popups::{Context, fuzzy::fuzzy_match},
 };
+
+pub(super) fn command_names(word: &str) -> Vec<String> {
+    fuzzy_match(word, COMMANDS.iter().map(|command| command.name))
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
 
 pub(super) fn sequences(ctx: &Context, word: &str) -> Vec<String> {
     fuzzy_match(word, names(ctx, |session| session.layout().rows()))
