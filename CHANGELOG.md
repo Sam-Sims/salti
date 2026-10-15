@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `reload-as-protein` is now `toggle-protein-view`. The `Shift+T` keybind is unchanged.
 - **Breaking:** `clear-filter` is now `clear-all-filters`, to make clear that it removes every filter.
 - **Breaking:** `toggle-protein-view` no longer takes a reading frame. Set the frame with `set-translation-frame`.
-- **Breaking:** The `terminal-default` theme is now `ansi`, and has been tweaked to stay readable on light and dark terminals.
+- **Breaking:** The `terminal-default` theme is now called `ansi`, and has been tweaked to stay readable on light and dark terminals.
 - **Breaking:** A `filter-rows` regex containing spaces must be quoted (`filter-rows 'a b'`)
 - **Breaking:** Alignments containing non-ASCII characters fail to load with an error.
 - **Breaking:** Invalid GFF files fail to load with an error.
