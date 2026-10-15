@@ -6,9 +6,11 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use crate::{
     command::Command,
     config::{keybindings, theme::Theme},
-    input::centre_on_pointer,
     session::Session,
-    ui::popups::{Context, PopupContent, PopupFrame},
+    ui::{
+        mouse::centre_on_pointer,
+        popups::{Context, PopupContent, PopupFrame},
+    },
 };
 
 /// maximum height of the minimap in rows

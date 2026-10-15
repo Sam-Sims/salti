@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-pub(crate) fn handle_mouse_event(
+pub(crate) fn handle(
     tracker: &mut MouseTracker,
     session: Option<&Session>,
     gff: Option<&Gff>,
@@ -309,7 +309,7 @@ mod tests {
                     modifiers,
                     ..mouse_event(kind, area.x + x, area.y + y)
                 };
-                handle_mouse_event(&mut tracker, Some(session), None, ui, &screen, mouse)
+                handle(&mut tracker, Some(session), None, ui, &screen, mouse)
             })
             .collect()
     }
@@ -427,7 +427,7 @@ mod tests {
         &[(LEFT_DOWN, KeyModifiers::CONTROL, 0, 0), (LEFT_UP, KeyModifiers::NONE, 1, 0), (LEFT_DRAG, KeyModifiers::NONE, 3, 3)],
         Some(selection(0..=0, 0..=1)),
     )]
-    fn handle_mouse_event_selects(
+    fn handle_selects(
         #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],
         #[case] expected: Option<Selection>,
     ) {
@@ -440,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_mouse_event_click_outside_rows_clears_selection() {
+    fn handle_click_outside_rows_clears_selection() {
         let session = pinned_session(6, &[3]);
         let mut ui = ui_state();
         ui.selection = Some(selection(0..=0, 0..=0));
@@ -453,7 +453,7 @@ mod tests {
     #[rstest]
     #[case::middle_drag(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[Command::ScrollLeft { amount: 2 }])]
     #[case::after_release(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_UP, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[])]
-    fn handle_mouse_event_pans(
+    fn handle_pans(
         #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],
         #[case] expected: &[Command],
     ) {
@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_mouse_event_gff_hover_sets_tooltip_until_mouse_leaves() {
+    fn handle_gff_hover_sets_tooltip_until_mouse_leaves() {
         let session = session(&[&[b'A'; 100]]);
         let gff = Gff {
             features: vec![Feature {
@@ -480,7 +480,7 @@ mod tests {
         let gff_rows = screen.app.gff_pane_rows;
         let alignment_rows = screen.app.alignment_pane_sequence_rows;
         let mut handle = |x, y| {
-            handle_mouse_event(
+            handle(
                 &mut tracker,
                 Some(&session),
                 Some(&gff),
@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_mouse_event_gff_click_jumps() {
+    fn handle_gff_click_jumps() {
         let session = session(&[&[b'A'; 100]]);
         let gff = Gff {
             features: vec![Feature {
@@ -511,7 +511,7 @@ mod tests {
         let mut tracker = MouseTracker::default();
         let area = screen.app.gff_pane_rows;
 
-        let commands = handle_mouse_event(
+        let commands = handle(
             &mut tracker,
             Some(&session),
             Some(&gff),

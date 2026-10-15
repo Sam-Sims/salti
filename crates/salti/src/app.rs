@@ -10,12 +10,12 @@ use crate::{
     command::Command,
     config::keybindings,
     gff::{self, Gff},
-    input::{self, MouseTracker},
     jobs::{JobEvent, Jobs},
     session::{Position, Session, ViewState},
     ui::{
         input_name,
         layout::ScreenLayout,
+        mouse::{self, MouseTracker},
         notification::Notification,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
         render::render,
@@ -89,7 +89,7 @@ impl App {
                             screen: &self.screen,
                         },
                     ),
-                    None => input::handle_mouse_event(
+                    None => mouse::handle(
                         &mut self.mouse_tracker,
                         self.session.as_ref(),
                         self.gff.as_ref(),

@@ -4,7 +4,6 @@ mod command;
 mod config;
 mod fasta;
 mod gff;
-mod input;
 mod jobs;
 mod logging;
 mod session;
