@@ -46,6 +46,14 @@ pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
     }
 }
 
+/// Returns true if `a` and `b` are the same residue for `kind`
+///
+/// DNA and protein ignore case, generic compares bytes exactly
+#[inline]
+pub const fn same_residue(a: u8, b: u8, kind: AlignmentType) -> bool {
+    fold(a, kind) == fold(b, kind)
+}
+
 /// Returns the index of a nucleotide in a codon, case-insensitive
 ///
 /// `A` is 0, `T` and `U` are 1, `C` is 2 and `G` is 3. Any other byte is `None`
@@ -98,13 +106,21 @@ pub(crate) const fn is_detection_protein(byte: u8) -> bool {
     )
 }
 
+#[inline]
+const fn fold(byte: u8, kind: AlignmentType) -> u8 {
+    match kind {
+        AlignmentType::Dna | AlignmentType::Protein => byte.to_ascii_uppercase(),
+        AlignmentType::Generic => byte,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
     use super::{
         UNKNOWN_AMINO_ACID, is_ambiguous_nucleotide, is_detection_nucleotide, is_detection_protein,
-        is_gap, is_unknown, nucleotide_index,
+        is_gap, is_unknown, nucleotide_index, same_residue,
     };
     use crate::alignment_type::AlignmentType;
 
@@ -139,6 +155,25 @@ mod tests {
     #[case::gap(AlignmentType::Dna, b'-')]
     fn is_unknown_rejects(#[case] kind: AlignmentType, #[case] byte: u8) {
         assert!(!is_unknown(byte, kind));
+    }
+
+    #[rstest]
+    #[case::dna_same(AlignmentType::Dna, b'A', b'A')]
+    #[case::dna_case(AlignmentType::Dna, b'a', b'A')]
+    #[case::dna_unknown_case(AlignmentType::Dna, b'n', b'N')]
+    #[case::protein_case(AlignmentType::Protein, b'l', b'L')]
+    #[case::generic_same(AlignmentType::Generic, b'a', b'a')]
+    fn same_residue_works(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
+        assert!(same_residue(a, b, kind));
+    }
+
+    #[rstest]
+    #[case::dna_different(AlignmentType::Dna, b'A', b'G')]
+    #[case::unknown_vs_base(AlignmentType::Dna, b'N', b'A')]
+    #[case::gap_vs_residue(AlignmentType::Dna, b'-', b'A')]
+    #[case::generic_case(AlignmentType::Generic, b'a', b'A')]
+    fn same_residue_rejects(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
+        assert!(!same_residue(a, b, kind));
     }
 
     #[rstest]
