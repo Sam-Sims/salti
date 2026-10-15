@@ -207,7 +207,7 @@ If no file is passed, the app starts and waits for you to load one via the comma
 
 ## Quick start keybinds
 
-I plan to add a help screen in the future for reference in app, but for now here are the most useful keybindings:
+Use `?` in app to open the help page.
 
 ### Global keybindings
 
@@ -226,6 +226,7 @@ I plan to add a help screen in the future for reference in app, but for now here
 - `Alt+1|2|3` - Change to forward reading frame `+1`, `+2` or `+3`.
 - `Alt+4|5|6` - Change to reverse reading frame `-1`, `-2` or `-3`.
 - `d` - Cycle the diff mode.
+- `?` - Open keybinds help.
 
 ### Command palette
 
@@ -260,6 +261,7 @@ Commands:
 - `set-theme` - Set active theme (`auto`, `everforest-dark`, `everforest-light`, `solarized-dark`, `solarized-light`, `tokyo-night`, or `ansi`).
 - `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `generic`).
 - `check-update` - Check for updates and show the latest version.
+- `keybinds` - Open the keybinds help page.
 - `quit` - Quit the app.
 
 ## Some notes on features
