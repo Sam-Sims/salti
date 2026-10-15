@@ -19,7 +19,7 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::session::{Cell, WindowColumns},
+    session::{Cell, WindowColumns},
 };
 
 /// Lookup table that maps each byte value (`0-255`) to a str for display.

@@ -1,8 +1,9 @@
+mod layout;
+
 use std::{ops::Range, range::RangeInclusive};
 
 use anyhow::{Result, bail, ensure};
-
-use crate::core::layout::Layout;
+pub(crate) use layout::Layout;
 
 #[derive(
     Debug,

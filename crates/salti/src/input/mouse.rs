@@ -3,7 +3,8 @@ use ratatui::layout::Rect;
 
 use crate::{
     command::Command,
-    core::{gff::Gff, session::Session},
+    gff::Gff,
+    session::Session,
     ui::{
         layout::{ScreenLayout, Window, screen_rows},
         panes::gff,
@@ -244,10 +245,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::{
-            gff::{Feature, FeatureType, Strand},
-            session::{Position, ViewState},
-        },
+        gff::{Feature, FeatureType, Strand},
+        session::{Position, ViewState},
         test_utils::{mouse_event, pinned_session, screen, session, ui_state},
     };
 

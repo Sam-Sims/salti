@@ -4,7 +4,8 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Styled, text::Line, widgets::
 
 use crate::{
     config::theme::Theme,
-    core::{gff::Gff, session::Session},
+    gff::Gff,
+    session::Session,
     ui::{
         bars::{BottomStatusBar, InputBar, TopStatusBar},
         input_name,
@@ -168,7 +169,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::session::{DiffMode, Position, ViewState},
+        session::{DiffMode, Position, ViewState},
         test_utils::{buffer_text, session_with_numbered_ids, ui_state},
         ui::{notification::Notification, selection::Selection},
     };

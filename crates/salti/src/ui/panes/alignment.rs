@@ -8,10 +8,8 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::{
-        gff::Gff,
-        session::{DiffMode, Session, WindowColumns},
-    },
+    gff::Gff,
+    session::{DiffMode, Session, WindowColumns},
     ui::{
         layout::{Window, screen_rows, split_alignment_header},
         panes::{
@@ -146,10 +144,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::{
-            gff::{Feature, FeatureType, Strand},
-            session::{Position, ViewState},
-        },
+        gff::{Feature, FeatureType, Strand},
+        session::{Position, ViewState},
         test_utils::{buffer_text, full_window, session},
         ui::{layout::AppLayout, panes::local_feature_track::local_feature_row_count},
     };

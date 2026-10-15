@@ -2,10 +2,12 @@ mod app;
 mod cli;
 mod command;
 mod config;
-mod core;
+mod fasta;
+mod gff;
 mod input;
 mod jobs;
 mod logging;
+mod session;
 #[cfg(test)]
 mod test_utils;
 mod ui;

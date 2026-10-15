@@ -3,7 +3,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{debug, error};
 
 use crate::{
-    core::parser,
+    fasta,
     update::{self, UpdateResult},
 };
 
@@ -33,7 +33,7 @@ impl Jobs {
         self.spawn(cancel, async move {
             let parse = {
                 let input = input.clone();
-                move || parser::parse_fasta_file(&input, &token)
+                move || fasta::read(&input, &token)
             };
             let result = match tokio::task::spawn_blocking(parse).await {
                 Ok(result) => result.map_err(|error| error.to_string()),

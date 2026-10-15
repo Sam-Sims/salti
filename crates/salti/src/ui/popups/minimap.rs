@@ -6,8 +6,8 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use crate::{
     command::Command,
     config::{keybindings, theme::Theme},
-    core::session::Session,
     input::centre_on_pointer,
+    session::Session,
     ui::popups::{Context, PopupContent, PopupFrame},
 };
 

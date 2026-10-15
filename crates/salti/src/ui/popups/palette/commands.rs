@@ -2,7 +2,7 @@ use anyhow::Result;
 use libmsa::{AlignmentType, ConsensusMethod, ReadingFrame};
 
 use super::{completers, runners};
-use crate::{command::Command, core::session::DiffMode, ui::popups::Context};
+use crate::{command::Command, session::DiffMode, ui::popups::Context};
 
 pub(super) struct PaletteCommand {
     pub(super) name: &'static str,

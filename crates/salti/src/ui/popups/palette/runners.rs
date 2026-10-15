@@ -4,7 +4,7 @@ use std::{num::NonZeroUsize, str::FromStr};
 
 use anyhow::{Context as _, Result, format_err};
 
-use crate::{command::Command, core::session::Session, ui::popups::Context};
+use crate::{command::Command, session::Session, ui::popups::Context};
 
 pub(super) fn jump_position(_: &Context, argument: &str) -> Result<Command> {
     let position = argument
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
     use crate::{
         config::theme::{ThemeChoice, ThemeName},
-        core::session::DiffMode,
+        session::DiffMode,
         test_utils::{genes, pinned_session, with_context},
     };
 

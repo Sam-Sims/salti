@@ -4,7 +4,8 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::{
     config::theme::Theme,
-    core::{gff::Gff, session::Session},
+    gff::Gff,
+    session::Session,
     ui::{
         layout::Window,
         panes::features::{DisplayFeature, PlacedFeature, display_features, render_features},

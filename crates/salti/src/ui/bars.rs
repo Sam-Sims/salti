@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::session::{Session, ViewMode},
+    session::{Session, ViewMode},
     ui::{
         input_name,
         layout::Window,
@@ -204,7 +204,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::session::{Position, ViewState},
+        session::{Position, ViewState},
         test_utils::{full_window, session_with_numbered_ids},
     };
 

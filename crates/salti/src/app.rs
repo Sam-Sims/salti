@@ -9,12 +9,10 @@ use crate::{
     cli::StartupState,
     command::Command,
     config::keybindings,
-    core::{
-        gff::{self, Gff},
-        session::{Position, Session, ViewState},
-    },
+    gff::{self, Gff},
     input::{self, MouseTracker},
     jobs::{JobEvent, Jobs},
+    session::{Position, Session, ViewState},
     ui::{
         input_name,
         layout::ScreenLayout,
@@ -200,7 +198,7 @@ impl App {
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
-                self.gff = Some(gff::parse_gff(Path::new(&path))?);
+                self.gff = Some(gff::parse(Path::new(&path))?);
                 self.ui
                     .notify(Notification::info(format!("Loaded GFF file: {path}")));
             }

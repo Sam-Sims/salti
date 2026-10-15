@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::{config::theme::Theme, core::session::Session, ui::layout::Window};
+use crate::{config::theme::Theme, session::Session, ui::layout::Window};
 
 pub(crate) struct Ruler<'a> {
     pub(crate) session: &'a Session,
@@ -242,7 +242,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::session::Position,
+        session::Position,
         test_utils::{buffer_text, session},
     };
 

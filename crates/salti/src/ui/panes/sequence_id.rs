@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::session::Session,
+    session::Session,
     ui::{
         layout::{Window, screen_rows, split_alignment_header},
         panes::{render_pane, separator_line},
@@ -89,7 +89,7 @@ impl Widget for SequenceIdPane<'_> {
 mod tests {
     use super::*;
     use crate::{
-        core::session::Position,
+        session::Position,
         test_utils::{buffer_text, full_window, session_with_ids},
         ui::layout::AppLayout,
     };

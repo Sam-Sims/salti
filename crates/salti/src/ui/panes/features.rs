@@ -9,10 +9,8 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::{
-        gff::{Feature, Gff, Strand},
-        session::Session,
-    },
+    gff::{Feature, Gff, Strand},
+    session::Session,
 };
 
 const MIN_LABEL_WIDTH: usize = 2;
@@ -95,10 +93,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::{
-            gff::FeatureType,
-            session::{Position, ViewState},
-        },
+        gff::FeatureType,
+        session::{Position, ViewState},
         test_utils::session,
     };
 

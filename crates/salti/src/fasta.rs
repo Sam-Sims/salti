@@ -6,7 +6,7 @@ use paraseq::fasta;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
-pub fn parse_fasta_file(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
+pub fn read(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
     info!(input = %input, "Starting fasta parse");
     let mut reader =
         open_fasta_reader(input).map_err(|error| format_err!("Failed to open input: {error}"))?;
@@ -72,11 +72,11 @@ mod tests {
     }
 
     fn parse(file: &NamedTempFile, cancel: &CancellationToken) -> Result<Alignment> {
-        parse_fasta_file(file.path().to_str().unwrap(), cancel)
+        read(file.path().to_str().unwrap(), cancel)
     }
 
     #[test]
-    fn parse_fasta_file_works() {
+    fn read_works() {
         let file = fasta_file(b">seq1\nA-CG\n>seq2\nTGCA\n");
 
         let alignment = parse(&file, &CancellationToken::new()).unwrap();
@@ -89,19 +89,19 @@ mod tests {
     #[case::empty(b"")]
     #[case::not_fasta(b"notfasta\nfile\n")]
     #[case::invalid_utf8_id(b">\xff\nACGT\n")]
-    fn parse_fasta_file_rejects(#[case] content: &[u8]) {
+    fn read_rejects(#[case] content: &[u8]) {
         let file = fasta_file(content);
 
         assert!(parse(&file, &CancellationToken::new()).is_err());
     }
 
     #[test]
-    fn parse_fasta_file_rejects_missing_file() {
-        assert!(parse_fasta_file("missing.fasta", &CancellationToken::new()).is_err());
+    fn read_rejects_missing_file() {
+        assert!(read("missing.fasta", &CancellationToken::new()).is_err());
     }
 
     #[test]
-    fn parse_fasta_file_rejects_cancelled() {
+    fn read_rejects_cancelled() {
         let file = fasta_file(b">seq1\nACGT\n");
         let cancel = CancellationToken::new();
         cancel.cancel();

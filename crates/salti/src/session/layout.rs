@@ -1,4 +1,4 @@
-use crate::core::session::ViewState;
+use super::ViewState;
 
 #[derive(Debug)]
 pub struct Layout {

@@ -5,10 +5,8 @@ use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::{
     config::theme::Theme,
-    core::{
-        gff::{Feature, FeatureType, Gff, Strand},
-        session::{Position, Session},
-    },
+    gff::{Feature, FeatureType, Gff, Strand},
+    session::{Position, Session},
     ui::{
         layout::{AppLayout, FrameLayout, ScreenLayout, Window},
         popups::Context,

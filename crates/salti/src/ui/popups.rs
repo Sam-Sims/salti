@@ -15,7 +15,8 @@ use ratatui::{
 use crate::{
     command::Command,
     config::theme::{Theme, ThemeChoice},
-    core::{gff::Gff, session::Session},
+    gff::Gff,
+    session::Session,
     ui::{
         layout::ScreenLayout,
         popups::{keybinds::Keybinds, minimap::Minimap, palette::PaletteState},

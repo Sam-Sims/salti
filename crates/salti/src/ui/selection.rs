@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    core::layout::Layout,
+    session::Layout,
     ui::layout::{Window, screen_rows},
 };
 
@@ -109,7 +109,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{core::session::Session, test_utils::pinned_session};
+    use crate::{session::Session, test_utils::pinned_session};
 
     fn selection(
         rows: ops::RangeInclusive<usize>,

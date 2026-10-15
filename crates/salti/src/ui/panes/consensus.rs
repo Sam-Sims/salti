@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::session::{Session, WindowColumns},
+    session::{Session, WindowColumns},
     ui::panes::{render_pane, stretch},
 };
 
@@ -111,7 +111,7 @@ fn spark(summary: &libmsa::ColumnSummary) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        core::session::{Position, ViewState},
+        session::{Position, ViewState},
         test_utils::{buffer_text, full_window, session},
         ui::layout::AppLayout,
     };

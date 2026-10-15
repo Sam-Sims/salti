@@ -2,7 +2,7 @@ use ratatui::style::Color;
 
 use crate::{
     config::theme::{Theme, ThemeChoice, ThemeName},
-    core::session::Position,
+    session::Position,
     ui::{
         notification::{Notification, Notifications},
         popups::Popup,

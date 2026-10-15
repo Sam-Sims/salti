@@ -10,10 +10,8 @@ use ratatui::{
 
 use crate::{
     config::theme::Theme,
-    core::{
-        gff::{Feature, Gff},
-        session::Session,
-    },
+    gff::{Feature, Gff},
+    session::Session,
     ui::{
         layout::Window,
         panes::{
@@ -244,7 +242,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::gff::{FeatureType, Strand},
+        gff::{FeatureType, Strand},
         test_utils::{buffer_text, genes, session},
     };
 

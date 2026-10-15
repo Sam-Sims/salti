@@ -4,7 +4,7 @@ use strum::VariantArray;
 
 use crate::{
     config::theme::ThemeChoice,
-    core::session::Session,
+    session::Session,
     ui::popups::{Context, fuzzy::fuzzy_match},
 };
 
@@ -98,7 +98,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        core::session::DiffMode,
+        session::DiffMode,
         test_utils::{genes, pinned_session, with_context},
         ui::popups::palette::commands::Completer,
     };

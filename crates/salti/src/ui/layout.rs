@@ -8,11 +8,8 @@ use ratatui::{
 use tracing::debug;
 
 use crate::{
-    core::{
-        gff::Gff,
-        layout::Layout,
-        session::{Position, Session},
-    },
+    gff::Gff,
+    session::{Layout, Position, Session},
     ui::panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
 };
 
