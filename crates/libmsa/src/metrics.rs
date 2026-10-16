@@ -7,6 +7,31 @@ const MIN_ROWS_PER_JOB: usize = 128;
 const MAX_BLOCK_COLUMNS: usize = 128;
 
 impl Grid<'_> {
+    /// Counts each id in `cols` over `rows` and returns `per_column` of each, in `cols` order
+    ///
+    /// `per_column` turns one column's [`ColumnCounts`] and its id into a value, such as its
+    /// [consensus](ColumnCounts::consensus) or [entropy](ColumnCounts::entropy), or a tuple of
+    /// several. The id lets it read another cell of the column, such as the reference row's.
+    ///
+    /// Ids may be in any order and may repeat, and each occurrence is counted. With no
+    /// `rows`, every column's counts are empty
+    pub fn map_column_counts<T: Send>(
+        self,
+        rows: &[usize],
+        cols: &[usize],
+        per_column: impl Fn(ColumnCounts, usize) -> T + Sync,
+    ) -> Vec<T> {
+        let alignment_type = self.alignment_type();
+        let per_column = &per_column;
+        count_blocks(self, rows, cols)
+            .flat_map_iter(move |(block, counts)| {
+                block.iter().zip(counts).map(move |(&col, counts)| {
+                    per_column(ColumnCounts::new(counts, alignment_type), col)
+                })
+            })
+            .collect()
+    }
+
     /// Returns a summary of each id in `cols` over `rows`, in `cols` order
     ///
     /// Ids may be in any order and may repeat, and each occurrence is counted. With no `rows`,
@@ -190,6 +215,100 @@ mod tests {
 
     fn sample() -> Alignment {
         dna(&[b"ACGT", b"ACGA", b"TTTA", b"--T-"])
+    }
+
+    #[rstest]
+    #[case::all(&[0, 1, 2], &[0, 1, 2, 3], b"ACGA")]
+    #[case::subset_rows(&[2], &[0, 1, 2, 3], b"TTTA")]
+    #[case::cols_unsorted_repeated(&[0, 1, 2], &[3, 0, 3], b"AAA")]
+    #[case::rows_repeated(&[2, 2, 0], &[0], b"T")]
+    fn map_column_counts_works(
+        #[case] rows: &[usize],
+        #[case] cols: &[usize],
+        #[case] expected: &[u8],
+    ) {
+        let alignment = sample();
+        let consensus =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(rows, cols, |counts, _| {
+                    counts.consensus(ConsensusMethod::MajorityNonGap)
+                });
+        let expected: Vec<_> = expected.iter().copied().map(Some).collect();
+        assert_eq!(consensus, expected);
+    }
+
+    #[test]
+    fn map_column_counts_passes_column_ids() {
+        let alignment = sample();
+        let ids =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(&[0], &[3, 0, 3], |_, col| col);
+        assert_eq!(ids, [3, 0, 3]);
+    }
+
+    #[test]
+    fn map_column_counts_is_empty() {
+        let alignment = sample();
+        let ids = alignment
+            .grid(AlignmentType::Dna)
+            .map_column_counts(&[0, 1], &[], |_, col| col);
+        assert_eq!(ids, []);
+    }
+
+    #[test]
+    fn map_column_counts_without_rows_counts_nothing() {
+        let alignment = sample();
+        let consensus =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(&[], &[0, 1], |counts, _| {
+                    counts.consensus(ConsensusMethod::Majority)
+                });
+        assert_eq!(consensus, [None, None]);
+    }
+
+    #[rstest]
+    #[case::dna(AlignmentType::Dna, Some(1.0))]
+    #[case::generic(AlignmentType::Generic, None)]
+    fn map_column_counts_uses_grid_alignment_type(
+        #[case] alignment_type: AlignmentType,
+        #[case] expected: Option<f64>,
+    ) {
+        let alignment = dna(&[b"A", b"A"]);
+        let conservation =
+            alignment
+                .grid(alignment_type)
+                .map_column_counts(&[0, 1], &[0], |counts, _| counts.conservation());
+        assert_eq!(conservation, [expected]);
+    }
+
+    #[test]
+    fn map_column_counts_keeps_cols_order_across_blocks() {
+        let row: Vec<u8> = b"ACGT".iter().copied().cycle().take(300).collect();
+        let alignment = dna(&[&row]);
+        let cols: Vec<usize> = (0..300).rev().collect();
+
+        let consensus =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(&[0], &cols, |counts, _| {
+                    counts.consensus(ConsensusMethod::Majority)
+                });
+        let expected: Vec<_> = cols.iter().map(|&col| Some(row[col])).collect();
+        assert_eq!(consensus, expected);
+    }
+
+    #[test]
+    fn map_column_counts_reads_translated_grid() {
+        let alignment = dna(&[b"ATGCCC"]);
+        let consensus = alignment
+            .translated_grid(ReadingFrame::Frame1)
+            .map_column_counts(&[0], &[1, 0], |counts, _| {
+                counts.consensus(ConsensusMethod::Majority)
+            });
+        assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
     }
 
     #[rstest]
