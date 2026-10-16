@@ -50,46 +50,15 @@ impl ColumnCounts {
 
     /// Returns how conserved the column is, from 0 to 1
     ///
-    /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
-    /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
-    /// grids, which have no alphabet
+    /// One minus the residues' [entropy](Self::entropy) over the alphabet's maximum, times
+    /// the fraction of residues and gaps that are residues. Unknown symbols and ambiguity codes
+    /// are left out.
+    ///
+    /// 0 when there are no residues, `None` for generic grids.
     pub fn conservation(&self) -> Option<f64> {
-        let max_entropy = f64::from(self.alignment_type.conservation_alphabet_size()?).log2();
-        let mut total = 0u32;
-        let mut gap_count = 0u32;
-        let mut merged_non_gap_counts = [0u32; 128];
-
-        for (symbol, count) in self.symbol_counts() {
-            if count == 0 {
-                continue;
-            }
-
-            total += count;
-            if residue::is_gap(symbol) {
-                gap_count += count;
-            } else {
-                merged_non_gap_counts[usize::from(symbol.to_ascii_uppercase())] += count;
-            }
-        }
-
-        let non_gap_total = total - gap_count;
-        if non_gap_total == 0 {
-            return Some(0.0);
-        }
-
-        let mut entropy = 0.0f64;
-        let non_gap_total_f = f64::from(non_gap_total);
-        for &count in &merged_non_gap_counts {
-            if count == 0 {
-                continue;
-            }
-            let frequency = f64::from(count) / non_gap_total_f;
-            entropy -= frequency * frequency.log2();
-        }
-
-        let gap_fraction = f64::from(gap_count) / f64::from(total);
-        let conservation = (1.0 - entropy / max_entropy).max(0.0);
-        Some(conservation * (1.0 - gap_fraction))
+        let max_entropy = f64::from(self.alignment_type.conservation_alphabet_size()?).ln();
+        let conservation = (1.0 - self.entropy() / max_entropy).max(0.0);
+        Some(conservation * self.fraction(&[Class::Residue], &[Class::Gap, Class::Residue]))
     }
 
     pub(crate) fn gap_fraction(&self) -> f64 {
@@ -134,6 +103,14 @@ impl ColumnCounts {
             }
         }
         counts
+    }
+
+    fn fraction(&self, part: &[Class], whole: &[Class]) -> f64 {
+        let whole: u32 = self.counts_in(whole).iter().sum();
+        if whole == 0 {
+            return 0.0;
+        }
+        f64::from(self.counts_in(part).iter().sum::<u32>()) / f64::from(whole)
     }
 
     fn residue_frequencies(&self) -> impl Iterator<Item = (u8, f64)> {
@@ -297,6 +274,9 @@ mod tests {
     #[case::case_insensitive(b"AaAa", 1.0)]
     #[case::gap_penalty(b"AA--", 0.5)]
     #[case::mixed(b"AACT", 0.25)]
+    #[case::leaves_out_unknown(b"AAAN", 1.0)]
+    #[case::leaves_out_ambiguous(b"AAAR", 1.0)]
+    #[case::outside_alphabet(b"????", 1.0)]
     fn conservation_works(#[case] symbols: &[u8], #[case] expected: f64) {
         assert_eq!(
             column(AlignmentType::Dna, symbols).conservation(),
@@ -308,7 +288,10 @@ mod tests {
     #[case::empty(b"")]
     #[case::all_gaps(b"----")]
     #[case::max_entropy(b"ACGT")]
-    #[case::clamped_above_max_entropy(b"ACGTN")]
+    #[case::clamped_above_max_entropy(b"ACGT?")]
+    #[case::all_unknown(b"NNNN")]
+    #[case::all_ambiguous(b"RY")]
+    #[case::unknown_and_gaps(b"NN--")]
     fn conservation_is_zero(#[case] symbols: &[u8]) {
         assert_eq!(
             column(AlignmentType::Dna, symbols).conservation(),

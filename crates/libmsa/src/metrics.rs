@@ -96,11 +96,7 @@ pub struct ColumnSummary {
     /// `None` when nothing is counted, such as an all-gap column under
     /// [`ConsensusMethod::MajorityNonGap`]
     pub consensus: Option<u8>,
-    /// How conserved the column is, from 0 to 1
-    ///
-    /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
-    /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
-    /// grids, which have no alphabet
+    /// How conserved the column is, as [`ColumnCounts::conservation`]
     pub conservation: Option<f64>,
 }
 
