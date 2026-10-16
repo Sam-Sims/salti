@@ -76,23 +76,10 @@ impl ColumnCounts {
         }
     }
 
-    pub(crate) fn max_counted_symbol_fraction(&self) -> Option<f64> {
-        let mut counted_total = 0u32;
-        let mut max_count = 0u32;
-
-        for (symbol, count) in self.symbol_counts() {
-            if count == 0
-                || residue::is_gap(symbol)
-                || residue::is_unknown(symbol, self.alignment_type)
-            {
-                continue;
-            }
-
-            counted_total += count;
-            max_count = max_count.max(count);
-        }
-
-        (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
+    pub(crate) fn constant_fraction(&self) -> Option<f64> {
+        self.residue_frequencies()
+            .map(|(_, frequency)| frequency)
+            .max_by(f64::total_cmp)
     }
 
     fn counts_in(&self, classes: &[Class]) -> [u32; 128] {
@@ -318,13 +305,16 @@ mod tests {
     #[case::protein_ignores_gaps_and_x(AlignmentType::Protein, b"MMXx--K", 2.0 / 3.0)]
     #[case::generic_counts_n(AlignmentType::Generic, b"NN-A", 2.0 / 3.0)]
     #[case::constant(AlignmentType::Dna, b"AAAA", 1.0)]
-    fn max_counted_symbol_fraction_works(
+    #[case::merges_case(AlignmentType::Dna, b"AaAa", 1.0)]
+    #[case::leaves_out_ambiguous(AlignmentType::Dna, b"CYCC", 1.0)]
+    #[case::generic_keeps_case(AlignmentType::Generic, b"Aa", 0.5)]
+    fn constant_fraction_works(
         #[case] alignment_type: AlignmentType,
         #[case] symbols: &[u8],
         #[case] expected: f64,
     ) {
         assert_eq!(
-            column(alignment_type, symbols).max_counted_symbol_fraction(),
+            column(alignment_type, symbols).constant_fraction(),
             Some(expected)
         );
     }
@@ -332,9 +322,10 @@ mod tests {
     #[rstest]
     #[case::empty(b"")]
     #[case::only_ignored(b"-Nn")]
-    fn max_counted_symbol_fraction_is_none(#[case] symbols: &[u8]) {
+    #[case::only_ambiguous(b"RY")]
+    fn constant_fraction_is_none(#[case] symbols: &[u8]) {
         assert_eq!(
-            column(AlignmentType::Dna, symbols).max_counted_symbol_fraction(),
+            column(AlignmentType::Dna, symbols).constant_fraction(),
             None
         );
     }

@@ -78,7 +78,7 @@ impl Grid<'_> {
                         .is_none_or(|threshold| counts.gap_fraction() <= threshold);
                     let const_ok = filter.min_const_fraction.is_none_or(|threshold| {
                         counts
-                            .max_counted_symbol_fraction()
+                            .constant_fraction()
                             .is_none_or(|fraction| fraction < threshold)
                     });
                     (gap_ok && const_ok).then_some(col)
@@ -106,7 +106,8 @@ pub struct ColumnFilter {
     /// Hides columns whose fraction of gaps is above this
     pub max_gap_fraction: Option<f64>,
     /// Hides columns whose most common residue makes up at least this fraction of the
-    /// residues that aren't gaps or unknown
+    /// residues. Gaps, unknown symbols and ambiguity codes are left out, and DNA and protein
+    /// ignore case
     pub min_const_fraction: Option<f64>,
 }
 
@@ -368,6 +369,17 @@ mod tests {
                 .grid(alignment_type)
                 .kept_columns(&[0, 1, 2, 3], filter(None, Some(1.0))),
             expected
+        );
+    }
+
+    #[test]
+    fn kept_columns_constant_filter_merges_case_and_ambiguity() {
+        let alignment = dna(&[b"CAA", b"YaC", b"CAA", b"CaC"]);
+        assert_eq!(
+            alignment
+                .grid(AlignmentType::Dna)
+                .kept_columns(&[0, 1, 2, 3], filter(None, Some(1.0))),
+            [2]
         );
     }
 
