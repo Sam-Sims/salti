@@ -28,6 +28,38 @@ const fn build_nucleotide_index_table() -> [u8; 256] {
     table
 }
 
+/// Biological meaning of a byte
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+pub enum Class {
+    /// `-`
+    Gap,
+    /// The unknown symbol, which says nothing about the residue: `N` for DNA, `X` for
+    /// protein, either case
+    Unknown,
+    /// A DNA ambiguity code, which could be one of several bases: `R Y S W K M B D H V`,
+    /// either case
+    Ambiguous,
+    /// Anything else, including bytes outside the alphabet
+    Residue,
+}
+
+/// Returns what `byte` is in an alignment of `kind`
+///
+/// `-` is a gap for every type. DNA has an unknown symbol and ambiguity codes, protein has
+/// only an unknown symbol, and generic has neither. Case is ignored
+#[inline]
+pub const fn classify(byte: u8, kind: AlignmentType) -> Class {
+    if is_gap(byte) {
+        Class::Gap
+    } else if is_unknown(byte, kind) {
+        Class::Unknown
+    } else if matches!(kind, AlignmentType::Dna) && is_ambiguous_nucleotide(byte) {
+        Class::Ambiguous
+    } else {
+        Class::Residue
+    }
+}
+
 /// Returns true if `byte` is a gap. Only `-` is a gap
 #[inline]
 pub const fn is_gap(byte: u8) -> bool {
@@ -111,32 +143,6 @@ pub(crate) const fn fold(byte: u8, kind: AlignmentType) -> u8 {
     match kind {
         AlignmentType::Dna | AlignmentType::Protein => byte.to_ascii_uppercase(),
         AlignmentType::Generic => byte,
-    }
-}
-
-/// Biological meaning of a byte
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
-pub(crate) enum Class {
-    /// `-`
-    Gap,
-    /// Any unknown symbol, which says nothing about the residue. See [`is_unknown`]
-    Unknown,
-    /// An IUPAC ambiguity code, which could be one of several residues
-    Ambiguous,
-    /// Anything else, including bytes outside the alphabet
-    Residue,
-}
-
-#[inline]
-pub(crate) const fn classify(byte: u8, kind: AlignmentType) -> Class {
-    if is_gap(byte) {
-        Class::Gap
-    } else if is_unknown(byte, kind) {
-        Class::Unknown
-    } else if matches!(kind, AlignmentType::Dna) && is_ambiguous_nucleotide(byte) {
-        Class::Ambiguous
-    } else {
-        Class::Residue
     }
 }
 
