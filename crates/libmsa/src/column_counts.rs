@@ -61,19 +61,33 @@ impl ColumnCounts {
         Some(conservation * self.fraction(&[Class::Residue], &[Class::Gap, Class::Residue]))
     }
 
-    pub(crate) fn gap_fraction(&self) -> f64 {
-        let total: u32 = self.counts.iter().sum();
-        let gap_count: u32 = self
-            .symbol_counts()
-            .filter(|&(symbol, _)| residue::is_gap(symbol))
-            .map(|(_, count)| count)
-            .sum();
+    /// Returns the fraction of the column's cells that are gaps, unknown symbols or ambiguity
+    /// codes
+    ///
+    /// 0 when the column is empty
+    pub fn missing_fraction(&self) -> f64 {
+        self.fraction(
+            &[Class::Gap, Class::Unknown, Class::Ambiguous],
+            Class::VARIANTS,
+        )
+    }
 
-        if total == 0 {
-            0.0
-        } else {
-            f64::from(gap_count) / f64::from(total)
+    /// Returns the fraction of the column's residues that aren't the same residue as
+    /// `reference`
+    ///
+    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case.
+    /// 0 when there are no residues or `reference` isn't a residue
+    pub fn differing_fraction(&self, reference: u8) -> f64 {
+        if residue::classify(reference, self.alignment_type) != Class::Residue {
+            return 0.0;
         }
+        self.residue_frequencies()
+            .filter(|&(symbol, _)| !residue::same_residue(symbol, reference, self.alignment_type))
+            .fold(0.0, |differing, (_, frequency)| differing + frequency)
+    }
+
+    pub(crate) fn gap_fraction(&self) -> f64 {
+        self.fraction(&[Class::Gap], Class::VARIANTS)
     }
 
     pub(crate) fn constant_fraction(&self) -> Option<f64> {
@@ -289,6 +303,47 @@ mod tests {
     #[test]
     fn conservation_is_none_for_generic() {
         assert_eq!(column(AlignmentType::Generic, b"AAAA").conservation(), None);
+    }
+
+    #[rstest]
+    #[case::none_missing(AlignmentType::Dna, b"AAAA", 0.0)]
+    #[case::gaps(AlignmentType::Dna, b"AA--", 0.5)]
+    #[case::unknown(AlignmentType::Dna, b"AANn", 0.5)]
+    #[case::ambiguous(AlignmentType::Dna, b"AARY", 0.5)]
+    #[case::all_kinds(AlignmentType::Dna, b"-NRA", 0.75)]
+    #[case::empty(AlignmentType::Dna, b"", 0.0)]
+    #[case::protein_unknown(AlignmentType::Protein, b"MMXx", 0.5)]
+    #[case::generic_counts_only_gaps(AlignmentType::Generic, b"NN-A", 0.25)]
+    fn missing_fraction_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] expected: f64,
+    ) {
+        assert_eq!(column(alignment_type, symbols).missing_fraction(), expected);
+    }
+
+    #[rstest]
+    #[case::all_same(AlignmentType::Dna, b"AAAA", b'A', 0.0)]
+    #[case::half(AlignmentType::Dna, b"AACC", b'A', 0.5)]
+    #[case::all_differ(AlignmentType::Dna, b"CCGG", b'A', 1.0)]
+    #[case::merges_case(AlignmentType::Dna, b"aaCC", b'A', 0.5)]
+    #[case::lower_case_reference(AlignmentType::Dna, b"AACC", b'a', 0.5)]
+    #[case::leaves_out_gaps_and_no_information(AlignmentType::Dna, b"AC--NR", b'A', 0.5)]
+    #[case::reference_unknown(AlignmentType::Dna, b"ACGT", b'N', 0.0)]
+    #[case::reference_ambiguous(AlignmentType::Dna, b"ACGT", b'R', 0.0)]
+    #[case::reference_gap(AlignmentType::Dna, b"ACGT", b'-', 0.0)]
+    #[case::no_residues(AlignmentType::Dna, b"NN--", b'A', 0.0)]
+    #[case::generic_keeps_case(AlignmentType::Generic, b"aaAA", b'A', 0.5)]
+    fn differing_fraction_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] reference: u8,
+        #[case] expected: f64,
+    ) {
+        assert_eq!(
+            column(alignment_type, symbols).differing_fraction(reference),
+            expected
+        );
     }
 
     #[rstest]
