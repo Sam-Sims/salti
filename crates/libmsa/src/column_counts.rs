@@ -1,4 +1,9 @@
-use crate::{AlignmentType, residue};
+use strum::VariantArray;
+
+use crate::{
+    AlignmentType,
+    residue::{self, Class},
+};
 
 /// The byte counts of one column of a [`Grid`](crate::Grid)
 #[derive(Debug)]
@@ -25,16 +30,22 @@ impl ColumnCounts {
     /// `None` when nothing is counted, such as an all-gap column under
     /// [`ConsensusMethod::MajorityNonGap`]
     pub fn consensus(&self, method: ConsensusMethod) -> Option<u8> {
-        let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
-        let folded = most_common(
-            (0..128)
-                .zip(self.folded_counts())
-                .filter(|&(symbol, _)| !(exclude_gap && residue::is_gap(symbol))),
-        )?;
+        let folded = most_common((0..128).zip(self.counts_in(method.classes())))?;
         most_common(
             self.symbol_counts()
                 .filter(|&(symbol, _)| residue::fold(symbol, self.alignment_type) == folded),
         )
+    }
+
+    /// Returns the Shannon entropy of the column's residues
+    ///
+    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case.
+    /// 0 when there are no residues
+    pub fn entropy(&self) -> f64 {
+        self.residue_frequencies()
+            .fold(0.0, |entropy, (_, frequency)| {
+                entropy - frequency * frequency.ln()
+            })
     }
 
     /// Returns how conserved the column is, from 0 to 1
@@ -115,12 +126,23 @@ impl ColumnCounts {
         (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
     }
 
-    fn folded_counts(&self) -> [u32; 128] {
-        let mut folded = [0u32; 128];
+    fn counts_in(&self, classes: &[Class]) -> [u32; 128] {
+        let mut counts = [0u32; 128];
         for (symbol, count) in self.symbol_counts() {
-            folded[usize::from(residue::fold(symbol, self.alignment_type))] += count;
+            if classes.contains(&residue::classify(symbol, self.alignment_type)) {
+                counts[usize::from(residue::fold(symbol, self.alignment_type))] += count;
+            }
         }
-        folded
+        counts
+    }
+
+    fn residue_frequencies(&self) -> impl Iterator<Item = (u8, f64)> {
+        let counts = self.counts_in(&[Class::Residue]);
+        let total = f64::from(counts.iter().sum::<u32>());
+        (0..128)
+            .zip(counts)
+            .filter(|&(_, count)| count != 0)
+            .map(move |(residue, count)| (residue, f64::from(count) / total))
     }
 
     fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
@@ -153,6 +175,15 @@ pub enum ConsensusMethod {
     /// The most common byte that isn't a gap
     #[default]
     MajorityNonGap,
+}
+
+impl ConsensusMethod {
+    const fn classes(self) -> &'static [Class] {
+        match self {
+            Self::Majority => Class::VARIANTS,
+            Self::MajorityNonGap => &[Class::Unknown, Class::Ambiguous, Class::Residue],
+        }
+    }
 }
 
 fn most_common(counts: impl Iterator<Item = (u8, u32)>) -> Option<u8> {
@@ -236,6 +267,29 @@ mod tests {
     #[case::all_gaps_non_gap(ConsensusMethod::MajorityNonGap, b"---")]
     fn consensus_is_none(#[case] method: ConsensusMethod, #[case] symbols: &[u8]) {
         assert_eq!(column(AlignmentType::Dna, symbols).consensus(method), None);
+    }
+
+    #[rstest]
+    #[case::constant(AlignmentType::Dna, b"AAAA", 0.0)]
+    #[case::two_even(AlignmentType::Dna, b"AACC", 2f64.ln())]
+    #[case::four_even(AlignmentType::Dna, b"ACGT", 4f64.ln())]
+    #[case::leaves_out_gaps_and_no_information(AlignmentType::Dna, b"AA--NNRY", 0.0)]
+    #[case::merges_case(AlignmentType::Dna, b"AaAa", 0.0)]
+    #[case::empty(AlignmentType::Dna, b"", 0.0)]
+    #[case::no_residues(AlignmentType::Dna, b"NN--", 0.0)]
+    #[case::outside_alphabet(AlignmentType::Dna, b"????", 0.0)]
+    #[case::protein(AlignmentType::Protein, b"MMKK", 2f64.ln())]
+    #[case::generic_keeps_case(AlignmentType::Generic, b"Aa", 2f64.ln())]
+    fn entropy_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] expected: f64,
+    ) {
+        // bits, so a -0.0 fails
+        assert_eq!(
+            column(alignment_type, symbols).entropy().to_bits(),
+            expected.to_bits()
+        );
     }
 
     #[rstest]
