@@ -107,7 +107,7 @@ pub(crate) const fn is_detection_protein(byte: u8) -> bool {
 }
 
 #[inline]
-const fn fold(byte: u8, kind: AlignmentType) -> u8 {
+pub(crate) const fn fold(byte: u8, kind: AlignmentType) -> u8 {
     match kind {
         AlignmentType::Dna | AlignmentType::Protein => byte.to_ascii_uppercase(),
         AlignmentType::Generic => byte,

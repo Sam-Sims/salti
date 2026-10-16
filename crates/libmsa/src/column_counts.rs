@@ -20,21 +20,21 @@ impl ColumnCounts {
 
     /// Returns the most common byte under `method`
     ///
+    /// For DNA and protein the vote merges case first, and then the most common case wins.
+    ///
     /// `None` when nothing is counted, such as an all-gap column under
     /// [`ConsensusMethod::MajorityNonGap`]
     pub fn consensus(&self, method: ConsensusMethod) -> Option<u8> {
         let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
-        let mut max_count = 0u32;
-        let mut consensus = None;
-
-        for (symbol, count) in self.symbol_counts() {
-            if count > max_count && !(exclude_gap && residue::is_gap(symbol)) {
-                max_count = count;
-                consensus = Some(symbol);
-            }
-        }
-
-        consensus
+        let folded = most_common(
+            (0..128)
+                .zip(self.folded_counts())
+                .filter(|&(symbol, _)| !(exclude_gap && residue::is_gap(symbol))),
+        )?;
+        most_common(
+            self.symbol_counts()
+                .filter(|&(symbol, _)| residue::fold(symbol, self.alignment_type) == folded),
+        )
     }
 
     /// Returns how conserved the column is, from 0 to 1
@@ -115,6 +115,14 @@ impl ColumnCounts {
         (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
     }
 
+    fn folded_counts(&self) -> [u32; 128] {
+        let mut folded = [0u32; 128];
+        for (symbol, count) in self.symbol_counts() {
+            folded[usize::from(residue::fold(symbol, self.alignment_type))] += count;
+        }
+        folded
+    }
+
     fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
         (0..128).zip(self.counts.iter().copied())
     }
@@ -124,7 +132,9 @@ impl ColumnCounts {
 ///
 /// # Ties
 ///
-/// When several bytes share the highest count, the lowest byte wins.
+/// When several bytes share the highest count, the lowest byte wins. For DNA and protein this
+/// applies twice: first between residues with case merged, then between the winner's two
+/// cases.
 #[derive(
     Debug,
     Clone,
@@ -145,6 +155,18 @@ pub enum ConsensusMethod {
     MajorityNonGap,
 }
 
+fn most_common(counts: impl Iterator<Item = (u8, u32)>) -> Option<u8> {
+    let mut max_count = 0;
+    let mut most_common = None;
+    for (symbol, count) in counts {
+        if count > max_count {
+            max_count = count;
+            most_common = Some(symbol);
+        }
+    }
+    most_common
+}
+
 #[cfg(test)]
 #[allow(clippy::float_cmp)]
 mod tests {
@@ -162,21 +184,48 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(ConsensusMethod::Majority, b"AAAA", b'A')]
-    #[case::majority_counts_gaps(ConsensusMethod::Majority, b"---AT", b'-')]
-    #[case::non_gap_skips_gaps(ConsensusMethod::MajorityNonGap, b"---AAT", b'A')]
-    #[case::higher_count_beats_lower_byte(ConsensusMethod::Majority, b"ACCTTT", b'T')]
-    #[case::tie_picks_lowest_byte(ConsensusMethod::Majority, b"TTCCAA", b'A')]
-    #[case::tie_uppercase_beats_lowercase(ConsensusMethod::Majority, b"aaTT", b'T')]
-    #[case::majority_tie_prefers_gap(ConsensusMethod::Majority, b"--AA", b'-')]
-    #[case::non_gap_tie_ignores_gap(ConsensusMethod::MajorityNonGap, b"---GGTT", b'G')]
+    #[case::single(AlignmentType::Dna, ConsensusMethod::Majority, b"AAAA", b'A')]
+    #[case::majority_counts_gaps(AlignmentType::Dna, ConsensusMethod::Majority, b"---AT", b'-')]
+    #[case::non_gap_skips_gaps(
+        AlignmentType::Dna,
+        ConsensusMethod::MajorityNonGap,
+        b"---AAT",
+        b'A'
+    )]
+    #[case::higher_count_beats_lower_byte(
+        AlignmentType::Dna,
+        ConsensusMethod::Majority,
+        b"ACCTTT",
+        b'T'
+    )]
+    #[case::tie_picks_lowest_byte(AlignmentType::Dna, ConsensusMethod::Majority, b"TTCCAA", b'A')]
+    #[case::tie_compares_folded_bytes(AlignmentType::Dna, ConsensusMethod::Majority, b"aaTT", b'a')]
+    #[case::majority_tie_prefers_gap(AlignmentType::Dna, ConsensusMethod::Majority, b"--AA", b'-')]
+    #[case::non_gap_tie_ignores_gap(
+        AlignmentType::Dna,
+        ConsensusMethod::MajorityNonGap,
+        b"---GGTT",
+        b'G'
+    )]
+    #[case::split_case_vote(AlignmentType::Dna, ConsensusMethod::Majority, b"AAaaGGG", b'A')]
+    #[case::soft_masked(AlignmentType::Dna, ConsensusMethod::Majority, b"aaaA", b'a')]
+    #[case::case_tie_picks_upper(AlignmentType::Dna, ConsensusMethod::Majority, b"AAaa", b'A')]
+    #[case::protein_merges_case(AlignmentType::Protein, ConsensusMethod::Majority, b"mmK", b'm')]
+    #[case::generic_keeps_case(AlignmentType::Generic, ConsensusMethod::Majority, b"AAaaGGG", b'G')]
+    #[case::generic_tie_compares_bytes(
+        AlignmentType::Generic,
+        ConsensusMethod::Majority,
+        b"aaTT",
+        b'T'
+    )]
     fn consensus_works(
+        #[case] alignment_type: AlignmentType,
         #[case] method: ConsensusMethod,
         #[case] symbols: &[u8],
         #[case] expected: u8,
     ) {
         assert_eq!(
-            column(AlignmentType::Dna, symbols).consensus(method),
+            column(alignment_type, symbols).consensus(method),
             Some(expected)
         );
     }
