@@ -32,33 +32,6 @@ impl Grid<'_> {
             .collect()
     }
 
-    /// Returns a summary of each id in `cols` over `rows`, in `cols` order
-    ///
-    /// Ids may be in any order and may repeat, and each occurrence is counted. With no `rows`,
-    /// every summary has no consensus and a conservation of zero
-    ///
-    /// # Panics
-    ///
-    /// If an id in `rows` or `cols` is out of range, as for [`cells`](Self::cells)
-    pub fn summaries(
-        self,
-        rows: &[usize],
-        cols: &[usize],
-        method: ConsensusMethod,
-    ) -> Vec<ColumnSummary> {
-        let alignment_type = self.alignment_type();
-        count_blocks(self, rows, cols)
-            .flat_map_iter(|(_, counts)| counts)
-            .map(|counts| {
-                let counts = ColumnCounts::new(counts, alignment_type);
-                ColumnSummary {
-                    consensus: counts.consensus(method),
-                    conservation: counts.conservation(),
-                }
-            })
-            .collect()
-    }
-
     /// Returns the consensus of every cell in `rows` and `cols` counted together
     ///
     /// Ids may repeat, and each occurrence is counted. `None` when nothing is counted, which
@@ -100,18 +73,6 @@ impl Grid<'_> {
         .flatten()
         .collect()
     }
-}
-
-/// The consensus and conservation of one column
-#[derive(Debug, Clone, PartialEq)]
-pub struct ColumnSummary {
-    /// The most common byte under the chosen [`ConsensusMethod`]
-    ///
-    /// `None` when nothing is counted, such as an all-gap column under
-    /// [`ConsensusMethod::MajorityNonGap`]
-    pub consensus: Option<u8>,
-    /// How conserved the column is, as [`ColumnCounts::conservation`]
-    pub conservation: Option<f64>,
 }
 
 /// Rules for hiding columns. `None` turns a rule off, and both fractions are in `0.0..=1.0`
@@ -307,89 +268,6 @@ mod tests {
             .map_column_counts(&[0], &[1, 0], |counts, _| {
                 counts.consensus(ConsensusMethod::Majority)
             });
-        assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
-    }
-
-    #[rstest]
-    #[case::all(&[0, 1, 2], &[0, 1, 2, 3], b"ACGA")]
-    #[case::subset_rows(&[2], &[0, 1, 2, 3], b"TTTA")]
-    #[case::cols_unsorted_repeated(&[0, 1, 2], &[3, 0, 3], b"AAA")]
-    #[case::rows_repeated(&[2, 2, 0], &[0], b"T")]
-    fn summaries_works(#[case] rows: &[usize], #[case] cols: &[usize], #[case] expected: &[u8]) {
-        let alignment = sample();
-        let consensus: Vec<_> = alignment
-            .grid(AlignmentType::Dna)
-            .summaries(rows, cols, ConsensusMethod::MajorityNonGap)
-            .into_iter()
-            .map(|summary| summary.consensus)
-            .collect();
-        let expected: Vec<_> = expected.iter().copied().map(Some).collect();
-        assert_eq!(consensus, expected);
-    }
-
-    #[test]
-    fn summaries_is_empty() {
-        let alignment = sample();
-        let summaries =
-            alignment
-                .grid(AlignmentType::Dna)
-                .summaries(&[0, 1], &[], ConsensusMethod::Majority);
-        assert_eq!(summaries, []);
-    }
-
-    #[test]
-    fn summaries_without_rows_has_no_consensus() {
-        let alignment = sample();
-        let summaries =
-            alignment
-                .grid(AlignmentType::Dna)
-                .summaries(&[], &[0, 1], ConsensusMethod::Majority);
-        for summary in summaries {
-            assert_eq!(summary.consensus, None);
-            assert_eq!(summary.conservation, Some(0.0));
-        }
-    }
-
-    #[rstest]
-    #[case::dna(AlignmentType::Dna, Some(1.0))]
-    #[case::generic(AlignmentType::Generic, None)]
-    fn summaries_uses_grid_alignment_type(
-        #[case] alignment_type: AlignmentType,
-        #[case] expected: Option<f64>,
-    ) {
-        let alignment = dna(&[b"A", b"A"]);
-        let summaries =
-            alignment
-                .grid(alignment_type)
-                .summaries(&[0, 1], &[0], ConsensusMethod::Majority);
-        assert_eq!(summaries[0].conservation, expected);
-    }
-
-    #[test]
-    fn summaries_keeps_cols_order_across_blocks() {
-        let row: Vec<u8> = b"ACGT".iter().copied().cycle().take(300).collect();
-        let alignment = dna(&[&row]);
-        let cols: Vec<usize> = (0..300).rev().collect();
-
-        let consensus: Vec<_> = alignment
-            .grid(AlignmentType::Dna)
-            .summaries(&[0], &cols, ConsensusMethod::Majority)
-            .into_iter()
-            .map(|summary| summary.consensus)
-            .collect();
-        let expected: Vec<_> = cols.iter().map(|&col| Some(row[col])).collect();
-        assert_eq!(consensus, expected);
-    }
-
-    #[test]
-    fn summaries_reads_translated_grid() {
-        let alignment = dna(&[b"ATGCCC"]);
-        let summaries = alignment.translated_grid(ReadingFrame::Frame1).summaries(
-            &[0],
-            &[1, 0],
-            ConsensusMethod::Majority,
-        );
-        let consensus: Vec<_> = summaries.iter().map(|summary| summary.consensus).collect();
         assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
     }
 
