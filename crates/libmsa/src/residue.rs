@@ -2,7 +2,7 @@
 
 use crate::alignment_type::AlignmentType;
 
-const GAP: u8 = b'-';
+pub(crate) const GAP: u8 = b'-';
 
 pub(crate) const UNKNOWN_AMINO_ACID: u8 = b'X';
 
