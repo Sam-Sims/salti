@@ -93,23 +93,12 @@ impl Grid<'_> {
             return cols;
         }
 
-        let alignment_type = self.alignment_type();
-        count_blocks(self, rows, &cols)
-            .flat_map_iter(|(block, counts)| {
-                block.iter().zip(counts).filter_map(move |(&col, counts)| {
-                    let counts = ColumnCounts::new(counts, alignment_type);
-                    let gap_ok = filter
-                        .max_gap_fraction
-                        .is_none_or(|threshold| counts.gap_fraction() <= threshold);
-                    let const_ok = filter.min_const_fraction.is_none_or(|threshold| {
-                        counts
-                            .constant_fraction()
-                            .is_none_or(|fraction| fraction < threshold)
-                    });
-                    (gap_ok && const_ok).then_some(col)
-                })
-            })
-            .collect()
+        self.map_column_counts(rows, &cols, |counts, col| {
+            filter.keeps(&counts).then_some(col)
+        })
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
@@ -140,6 +129,16 @@ impl ColumnFilter {
     /// Returns true if either rule is on
     pub fn is_active(self) -> bool {
         self.max_gap_fraction.is_some() || self.min_const_fraction.is_some()
+    }
+
+    fn keeps(self, counts: &ColumnCounts) -> bool {
+        self.max_gap_fraction
+            .is_none_or(|threshold| counts.gap_fraction() <= threshold)
+            && self.min_const_fraction.is_none_or(|threshold| {
+                counts
+                    .constant_fraction()
+                    .is_none_or(|fraction| fraction < threshold)
+            })
     }
 }
 
