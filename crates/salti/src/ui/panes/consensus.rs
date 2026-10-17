@@ -33,19 +33,24 @@ impl Widget for ConsensusAlignmentPane<'_> {
             },
         );
 
-        let mut lines = vec![
+        let conservation = match &columns.conservation {
+            Some(conservation) => {
+                let sparks: String = columns
+                    .cells
+                    .iter()
+                    .map(|cell| cell.map_or(" ", |cell| spark(conservation[cell.index])))
+                    .collect();
+                Line::from(sparks).set_style(theme.accent_alt)
+            }
+            None => Line::from(
+                "Conservation needs a DNA or protein alignment.".set_style(theme.text_dim.italic()),
+            ),
+        };
+        let lines = vec![
             reference,
             Line::from(stretch(columns, &columns.consensus, None, theme)),
+            conservation,
         ];
-
-        if let Some(conservation) = &columns.conservation {
-            let sparks: String = columns
-                .cells
-                .iter()
-                .map(|cell| cell.map_or(" ", |cell| spark(conservation[cell.index])))
-                .collect();
-            lines.push(Line::from(sparks).set_style(theme.accent_alt));
-        }
 
         Paragraph::new(lines)
             .style(theme.base)
@@ -54,7 +59,6 @@ impl Widget for ConsensusAlignmentPane<'_> {
 }
 
 pub(crate) struct ConsensusSequenceIdPane<'a> {
-    pub(crate) session: &'a Session,
     pub(crate) theme: &'a Theme,
 }
 
@@ -62,30 +66,19 @@ impl Widget for ConsensusSequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = render_pane(self.theme, None, area, buf);
 
-        // keep Conservation at end of array
-        let labels = [
+        let lines: Vec<Line> = [
             "Reference Sequence:",
             "Consensus Sequence:",
             "Conservation:",
-        ];
-        let shown = if shows_conservation_line(self.session) {
-            3
-        } else {
-            2
-        };
-        let lines: Vec<Line> = labels[..shown]
-            .iter()
-            .map(|&label| Line::from(label.set_style(self.theme.accent)))
-            .collect();
+        ]
+        .into_iter()
+        .map(|label| Line::from(label.set_style(self.theme.accent)))
+        .collect();
 
         Paragraph::new(lines)
             .style(self.theme.base)
             .render(inner_area, buf);
     }
-}
-
-fn shows_conservation_line(session: &Session) -> bool {
-    session.grid().alignment_type() != libmsa::AlignmentType::Generic
 }
 
 #[allow(
@@ -116,11 +109,8 @@ mod tests {
         let theme = Theme::default();
         let mut buf = Buffer::empty(area);
 
-        ConsensusSequenceIdPane {
-            session,
-            theme: &theme,
-        }
-        .render(layout.consensus_sequence_id_pane, &mut buf);
+        ConsensusSequenceIdPane { theme: &theme }
+            .render(layout.consensus_sequence_id_pane, &mut buf);
         ConsensusAlignmentPane {
             session,
             columns: &columns,

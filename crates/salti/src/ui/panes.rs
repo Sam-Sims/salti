@@ -98,7 +98,7 @@ pub(super) fn render(
         theme,
     }
     .render(layout.alignment_pane, buf);
-    ConsensusSequenceIdPane { session, theme }.render(layout.consensus_sequence_id_pane, buf);
+    ConsensusSequenceIdPane { theme }.render(layout.consensus_sequence_id_pane, buf);
     ConsensusAlignmentPane {
         session,
         columns: &columns,
