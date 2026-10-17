@@ -12,7 +12,8 @@ const SAMPLE_SIZE: usize = 100;
 pub enum AlignmentType {
     Dna,
     Protein,
-    /// Neither DNA nor protein. Has no unknown symbol and no conservation
+    /// Neither DNA nor protein. Has no unknown symbol or ambiguity codes, keeps case, and has no
+    /// conservation
     Generic,
 }
 

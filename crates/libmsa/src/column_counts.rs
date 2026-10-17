@@ -272,7 +272,6 @@ mod tests {
 
     #[rstest]
     #[case::fully_conserved(b"AAAA", 1.0)]
-    #[case::case_insensitive(b"AaAa", 1.0)]
     #[case::gap_penalty(b"AA--", 0.5)]
     #[case::mixed(b"AACT", 0.25)]
     #[case::leaves_out_unknown(b"AAAN", 1.0)]

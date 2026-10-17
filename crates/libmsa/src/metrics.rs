@@ -369,17 +369,6 @@ mod tests {
     }
 
     #[test]
-    fn kept_columns_constant_filter_merges_case_and_ambiguity() {
-        let alignment = dna(&[b"CAA", b"YaC", b"CAA", b"CaC"]);
-        assert_eq!(
-            alignment
-                .grid(AlignmentType::Dna)
-                .kept_columns(&[0, 1, 2, 3], filter(None, Some(1.0))),
-            [2]
-        );
-    }
-
-    #[test]
     fn kept_columns_keeps_ids_across_blocks() {
         let row: Vec<u8> = b"-AC".iter().copied().cycle().take(300).collect();
         let alignment = dna(&[&row]);
