@@ -1,9 +1,10 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    macros::vertical,
     style::Styled,
     text::Line,
-    widgets::{Paragraph, Widget},
+    widgets::{Paragraph, Sparkline, Widget},
 };
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     ui::panes::{render_pane, stretch},
 };
 
-const CONSERVATION_SPARK_STRS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+const FULL_BAR_HEIGHT: u64 = 8;
 
 pub(crate) struct ConsensusAlignmentPane<'a> {
     pub(crate) session: &'a Session,
@@ -23,6 +24,7 @@ pub(crate) struct ConsensusAlignmentPane<'a> {
 impl Widget for ConsensusAlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = render_pane(self.theme, None, area, buf);
+        let [sequences_area, conservation_area] = inner_area.layout(&vertical![==2, ==1]);
 
         let (columns, theme) = (self.columns, self.theme);
         let reference = self.session.state().reference().map_or_else(
@@ -32,29 +34,31 @@ impl Widget for ConsensusAlignmentPane<'_> {
                 Line::from(stretch(columns, &bytes, None, theme))
             },
         );
-
-        let conservation = match &columns.conservation {
-            Some(conservation) => {
-                let sparks: String = columns
-                    .cells
-                    .iter()
-                    .map(|cell| cell.map_or(" ", |cell| spark(conservation[cell.index])))
-                    .collect();
-                Line::from(sparks).set_style(theme.accent_alt)
-            }
-            None => Line::from(
-                "Conservation needs a DNA or protein alignment.".set_style(theme.text_dim.italic()),
-            ),
-        };
         let lines = vec![
             reference,
             Line::from(stretch(columns, &columns.consensus, None, theme)),
-            conservation,
         ];
-
         Paragraph::new(lines)
             .style(theme.base)
-            .render(inner_area, buf);
+            .render(sequences_area, buf);
+
+        match &columns.conservation {
+            Some(conservation) => Sparkline::default()
+                .data(
+                    columns
+                        .cells
+                        .iter()
+                        .map(|cell| cell.map(|cell| bar_height(conservation[cell.index]))),
+                )
+                .max(FULL_BAR_HEIGHT)
+                .style(theme.accent_alt)
+                .render(conservation_area, buf),
+            None => Paragraph::new(Line::from(
+                "Conservation needs a DNA or protein alignment.".set_style(theme.text_dim.italic()),
+            ))
+            .style(theme.base)
+            .render(conservation_area, buf),
+        }
     }
 }
 
@@ -86,10 +90,9 @@ impl Widget for ConsensusSequenceIdPane<'_> {
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-fn spark(value: f64) -> &'static str {
+fn bar_height(value: f64) -> u64 {
     debug_assert!((0.0..=1.0).contains(&value));
-    let max_index = CONSERVATION_SPARK_STRS.len() - 1;
-    CONSERVATION_SPARK_STRS[(value * max_index as f64).round() as usize]
+    (value * FULL_BAR_HEIGHT as f64).round() as u64
 }
 
 #[cfg(test)]
