@@ -277,11 +277,13 @@ All commands that take string input support fuzzy matching. For example, `jump-s
 Two methods are available for consensus calculation:
 
 - `majority` - The most common character at each position, including gaps.
-- `majority-non-gap` - The most common character at each position, excluding gaps
+- `majority-non-gap` - The most common character at each position, excluding gaps.
 
-If there is a tie for most common character, the lowest ASCII value wins. For example this means `A` beats `C`, uppercase beats lowercase (`T` beats `a`), and under `majority` a gap (`-`) beats any letter.
+In DNA and protein alignments upper and lower case "vote" together as one residue, and the consensus takes whichever case is more common in that column, e.g `aaA` would give `a`. Unknown characters and ambiguity codes are always counted in the consensus calculation
 
-The default is `majority-non-gap`
+If there is a tie for most common character, the lowest ASCII value wins.
+
+The default is `majority-non-gap`.
 
 ### Translation overlay vs protein view
 
@@ -313,7 +315,7 @@ Like gap filtering - removing columns can change the visible coordinate space - 
 
 `filter-constant 99` hides columns where 99% of the positions are the same and so on. `filter-constant 0` clears the filter.
 
-NOTE: Gaps are ignored when calculating constant fractions, in DNA alignments `N` is also ignored and in protein, `X` is also ignored
+The fraction is taken over residues only: gaps, unknown characters and ambiguity codes are ignored, and DNA and protein ignore case.
 
 ### GFF support
 
