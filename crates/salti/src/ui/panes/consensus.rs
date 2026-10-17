@@ -33,22 +33,16 @@ impl Widget for ConsensusAlignmentPane<'_> {
             },
         );
 
-        let consensus: Vec<u8> = columns
-            .summaries
-            .iter()
-            .map(|s| s.consensus.unwrap_or(b' '))
-            .collect();
-
         let mut lines = vec![
             reference,
-            Line::from(stretch(columns, &consensus, None, theme)),
+            Line::from(stretch(columns, &columns.consensus, None, theme)),
         ];
 
-        if shows_conservation_line(self.session) {
+        if let Some(conservation) = &columns.conservation {
             let sparks: String = columns
                 .cells
                 .iter()
-                .map(|cell| cell.map_or(" ", |cell| spark(&columns.summaries[cell.index])))
+                .map(|cell| cell.map_or(" ", |cell| spark(conservation[cell.index])))
                 .collect();
             lines.push(Line::from(sparks).set_style(theme.accent_alt));
         }
@@ -99,12 +93,10 @@ fn shows_conservation_line(session: &Session) -> bool {
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-fn spark(summary: &libmsa::ColumnSummary) -> &'static str {
-    summary.conservation.map_or(" ", |value| {
-        debug_assert!((0.0..=1.0).contains(&value));
-        let max_index = CONSERVATION_SPARK_STRS.len() - 1;
-        CONSERVATION_SPARK_STRS[(value * max_index as f64).round() as usize]
-    })
+fn spark(value: f64) -> &'static str {
+    debug_assert!((0.0..=1.0).contains(&value));
+    let max_index = CONSERVATION_SPARK_STRS.len() - 1;
+    CONSERVATION_SPARK_STRS[(value * max_index as f64).round() as usize]
 }
 
 #[cfg(test)]

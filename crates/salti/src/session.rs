@@ -342,12 +342,22 @@ impl Session {
                 (self.grid(), columns, cells)
             }
         };
-        let summaries = grid.summaries(self.layout.rows(), &columns, self.consensus_method);
+        let method = self.consensus_method;
+        let (consensus, conservation): (Vec<u8>, Vec<Option<f64>>) = grid
+            .map_column_counts(self.layout.rows(), &columns, |counts, _| {
+                (
+                    counts.consensus(method).unwrap_or(b' '),
+                    counts.conservation(),
+                )
+            })
+            .into_iter()
+            .unzip();
         WindowColumns {
             grid,
             columns,
             cells,
-            summaries,
+            consensus,
+            conservation: conservation.into_iter().collect(),
         }
     }
 
@@ -396,7 +406,8 @@ pub struct WindowColumns<'a> {
     pub grid: libmsa::Grid<'a>,
     pub columns: Vec<usize>,
     pub cells: Vec<Option<Cell>>,
-    pub summaries: Vec<libmsa::ColumnSummary>,
+    pub consensus: Vec<u8>,
+    pub conservation: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -746,9 +757,9 @@ mod tests {
 
         let window = session.window_columns(1..1);
 
-        assert!(
-            window.columns.is_empty() && window.cells.is_empty() && window.summaries.is_empty()
-        );
+        assert!(window.columns.is_empty() && window.cells.is_empty());
+        assert_eq!(window.consensus, b"");
+        assert_eq!(window.conservation, Some(vec![]));
     }
 
     #[rstest]
@@ -759,13 +770,26 @@ mod tests {
         Ok(())
     }, b'C')]
     #[case::translation_overlay(ViewState::toggle_translation_overlay, b'M')]
-    fn window_columns_summarises_shown_rows(#[case] change: Change, #[case] expected: u8) {
+    fn window_columns_counts_shown_rows(#[case] change: Change, #[case] expected: u8) {
         let mut session = session(&[b"ATG", b"CCC", b"CCC", b"ATG", b"ATG"]);
         session.update(Position::default(), change).unwrap();
 
         let window = session.window_columns(0..1);
 
-        assert_eq!(window.summaries.len(), 1);
-        assert_eq!(window.summaries[0].consensus, Some(expected));
+        assert_eq!(window.consensus, [expected]);
+    }
+
+    #[rstest]
+    #[case::dna(b"A", Some(vec![1.0]))]
+    #[case::generic(b"#", None)]
+    fn window_columns_conservation_works(
+        #[case] sequence: &[u8],
+        #[case] expected: Option<Vec<f64>>,
+    ) {
+        let session = session(&[sequence, sequence]);
+
+        let window = session.window_columns(0..1);
+
+        assert_eq!(window.conservation, expected);
     }
 }

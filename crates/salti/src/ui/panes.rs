@@ -191,7 +191,8 @@ mod tests {
             grid: session.grid(),
             columns: vec![0],
             cells: vec![cell],
-            summaries: Vec::new(),
+            consensus: Vec::new(),
+            conservation: None,
         };
         let diff = diff.map(|byte| vec![byte]);
 
@@ -243,7 +244,8 @@ mod tests {
                     centre: true,
                 }),
             ],
-            summaries: Vec::new(),
+            consensus: Vec::new(),
+            conservation: None,
         };
 
         let text: String = stretch(&columns, b"AC", Some(b"AG"), &Theme::default())
