@@ -113,9 +113,15 @@ fn count_blocks<'c>(
 }
 
 fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
+    // a run of columns is read as a slice rather than id by id
+    let run = block
+        .windows(2)
+        .all(|pair| pair[1] == pair[0] + 1)
+        .then(|| block[0]..block[0] + block.len());
     let count_row = |mut counts: Vec<[u32; 128]>, &row: &usize| {
-        for (table, byte) in counts.iter_mut().zip(grid.cells(row, block)) {
-            table[symbol_index(byte)] += 1;
+        match &run {
+            Some(run) => add_cells(&mut counts, grid.cells_in(row, run.clone())),
+            None => add_cells(&mut counts, grid.cells(row, block)),
         }
         counts
     };
@@ -136,6 +142,12 @@ fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]
             totals
         })
         .expect("rows should not be empty above min cells")
+}
+
+fn add_cells(counts: &mut [[u32; 128]], cells: impl Iterator<Item = u8>) {
+    for (table, byte) in counts.iter_mut().zip(cells) {
+        table[symbol_index(byte)] += 1;
+    }
 }
 
 fn add_counts(total: &mut [u32; 128], other: &[u32; 128]) {
