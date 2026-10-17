@@ -124,7 +124,9 @@ impl ColumnCounts {
     }
 
     fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
-        (0..128).zip(self.counts.iter().copied())
+        (0..128)
+            .zip(self.counts.iter().copied())
+            .filter(|&(_, count)| count != 0)
     }
 }
 
