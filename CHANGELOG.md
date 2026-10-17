@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Notifications clear themselves instead of staying until the next key press. Errors show for 3s and other notifications for 1s, then fade out.
 - Cysteine (C) has its own protein colour, following Clustal's groups.
 - The minimap colours each block by the consensus of the columns it covers, using the current consensus method.
+- In DNA and protein alignments the consensus counts upper and lower case as the same residue, and shows whichever case is more common in the column.
+- Conservation calculations now ignore `N`, `X` and ambiguity codes
+- Generic alignments show the `Conservation:` row with a note that conservation needs a DNA or protein alignment, instead of hiding the row.
+- `filter-constant` ignores case and ambiguity codes (in DNA/protein alignments)
+- Diff view now ignores case in DNA and protein.
 - The GFF pane's scrollbar matches the alignment's, and scrollbars no longer draw a background.
 - Column stats (consensus, conservation, etc.) are only calculated for the part of the alignment on screen.
 - Consensus, conservation and column filtering are faster, especially on alignments with many sequences.
@@ -66,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `U` in DNA alignments is coloured like `T`. Previously it had no colour.
+- A codon of three gaps translates to `-` instead of `X`, so it counts as a gap in `filter-gaps`, conservation and the consensus. A codon with only some gaps is still `X`.
 - Pinned sequences count towards the consensus, conservation and column filters.
 - Pinning a sequence no longer lowers the sequence count in the status bar.
 - Keys no longer sometimes register twice on Windows.

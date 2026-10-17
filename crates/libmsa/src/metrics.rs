@@ -1,36 +1,33 @@
 use rayon::prelude::*;
 
-use crate::{
-    AlignmentType, Grid,
-    counts::{add_counts, count_blocks},
-    residue,
-};
+use crate::{ColumnCounts, ConsensusMethod, Grid};
+
+const PARALLEL_MIN_CELLS: usize = 1 << 16;
+const MIN_ROWS_PER_JOB: usize = 128;
+const MAX_BLOCK_COLUMNS: usize = 128;
 
 impl Grid<'_> {
-    /// Returns a summary of each id in `cols` over `rows`, in `cols` order
+    /// Counts each id in `cols` over `rows` and returns `per_column` of each, in `cols` order
     ///
-    /// Ids may be in any order and may repeat, and each occurrence is counted. With no `rows`,
-    /// every summary has no consensus and a conservation of zero
+    /// `per_column` turns one column's [`ColumnCounts`] and its id into a value, such as its
+    /// [consensus](ColumnCounts::consensus) or [entropy](ColumnCounts::entropy), or a tuple of
+    /// several. The id lets it read another cell of the column, such as the reference row's.
     ///
-    /// # Panics
-    ///
-    /// If an id in `rows` or `cols` is out of range, as for [`cells`](Self::cells)
-    pub fn summaries(
+    /// Ids may be in any order and may repeat, and each occurrence is counted. With no
+    /// `rows`, every column's counts are empty
+    pub fn map_column_counts<T: Send>(
         self,
         rows: &[usize],
         cols: &[usize],
-        method: ConsensusMethod,
-    ) -> Vec<ColumnSummary> {
-        let max_entropy = self
-            .alignment_type()
-            .conservation_alphabet_size()
-            .map(|size| f64::from(size).log2());
+        per_column: impl Fn(ColumnCounts, usize) -> T + Sync,
+    ) -> Vec<T> {
+        let alignment_type = self.alignment_type();
+        let per_column = &per_column;
         count_blocks(self, rows, cols)
-            .flat_map_iter(|(_, counts)| counts)
-            .map(|counts| ColumnSummary {
-                consensus: consensus_from_counts(&counts, method),
-                conservation: max_entropy
-                    .map(|max_entropy| conservation_from_counts(&counts, max_entropy)),
+            .flat_map_iter(move |(block, counts)| {
+                block.iter().zip(counts).map(move |(&col, counts)| {
+                    per_column(ColumnCounts::new(counts, alignment_type), col)
+                })
             })
             .collect()
     }
@@ -53,7 +50,7 @@ impl Grid<'_> {
                     pooled
                 },
             );
-        consensus_from_counts(&pooled, method)
+        ColumnCounts::new(pooled, self.alignment_type()).consensus(method)
     }
 
     /// Returns the ids of the columns that pass `filter` over `rows`, in ascending order
@@ -69,69 +66,13 @@ impl Grid<'_> {
             return cols;
         }
 
-        let alignment_type = self.alignment_type();
-        count_blocks(self, rows, &cols)
-            .flat_map_iter(|(block, counts)| {
-                block
-                    .iter()
-                    .zip(counts)
-                    .filter(move |(_, counts)| {
-                        let gap_ok = filter
-                            .max_gap_fraction
-                            .is_none_or(|threshold| gap_fraction_from_counts(counts) <= threshold);
-                        let const_ok = filter.min_const_fraction.is_none_or(|threshold| {
-                            max_counted_symbol_fraction_from_counts(counts, alignment_type)
-                                .is_none_or(|fraction| fraction < threshold)
-                        });
-                        gap_ok && const_ok
-                    })
-                    .map(|(&col, _)| col)
-            })
-            .collect()
+        self.map_column_counts(rows, &cols, |counts, col| {
+            filter.keeps(&counts).then_some(col)
+        })
+        .into_iter()
+        .flatten()
+        .collect()
     }
-}
-
-/// The consensus and conservation of one column
-#[derive(Debug, Clone, PartialEq)]
-pub struct ColumnSummary {
-    /// The most common byte under the chosen [`ConsensusMethod`]
-    ///
-    /// `None` when nothing is counted, such as an all-gap column under
-    /// [`ConsensusMethod::MajorityNonGap`]
-    pub consensus: Option<u8>,
-    /// How conserved the column is, from 0 to 1
-    ///
-    /// One minus the entropy of the residues that aren't gaps (case-insensitive) over the
-    /// alphabet's maximum, times the fraction of cells that aren't gaps. `None` for generic
-    /// grids, which have no alphabet
-    pub conservation: Option<f64>,
-}
-
-/// How the consensus byte of a column is chosen
-///
-/// # Ties
-///
-/// When several bytes share the highest count, the lowest byte wins. Bytes are compared as
-/// they are, so `A` beats `C`, uppercase beats lowercase, and under
-/// [`ConsensusMethod::Majority`] a gap (`-`) or `*` beats every letter
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    strum::Display,
-    strum::EnumString,
-    strum::VariantArray,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum ConsensusMethod {
-    /// The most common byte, gaps included
-    Majority,
-    /// The most common byte that isn't a gap
-    #[default]
-    MajorityNonGap,
 }
 
 /// Rules for hiding columns. `None` turns a rule off, and both fractions are in `0.0..=1.0`
@@ -140,7 +81,8 @@ pub struct ColumnFilter {
     /// Hides columns whose fraction of gaps is above this
     pub max_gap_fraction: Option<f64>,
     /// Hides columns whose most common residue makes up at least this fraction of the
-    /// residues that aren't gaps or unknown
+    /// residues. Gaps, unknown symbols and ambiguity codes are left out, and DNA and protein
+    /// ignore case
     pub min_const_fraction: Option<f64>,
 }
 
@@ -149,118 +91,85 @@ impl ColumnFilter {
     pub fn is_active(self) -> bool {
         self.max_gap_fraction.is_some() || self.min_const_fraction.is_some()
     }
-}
 
-fn gap_fraction_from_counts(counts: &[u32; 128]) -> f64 {
-    let total: u32 = counts.iter().sum();
-    let gap_count: u32 = symbol_counts(counts)
-        .filter(|&(symbol, _)| residue::is_gap(symbol))
-        .map(|(_, count)| count)
-        .sum();
-
-    if total == 0 {
-        0.0
-    } else {
-        f64::from(gap_count) / f64::from(total)
+    fn keeps(self, counts: &ColumnCounts) -> bool {
+        self.max_gap_fraction
+            .is_none_or(|threshold| counts.gap_fraction() <= threshold)
+            && self.min_const_fraction.is_none_or(|threshold| {
+                counts
+                    .constant_fraction()
+                    .is_none_or(|fraction| fraction < threshold)
+            })
     }
 }
 
-fn max_counted_symbol_fraction_from_counts(
-    counts: &[u32; 128],
-    kind: AlignmentType,
-) -> Option<f64> {
-    let mut counted_total = 0u32;
-    let mut max_count = 0u32;
-
-    for (symbol, count) in symbol_counts(counts) {
-        if count == 0 || residue::is_gap(symbol) || residue::is_unknown(symbol, kind) {
-            continue;
-        }
-
-        counted_total += count;
-        max_count = max_count.max(count);
-    }
-
-    (counted_total != 0).then(|| f64::from(max_count) / f64::from(counted_total))
+fn count_blocks<'c>(
+    grid: Grid<'_>,
+    rows: &[usize],
+    cols: &'c [usize],
+) -> impl IndexedParallelIterator<Item = (&'c [usize], Vec<[u32; 128]>)> {
+    cols.par_chunks(MAX_BLOCK_COLUMNS)
+        .map(move |block| (block, count_rows(grid, rows, block)))
 }
 
-fn consensus_from_counts(counts: &[u32; 128], method: ConsensusMethod) -> Option<u8> {
-    let exclude_gap = matches!(method, ConsensusMethod::MajorityNonGap);
-    let mut max_count = 0u32;
-    let mut consensus = None;
-
-    for (symbol, count) in symbol_counts(counts) {
-        if count > max_count && !(exclude_gap && residue::is_gap(symbol)) {
-            max_count = count;
-            consensus = Some(symbol);
+fn count_rows(grid: Grid<'_>, rows: &[usize], block: &[usize]) -> Vec<[u32; 128]> {
+    // a run of columns is read as a slice rather than id by id
+    let run = block
+        .windows(2)
+        .all(|pair| pair[1] == pair[0] + 1)
+        .then(|| block[0]..block[0] + block.len());
+    let count_row = |mut counts: Vec<[u32; 128]>, &row: &usize| {
+        match &run {
+            Some(run) => add_cells(&mut counts, grid.cells_in(row, run.clone())),
+            None => add_cells(&mut counts, grid.cells(row, block)),
         }
+        counts
+    };
+
+    // only go parallel if we actually need it
+    if rows.len().saturating_mul(block.len()) < PARALLEL_MIN_CELLS {
+        return rows.iter().fold(vec![[0; 128]; block.len()], count_row);
     }
 
-    consensus
+    rows.par_iter()
+        .with_min_len(MIN_ROWS_PER_JOB)
+        .fold(|| vec![[0; 128]; block.len()], count_row)
+        .reduce_with(|mut totals, other| {
+            debug_assert_eq!(totals.len(), other.len());
+            for (total, other) in totals.iter_mut().zip(&other) {
+                add_counts(total, other);
+            }
+            totals
+        })
+        .expect("rows should not be empty above min cells")
 }
 
-fn conservation_from_counts(counts: &[u32; 128], max_entropy: f64) -> f64 {
-    let mut total = 0u32;
-    let mut gap_count = 0u32;
-    let mut merged_non_gap_counts = [0u32; 128];
-
-    for (symbol, count) in symbol_counts(counts) {
-        if count == 0 {
-            continue;
-        }
-
-        total += count;
-        if residue::is_gap(symbol) {
-            gap_count += count;
-        } else {
-            merged_non_gap_counts[usize::from(symbol.to_ascii_uppercase())] += count;
-        }
+fn add_cells(counts: &mut [[u32; 128]], cells: impl Iterator<Item = u8>) {
+    for (table, byte) in counts.iter_mut().zip(cells) {
+        table[symbol_index(byte)] += 1;
     }
-
-    let non_gap_total = total - gap_count;
-    if non_gap_total == 0 {
-        return 0.0;
-    }
-
-    let mut entropy = 0.0f64;
-    let non_gap_total_f = f64::from(non_gap_total);
-    for &count in &merged_non_gap_counts {
-        if count == 0 {
-            continue;
-        }
-        let frequency = f64::from(count) / non_gap_total_f;
-        entropy -= frequency * frequency.log2();
-    }
-
-    let gap_fraction = f64::from(gap_count) / f64::from(total);
-    let conservation = (1.0 - entropy / max_entropy).max(0.0);
-    conservation * (1.0 - gap_fraction)
 }
 
-fn symbol_counts(counts: &[u32; 128]) -> impl Iterator<Item = (u8, u32)> + '_ {
-    (0..128).zip(counts.iter().copied())
+fn add_counts(total: &mut [u32; 128], other: &[u32; 128]) {
+    for (total, other) in total.iter_mut().zip(other) {
+        *total += other;
+    }
+}
+
+#[inline]
+fn symbol_index(byte: u8) -> usize {
+    debug_assert!(byte.is_ascii(), "sequence bytes are ASCII");
+    usize::from(byte & 0x7f)
 }
 
 #[cfg(test)]
 #[allow(clippy::float_cmp)]
 mod tests {
+    use rayon::prelude::*;
     use rstest::rstest;
 
-    use super::{
-        ColumnFilter, ConsensusMethod, consensus_from_counts, conservation_from_counts,
-        gap_fraction_from_counts, max_counted_symbol_fraction_from_counts,
-    };
-    use crate::{Alignment, AlignmentType, ReadingFrame, Sequence};
-
-    const DNA_MAX_ENTROPY: f64 = 2.0;
-
-    fn counts_for(symbols: &[u8]) -> [u32; 128] {
-        let mut counts = [0u32; 128];
-        for &symbol in symbols {
-            counts[usize::from(symbol)] += 1;
-        }
-        counts
-    }
+    use super::{ColumnFilter, MAX_BLOCK_COLUMNS, add_counts, count_blocks, symbol_index};
+    use crate::{Alignment, AlignmentType, ConsensusMethod, Grid, ReadingFrame, Sequence};
 
     fn dna(sequences: &[&[u8]]) -> Alignment {
         Alignment::new(
@@ -285,81 +194,92 @@ mod tests {
     #[case::subset_rows(&[2], &[0, 1, 2, 3], b"TTTA")]
     #[case::cols_unsorted_repeated(&[0, 1, 2], &[3, 0, 3], b"AAA")]
     #[case::rows_repeated(&[2, 2, 0], &[0], b"T")]
-    fn summaries_works(#[case] rows: &[usize], #[case] cols: &[usize], #[case] expected: &[u8]) {
+    fn map_column_counts_works(
+        #[case] rows: &[usize],
+        #[case] cols: &[usize],
+        #[case] expected: &[u8],
+    ) {
         let alignment = sample();
-        let consensus: Vec<_> = alignment
-            .grid(AlignmentType::Dna)
-            .summaries(rows, cols, ConsensusMethod::MajorityNonGap)
-            .into_iter()
-            .map(|summary| summary.consensus)
-            .collect();
+        let consensus =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(rows, cols, |counts, _| {
+                    counts.consensus(ConsensusMethod::MajorityNonGap)
+                });
         let expected: Vec<_> = expected.iter().copied().map(Some).collect();
         assert_eq!(consensus, expected);
     }
 
     #[test]
-    fn summaries_is_empty() {
+    fn map_column_counts_passes_column_ids() {
         let alignment = sample();
-        let summaries =
+        let ids =
             alignment
                 .grid(AlignmentType::Dna)
-                .summaries(&[0, 1], &[], ConsensusMethod::Majority);
-        assert_eq!(summaries, []);
+                .map_column_counts(&[0], &[3, 0, 3], |_, col| col);
+        assert_eq!(ids, [3, 0, 3]);
     }
 
     #[test]
-    fn summaries_without_rows_has_no_consensus() {
+    fn map_column_counts_is_empty() {
         let alignment = sample();
-        let summaries =
+        let ids = alignment
+            .grid(AlignmentType::Dna)
+            .map_column_counts(&[0, 1], &[], |_, col| col);
+        assert_eq!(ids, []);
+    }
+
+    #[test]
+    fn map_column_counts_without_rows_counts_nothing() {
+        let alignment = sample();
+        let consensus =
             alignment
                 .grid(AlignmentType::Dna)
-                .summaries(&[], &[0, 1], ConsensusMethod::Majority);
-        for summary in summaries {
-            assert_eq!(summary.consensus, None);
-            assert_eq!(summary.conservation, Some(0.0));
-        }
+                .map_column_counts(&[], &[0, 1], |counts, _| {
+                    counts.consensus(ConsensusMethod::Majority)
+                });
+        assert_eq!(consensus, [None, None]);
     }
 
     #[rstest]
     #[case::dna(AlignmentType::Dna, Some(1.0))]
     #[case::generic(AlignmentType::Generic, None)]
-    fn summaries_uses_grid_alignment_type(
+    fn map_column_counts_uses_grid_alignment_type(
         #[case] alignment_type: AlignmentType,
         #[case] expected: Option<f64>,
     ) {
         let alignment = dna(&[b"A", b"A"]);
-        let summaries =
+        let conservation =
             alignment
                 .grid(alignment_type)
-                .summaries(&[0, 1], &[0], ConsensusMethod::Majority);
-        assert_eq!(summaries[0].conservation, expected);
+                .map_column_counts(&[0, 1], &[0], |counts, _| counts.conservation());
+        assert_eq!(conservation, [expected]);
     }
 
     #[test]
-    fn summaries_keeps_cols_order_across_blocks() {
+    fn map_column_counts_keeps_cols_order_across_blocks() {
         let row: Vec<u8> = b"ACGT".iter().copied().cycle().take(300).collect();
         let alignment = dna(&[&row]);
         let cols: Vec<usize> = (0..300).rev().collect();
 
-        let consensus: Vec<_> = alignment
-            .grid(AlignmentType::Dna)
-            .summaries(&[0], &cols, ConsensusMethod::Majority)
-            .into_iter()
-            .map(|summary| summary.consensus)
-            .collect();
+        let consensus =
+            alignment
+                .grid(AlignmentType::Dna)
+                .map_column_counts(&[0], &cols, |counts, _| {
+                    counts.consensus(ConsensusMethod::Majority)
+                });
         let expected: Vec<_> = cols.iter().map(|&col| Some(row[col])).collect();
         assert_eq!(consensus, expected);
     }
 
     #[test]
-    fn summaries_reads_translated_grid() {
+    fn map_column_counts_reads_translated_grid() {
         let alignment = dna(&[b"ATGCCC"]);
-        let summaries = alignment.translated_grid(ReadingFrame::Frame1).summaries(
-            &[0],
-            &[1, 0],
-            ConsensusMethod::Majority,
-        );
-        let consensus: Vec<_> = summaries.iter().map(|summary| summary.consensus).collect();
+        let consensus = alignment
+            .translated_grid(ReadingFrame::Frame1)
+            .map_column_counts(&[0], &[1, 0], |counts, _| {
+                counts.consensus(ConsensusMethod::Majority)
+            });
         assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
     }
 
@@ -406,96 +326,6 @@ mod tests {
             alignment
                 .grid(AlignmentType::Dna)
                 .consensus(rows, cols, ConsensusMethod::Majority),
-            None
-        );
-    }
-
-    #[rstest]
-    #[case::single(ConsensusMethod::Majority, b"AAAA", b'A')]
-    #[case::majority_counts_gaps(ConsensusMethod::Majority, b"---AT", b'-')]
-    #[case::non_gap_skips_gaps(ConsensusMethod::MajorityNonGap, b"---AAT", b'A')]
-    #[case::higher_count_beats_lower_byte(ConsensusMethod::Majority, b"ACCTTT", b'T')]
-    #[case::tie_picks_lowest_byte(ConsensusMethod::Majority, b"TTCCAA", b'A')]
-    #[case::tie_uppercase_beats_lowercase(ConsensusMethod::Majority, b"aaTT", b'T')]
-    #[case::majority_tie_prefers_gap(ConsensusMethod::Majority, b"--AA", b'-')]
-    #[case::non_gap_tie_ignores_gap(ConsensusMethod::MajorityNonGap, b"---GGTT", b'G')]
-    fn consensus_from_counts_works(
-        #[case] method: ConsensusMethod,
-        #[case] symbols: &[u8],
-        #[case] expected: u8,
-    ) {
-        assert_eq!(
-            consensus_from_counts(&counts_for(symbols), method),
-            Some(expected)
-        );
-    }
-
-    #[rstest]
-    #[case::empty_majority(ConsensusMethod::Majority, b"")]
-    #[case::empty_non_gap(ConsensusMethod::MajorityNonGap, b"")]
-    #[case::all_gaps_non_gap(ConsensusMethod::MajorityNonGap, b"---")]
-    fn consensus_from_counts_is_none(#[case] method: ConsensusMethod, #[case] symbols: &[u8]) {
-        assert_eq!(consensus_from_counts(&counts_for(symbols), method), None);
-    }
-
-    #[rstest]
-    #[case::fully_conserved(b"AAAA", 1.0)]
-    #[case::case_insensitive(b"AaAa", 1.0)]
-    #[case::gap_penalty(b"AA--", 0.5)]
-    #[case::mixed(b"AACT", 0.25)]
-    fn conservation_from_counts_works(#[case] symbols: &[u8], #[case] expected: f64) {
-        assert_eq!(
-            conservation_from_counts(&counts_for(symbols), DNA_MAX_ENTROPY),
-            expected
-        );
-    }
-
-    #[rstest]
-    #[case::empty(b"")]
-    #[case::all_gaps(b"----")]
-    #[case::max_entropy(b"ACGT")]
-    #[case::clamped_above_max_entropy(b"ACGTN")]
-    fn conservation_from_counts_is_zero(#[case] symbols: &[u8]) {
-        assert_eq!(
-            conservation_from_counts(&counts_for(symbols), DNA_MAX_ENTROPY),
-            0.0
-        );
-    }
-
-    #[rstest]
-    #[case::no_gaps(b"AAAA", 0.0)]
-    #[case::half_gaps(b"AA--", 0.5)]
-    #[case::all_gaps(b"----", 1.0)]
-    #[case::empty(b"", 0.0)]
-    fn gap_fraction_from_counts_works(#[case] symbols: &[u8], #[case] expected: f64) {
-        assert_eq!(gap_fraction_from_counts(&counts_for(symbols)), expected);
-    }
-
-    #[rstest]
-    #[case::dna_ignores_gaps_and_n(AlignmentType::Dna, b"AANn--T", 2.0 / 3.0)]
-    #[case::protein_ignores_gaps_and_x(AlignmentType::Protein, b"MMXx--K", 2.0 / 3.0)]
-    #[case::generic_counts_n(AlignmentType::Generic, b"NN-A", 2.0 / 3.0)]
-    #[case::constant(AlignmentType::Dna, b"AAAA", 1.0)]
-    fn max_counted_symbol_fraction_from_counts_works(
-        #[case] alignment_type: AlignmentType,
-        #[case] symbols: &[u8],
-        #[case] expected: f64,
-    ) {
-        assert_eq!(
-            max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
-            Some(expected)
-        );
-    }
-
-    #[rstest]
-    #[case::empty(AlignmentType::Dna, b"")]
-    #[case::only_ignored(AlignmentType::Dna, b"-Nn")]
-    fn max_counted_symbol_fraction_from_counts_is_none(
-        #[case] alignment_type: AlignmentType,
-        #[case] symbols: &[u8],
-    ) {
-        assert_eq!(
-            max_counted_symbol_fraction_from_counts(&counts_for(symbols), alignment_type),
             None
         );
     }
@@ -573,5 +403,67 @@ mod tests {
                 .kept_columns(&[0, 1], filter(None, Some(1.0))),
             [1]
         );
+    }
+
+    const ROWS: usize = 600;
+    const COLS: usize = 300;
+
+    fn alignment() -> Alignment {
+        Alignment::new(
+            (0..ROWS)
+                .map(|row| Sequence {
+                    id: format!("s{row}"),
+                    residues: (0..COLS)
+                        .map(|col| b"ACGT-"[(row * 7 + col * 13) % 5])
+                        .collect(),
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    fn expected_counts(grid: Grid<'_>, rows: &[usize], cols: &[usize]) -> Vec<[u32; 128]> {
+        cols.iter()
+            .map(|&col| {
+                let mut counts = [0; 128];
+                for &row in rows {
+                    counts[symbol_index(grid.cell(row, col))] += 1;
+                }
+                counts
+            })
+            .collect()
+    }
+
+    #[rstest]
+    #[case::single_block((0..3).collect(), vec![2, 0, 2])]
+    #[case::across_blocks((0..3).collect(), (0..COLS).rev().collect())]
+    #[case::parallel_rows((0..ROWS).collect(), (0..200).collect())]
+    #[case::repeated_rows((0..ROWS).chain([5, 5]).collect(), (0..200).collect())]
+    #[case::no_rows(vec![], (0..200).collect())]
+    #[case::no_cols((0..3).collect(), vec![])]
+    fn count_blocks_works(#[case] rows: Vec<usize>, #[case] cols: Vec<usize>) {
+        let alignment = alignment();
+        let grid = alignment.grid(AlignmentType::Dna);
+
+        let (blocks, counts): (Vec<_>, Vec<_>) = count_blocks(grid, &rows, &cols).unzip();
+
+        assert_eq!(blocks.concat(), cols);
+        assert!(blocks.iter().all(|block| block.len() <= MAX_BLOCK_COLUMNS));
+        assert_eq!(counts.concat(), expected_counts(grid, &rows, &cols));
+    }
+
+    #[test]
+    fn add_counts_works() {
+        let mut total = [0; 128];
+        total[symbol_index(b'A')] = 2;
+        let mut other = [0; 128];
+        other[symbol_index(b'A')] = 1;
+        other[symbol_index(b'C')] = 3;
+
+        add_counts(&mut total, &other);
+
+        assert_eq!(total[symbol_index(b'A')], 3);
+        assert_eq!(total[symbol_index(b'C')], 3);
+        assert_eq!(total.iter().sum::<u32>(), 6);
     }
 }

@@ -5,5 +5,5 @@ expression: "consensus_text(&[b\"ACDEACDEACDE\", b\"ACDEACDEACDE\"], |state|\n{\
 ┌──────────────────┬───────────────────────────────────────────────────────────────────────────────┐
 │Reference Sequence│ACDEACDEACDE                                                                   │
 │Consensus Sequence│ACDEACDEACDE                                                                   │
-│                  │                                                                               │
+│Conservation:     │Conservation needs a DNA or protein alignment.                                 │
 └──────────────────┴───────────────────────────────────────────────────────────────────────────────┘

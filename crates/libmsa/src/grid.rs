@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use rayon::iter::Either;
 
 use crate::{Alignment, AlignmentType, ReadingFrame, translation::codon_at};
@@ -43,6 +45,16 @@ impl Grid<'_> {
                     .map(move |&col| *residues.get(col).expect("col id should be below the width")),
             ),
             Some(frame) => Either::Right(cols.iter().map(move |&protein_col| {
+                codon_at(residues, frame.nt_range(protein_col), frame.strand())
+            })),
+        }
+    }
+
+    pub(crate) fn cells_in(self, row: usize, cols: Range<usize>) -> impl Iterator<Item = u8> {
+        let residues = &self.alignment.row(row).residues;
+        match self.frame {
+            None => Either::Left(residues[cols].iter().copied()),
+            Some(frame) => Either::Right(cols.map(move |protein_col| {
                 codon_at(residues, frame.nt_range(protein_col), frame.strand())
             })),
         }
@@ -139,6 +151,21 @@ mod tests {
 
         assert_eq!(grid.cells(1, &[0, 1]).collect::<Vec<_>>(), b"FP");
         assert_eq!(grid.cells(0, &[0, 1]).collect::<Vec<_>>(), b"MK");
+    }
+
+    #[rstest]
+    fn cells_in_same_as_cells(
+        #[values(None, Some(ReadingFrame::Frame2), Some(ReadingFrame::Frame1Reverse))]
+        frame: Option<ReadingFrame>,
+    ) {
+        let alignment = dna(&[b"ATGCCCTAAG"]);
+        let grid = grid(&alignment, frame);
+        for start in 0..grid.width() {
+            for end in start..=grid.width() {
+                let cols: Vec<usize> = (start..end).collect();
+                assert!(grid.cells_in(0, start..end).eq(grid.cells(0, &cols)));
+            }
+        }
     }
 
     #[rstest]

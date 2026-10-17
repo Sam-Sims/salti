@@ -2,7 +2,7 @@
 
 use crate::alignment_type::AlignmentType;
 
-const GAP: u8 = b'-';
+pub(crate) const GAP: u8 = b'-';
 
 pub(crate) const UNKNOWN_AMINO_ACID: u8 = b'X';
 
@@ -28,22 +28,44 @@ const fn build_nucleotide_index_table() -> [u8; 256] {
     table
 }
 
-/// Returns true if `byte` is a gap. Only `-` is a gap
-#[inline]
-pub const fn is_gap(byte: u8) -> bool {
-    byte == GAP
+/// Biological meaning of a byte
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+pub enum Class {
+    /// `-`
+    Gap,
+    /// The unknown symbol, which says nothing about the residue: `N` for DNA, `X` for
+    /// protein, either case
+    Unknown,
+    /// A DNA ambiguity code, which could be one of several bases: `R Y S W K M B D H V`,
+    /// either case
+    Ambiguous,
+    /// Anything else, including bytes outside the alphabet
+    Residue,
 }
 
-/// Returns true if `byte` is the unknown symbol for `kind`
+/// Returns what `byte` is in an alignment of `kind`
 ///
-/// DNA uses `N` or `n`, protein uses `X` or `x`, and generic has none
+/// `-` is a gap for every type. DNA has an unknown symbol and ambiguity codes, protein has
+/// only an unknown symbol, and generic has neither. Case is ignored
 #[inline]
-pub const fn is_unknown(byte: u8, kind: AlignmentType) -> bool {
-    match kind {
-        AlignmentType::Dna => matches!(byte, b'N' | b'n'),
-        AlignmentType::Protein => matches!(byte, b'X' | b'x'),
-        AlignmentType::Generic => false,
+pub const fn classify(byte: u8, kind: AlignmentType) -> Class {
+    match (kind, byte.to_ascii_uppercase()) {
+        (_, GAP) => Class::Gap,
+        (AlignmentType::Dna, b'N') | (AlignmentType::Protein, UNKNOWN_AMINO_ACID) => Class::Unknown,
+        (
+            AlignmentType::Dna,
+            b'R' | b'Y' | b'S' | b'W' | b'K' | b'M' | b'B' | b'D' | b'H' | b'V',
+        ) => Class::Ambiguous,
+        _ => Class::Residue,
     }
+}
+
+/// Returns true if `a` and `b` are the same residue for `kind`
+///
+/// DNA and protein ignore case, generic compares bytes exactly
+#[inline]
+pub const fn same_residue(a: u8, b: u8, kind: AlignmentType) -> bool {
+    fold(a, kind) == fold(b, kind)
 }
 
 /// Returns the index of a nucleotide in a codon, case-insensitive
@@ -57,22 +79,18 @@ pub const fn nucleotide_index(byte: u8) -> Option<usize> {
     }
 }
 
-/// Returns true if `byte` is an IUPAC ambiguity code for two or more bases, case-insensitive
-///
-/// `R`, `Y`, `S`, `W`, `K`, `M`, `B`, `D`, `H` and `V`. `N` is the unknown symbol (see [`is_unknown`])
 #[inline]
-pub const fn is_ambiguous_nucleotide(byte: u8) -> bool {
-    matches!(
-        byte.to_ascii_uppercase(),
-        b'R' | b'Y' | b'S' | b'W' | b'K' | b'M' | b'B' | b'D' | b'H' | b'V'
-    )
+pub(crate) const fn is_gap(byte: u8) -> bool {
+    byte == GAP
 }
 
 #[inline]
 pub(crate) const fn is_detection_nucleotide(byte: u8) -> bool {
     nucleotide_index(byte).is_some()
-        || is_ambiguous_nucleotide(byte)
-        || is_unknown(byte, AlignmentType::Dna)
+        || matches!(
+            classify(byte, AlignmentType::Dna),
+            Class::Unknown | Class::Ambiguous
+        )
 }
 
 #[inline]
@@ -98,13 +116,21 @@ pub(crate) const fn is_detection_protein(byte: u8) -> bool {
     )
 }
 
+#[inline]
+pub(crate) const fn fold(byte: u8, kind: AlignmentType) -> u8 {
+    match kind {
+        AlignmentType::Dna | AlignmentType::Protein => byte.to_ascii_uppercase(),
+        AlignmentType::Generic => byte,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
     use super::{
-        UNKNOWN_AMINO_ACID, is_ambiguous_nucleotide, is_detection_nucleotide, is_detection_protein,
-        is_gap, is_unknown, nucleotide_index,
+        Class, UNKNOWN_AMINO_ACID, classify, is_detection_nucleotide, is_detection_protein, is_gap,
+        nucleotide_index, same_residue,
     };
     use crate::alignment_type::AlignmentType;
 
@@ -122,23 +148,22 @@ mod tests {
     }
 
     #[rstest]
-    #[case::dna_upper(AlignmentType::Dna, b'N')]
-    #[case::dna_lower(AlignmentType::Dna, b'n')]
-    #[case::protein_upper(AlignmentType::Protein, b'X')]
-    #[case::protein_lower(AlignmentType::Protein, b'x')]
-    #[case::translated_unknown(AlignmentType::Protein, UNKNOWN_AMINO_ACID)]
-    fn is_unknown_works(#[case] kind: AlignmentType, #[case] byte: u8) {
-        assert!(is_unknown(byte, kind));
+    #[case::dna_same(AlignmentType::Dna, b'A', b'A')]
+    #[case::dna_case(AlignmentType::Dna, b'a', b'A')]
+    #[case::dna_unknown_case(AlignmentType::Dna, b'n', b'N')]
+    #[case::protein_case(AlignmentType::Protein, b'l', b'L')]
+    #[case::generic_same(AlignmentType::Generic, b'a', b'a')]
+    fn same_residue_works(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
+        assert!(same_residue(a, b, kind));
     }
 
     #[rstest]
-    #[case::dna_x(AlignmentType::Dna, b'X')]
-    #[case::protein_n(AlignmentType::Protein, b'N')]
-    #[case::generic_n(AlignmentType::Generic, b'N')]
-    #[case::generic_x(AlignmentType::Generic, b'X')]
-    #[case::gap(AlignmentType::Dna, b'-')]
-    fn is_unknown_rejects(#[case] kind: AlignmentType, #[case] byte: u8) {
-        assert!(!is_unknown(byte, kind));
+    #[case::dna_different(AlignmentType::Dna, b'A', b'G')]
+    #[case::unknown_vs_base(AlignmentType::Dna, b'N', b'A')]
+    #[case::gap_vs_residue(AlignmentType::Dna, b'-', b'A')]
+    #[case::generic_case(AlignmentType::Generic, b'a', b'A')]
+    fn same_residue_rejects(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
+        assert!(!same_residue(a, b, kind));
     }
 
     #[rstest]
@@ -159,24 +184,6 @@ mod tests {
     #[case::non_ascii(0x80)]
     fn nucleotide_index_is_none(#[case] byte: u8) {
         assert_eq!(nucleotide_index(byte), None);
-    }
-
-    #[rstest]
-    #[case::two_bases(b'R')]
-    #[case::three_bases(b'V')]
-    #[case::lowercase(b'k')]
-    fn is_ambiguous_nucleotide_works(#[case] byte: u8) {
-        assert!(is_ambiguous_nucleotide(byte));
-    }
-
-    #[rstest]
-    #[case::base(b'A')]
-    #[case::rna(b'U')]
-    #[case::unknown(b'N')]
-    #[case::gap(b'-')]
-    #[case::protein_only(b'E')]
-    fn is_ambiguous_nucleotide_rejects(#[case] byte: u8) {
-        assert!(!is_ambiguous_nucleotide(byte));
     }
 
     #[rstest]
@@ -213,5 +220,33 @@ mod tests {
     #[case::non_ascii(0x80)]
     fn is_detection_protein_rejects(#[case] byte: u8) {
         assert!(!is_detection_protein(byte));
+    }
+
+    #[rstest]
+    #[case::dna_gap(AlignmentType::Dna, b'-', Class::Gap)]
+    #[case::dna_unknown(AlignmentType::Dna, b'N', Class::Unknown)]
+    #[case::dna_unknown_lower(AlignmentType::Dna, b'n', Class::Unknown)]
+    #[case::dna_ambiguous(AlignmentType::Dna, b'R', Class::Ambiguous)]
+    #[case::dna_ambiguous_lower(AlignmentType::Dna, b'y', Class::Ambiguous)]
+    #[case::dna_base(AlignmentType::Dna, b'a', Class::Residue)]
+    #[case::dna_outside_alphabet(AlignmentType::Dna, b'?', Class::Residue)]
+    #[case::protein_gap(AlignmentType::Protein, b'-', Class::Gap)]
+    #[case::protein_unknown(AlignmentType::Protein, b'x', Class::Unknown)]
+    #[case::protein_r_is_residue(AlignmentType::Protein, b'R', Class::Residue)]
+    #[case::protein_n_is_residue(AlignmentType::Protein, b'N', Class::Residue)]
+    #[case::generic_gap(AlignmentType::Generic, b'-', Class::Gap)]
+    #[case::generic_n_is_residue(AlignmentType::Generic, b'N', Class::Residue)]
+    #[case::generic_ambiguous_is_residue(AlignmentType::Generic, b'R', Class::Residue)]
+    #[case::dna_three_base_ambiguous(AlignmentType::Dna, b'V', Class::Ambiguous)]
+    #[case::dna_ambiguous_k_lower(AlignmentType::Dna, b'k', Class::Ambiguous)]
+    #[case::dna_rna_is_residue(AlignmentType::Dna, b'U', Class::Residue)]
+    #[case::dna_protein_only_is_residue(AlignmentType::Dna, b'E', Class::Residue)]
+    #[case::dna_x_is_residue(AlignmentType::Dna, b'X', Class::Residue)]
+    #[case::dna_dot_is_residue(AlignmentType::Dna, b'.', Class::Residue)]
+    #[case::protein_unknown_upper(AlignmentType::Protein, b'X', Class::Unknown)]
+    #[case::translated_unknown(AlignmentType::Protein, UNKNOWN_AMINO_ACID, Class::Unknown)]
+    #[case::generic_x_is_residue(AlignmentType::Generic, b'X', Class::Residue)]
+    fn classify_works(#[case] kind: AlignmentType, #[case] byte: u8, #[case] expected: Class) {
+        assert_eq!(classify(byte, kind), expected);
     }
 }

@@ -1,4 +1,7 @@
-use libmsa::{AlignmentType, residue};
+use libmsa::{
+    AlignmentType,
+    residue::{self, Class},
+};
 use ratatui::style::{Color, Style};
 
 // Generated from iwanthue
@@ -122,26 +125,24 @@ pub struct ResidueStyles {
 
 impl ResidueStyles {
     pub fn style(&self, alignment_type: AlignmentType, byte: u8) -> Style {
-        match alignment_type {
-            AlignmentType::Dna => self.dna(byte),
-            AlignmentType::Protein => self.protein(byte),
-            AlignmentType::Generic => generic(byte),
+        match (alignment_type, residue::classify(byte, alignment_type)) {
+            (AlignmentType::Generic, _) => generic(byte),
+            (_, Class::Gap) => self.gap,
+            (_, Class::Unknown) => self.unknown,
+            (_, Class::Ambiguous) => self.ambiguity,
+            (AlignmentType::Dna, Class::Residue) => self.base(byte),
+            (AlignmentType::Protein, Class::Residue) => self.amino_acid(byte),
         }
     }
 
-    fn dna(&self, byte: u8) -> Style {
-        match residue::nucleotide_index(byte) {
-            Some(index) => [self.a, self.t, self.c, self.g][index],
-            None if residue::is_ambiguous_nucleotide(byte) => self.ambiguity,
-            None if residue::is_unknown(byte, AlignmentType::Dna) => self.unknown,
-            None if residue::is_gap(byte) => self.gap,
-            None => Style::new(),
-        }
+    fn base(&self, byte: u8) -> Style {
+        residue::nucleotide_index(byte)
+            .map_or_else(Style::new, |index| [self.a, self.t, self.c, self.g][index])
     }
 
     // groups from clustal
     // http://www.jalview.org/help/html/colourSchemes/clustal.html
-    fn protein(&self, byte: u8) -> Style {
+    fn amino_acid(&self, byte: u8) -> Style {
         match byte.to_ascii_uppercase() {
             b'A' | b'V' | b'L' | b'I' | b'M' | b'F' | b'W' => self.hydrophobic,
             b'C' => self.cysteine,
@@ -151,8 +152,6 @@ impl ResidueStyles {
             b'G' => self.glycine,
             b'P' => self.proline,
             b'H' | b'Y' => self.aromatic,
-            _ if residue::is_unknown(byte, AlignmentType::Protein) => self.unknown,
-            _ if residue::is_gap(byte) => self.gap,
             _ => Style::new(),
         }
     }

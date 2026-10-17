@@ -8,6 +8,7 @@ pub(crate) mod sequence_id;
 
 use std::ops::Range;
 
+use libmsa::residue;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -97,7 +98,7 @@ pub(super) fn render(
         theme,
     }
     .render(layout.alignment_pane, buf);
-    ConsensusSequenceIdPane { session, theme }.render(layout.consensus_sequence_id_pane, buf);
+    ConsensusSequenceIdPane { theme }.render(layout.consensus_sequence_id_pane, buf);
     ConsensusAlignmentPane {
         session,
         columns: &columns,
@@ -121,7 +122,8 @@ fn stretch(
                 return Span::raw(" ");
             };
             let byte = bytes[index];
-            let matches = diff.is_some_and(|diff| diff[index] == byte);
+            let matches =
+                diff.is_some_and(|diff| residue::same_residue(diff[index], byte, alignment_type));
             let style = theme.residues.style(alignment_type, byte);
             match (matches, centre) {
                 // diff mode rendering
@@ -191,7 +193,8 @@ mod tests {
             grid: session.grid(),
             columns: vec![0],
             cells: vec![cell],
-            summaries: Vec::new(),
+            consensus: Vec::new(),
+            conservation: None,
         };
         let diff = diff.map(|byte| vec![byte]);
 
@@ -217,6 +220,7 @@ mod tests {
     #[case::diff_match_centre_is_dot(CENTRE, b'A', Some(b'A'), ".")]
     #[case::diff_match_flank_is_blank(FLANK, b'A', Some(b'A'), " ")]
     #[case::diff_mismatch_shows_letter(CENTRE, b'G', Some(b'A'), "G")]
+    #[case::diff_ignores_case(CENTRE, b'a', Some(b'A'), ".")]
     #[case::unprintable_is_question_mark(CENTRE, 0x07, None, "?")]
     fn stretch_works(
         #[case] cell: Option<Cell>,
@@ -243,7 +247,8 @@ mod tests {
                     centre: true,
                 }),
             ],
-            summaries: Vec::new(),
+            consensus: Vec::new(),
+            conservation: None,
         };
 
         let text: String = stretch(&columns, b"AC", Some(b"AG"), &Theme::default())

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::residue::{UNKNOWN_AMINO_ACID, nucleotide_index};
+use crate::residue::{GAP, UNKNOWN_AMINO_ACID, nucleotide_index};
 
 const STANDARD_CODONS: [[[u8; 4]; 4]; 4] = [
     [*b"KNNK", *b"IIIM", *b"TTTT", *b"RSSR"],
@@ -111,6 +111,9 @@ pub(crate) fn codon_at(sequence: &[u8], codon: Range<usize>, strand: Strand) -> 
 }
 
 fn translate_codon(codon: [u8; 3], strand: Strand) -> u8 {
+    if codon == [GAP; 3] {
+        return GAP;
+    }
     let [Some(first), Some(second), Some(third)] = codon.map(nucleotide_index) else {
         return UNKNOWN_AMINO_ACID;
     };
@@ -229,8 +232,14 @@ mod tests {
     }
 
     #[rstest]
+    fn translate_codon_keeps_gap(#[values(Strand::Forward, Strand::Reverse)] strand: Strand) {
+        assert_eq!(translate_codon(*b"---", strand), b'-');
+    }
+
+    #[rstest]
     #[case::unknown_base(*b"ATN")]
-    #[case::gap(*b"A-G")]
+    #[case::partial_gap(*b"A-G")]
+    #[case::two_gaps(*b"--G")]
     fn translate_codon_is_unknown(
         #[case] codon: [u8; 3],
         #[values(Strand::Forward, Strand::Reverse)] strand: Strand,
