@@ -10,7 +10,7 @@ use crate::{
     ui::{
         UiState,
         layout::{AppLayout, FrameLayout, ScreenLayout, Window},
-        popups::Context,
+        popups::{Context, minimap::MinimapView},
     },
 };
 
@@ -100,6 +100,7 @@ pub(crate) fn with_context<T>(
         gff,
         theme: &theme,
         screen: &screen,
+        minimap_view: MinimapView::default(),
     })
 }
 

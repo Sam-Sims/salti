@@ -26,7 +26,7 @@ use crate::{
         bars::{BottomStatusBar, InputBar, TopStatusBar},
         layout::ScreenLayout,
         notification::{Notification, Notifications},
-        popups::{Context, Popup},
+        popups::{Context, Popup, minimap::MinimapView},
         selection::Selection,
     },
 };
@@ -84,6 +84,7 @@ pub fn render(
                 gff,
                 theme,
                 screen,
+                minimap_view: ui.minimap_view,
             },
         );
     }
@@ -99,6 +100,7 @@ pub struct UiState {
     pub position: Position,
     pub loading: Option<String>,
     pub gff_tooltip: Option<String>,
+    pub(crate) minimap_view: MinimapView,
 }
 
 impl UiState {

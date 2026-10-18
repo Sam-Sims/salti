@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{iter, ops::Range};
 
-use crossterm::event::{KeyEvent, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use libmsa::{AlignmentType, ColumnCounts};
 use ratatui::{
     buffer::Buffer,
@@ -8,7 +8,7 @@ use ratatui::{
     style::{Color, Style, Styled},
     symbols,
     text::Line,
-    widgets::{Paragraph, Widget},
+    widgets::{Paragraph, Sparkline, SparklineBar, Widget},
 };
 use strum::VariantArray;
 
@@ -17,12 +17,13 @@ use crate::{
     config::{
         keybindings,
         residues::{ResidueColour, ResidueStyles},
+        theme::Theme,
     },
     session::Session,
     ui::{
-        cell_columns,
+        bar_ticks, cell_columns, full_bar_ticks,
         mouse::centre_on_pointer,
-        popups::{Context, PopupContent, PopupFrame},
+        popups::{Context, PopupContent, PopupFrame, next_tab, previous_tab, tab_title},
         selection::blend,
     },
 };
@@ -30,6 +31,8 @@ use crate::{
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
 const MINIMAP_WINDOW_ALPHA: f32 = 0.28;
+/// width in cells of the sliding window a plot cell takes its peak mean from
+const WINDOW_CELLS: usize = 4;
 
 const COLOURS: usize = ResidueColour::VARIANTS.len();
 
@@ -37,28 +40,37 @@ const COLOURS: usize = ResidueColour::VARIANTS.len();
 pub(crate) struct Minimap {
     total_columns: usize,
     composition: Option<Vec<[f32; COLOURS]>>,
+    entropy: Vec<f64>,
 }
 
 impl Minimap {
     pub(crate) fn new(session: &Session) -> Self {
         let (grid, layout) = (session.grid(), session.layout());
         let alignment_type = grid.alignment_type();
-        let composition = (alignment_type != AlignmentType::Generic).then(|| {
-            grid.map_column_counts(layout.rows(), layout.columns(), |counts, _| {
-                colour_shares(&counts, alignment_type)
-            })
+        let has_composition = alignment_type != AlignmentType::Generic;
+        let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, _| {
+            let shares = has_composition.then(|| colour_shares(&counts, alignment_type));
+            (shares, counts.entropy())
         });
         Self {
             total_columns: layout.columns().len(),
-            composition,
+            composition: columns.iter().map(|&(shares, ..)| shares).collect(),
+            entropy: prefix_sums(columns.iter().map(|&(_, entropy, ..)| entropy)),
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::Display, strum::VariantArray)]
+pub(crate) enum MinimapView {
+    #[default]
+    Composition,
+    Entropy,
+}
+
 impl PopupContent for Minimap {
-    fn frame(&self, _: &Context) -> PopupFrame {
+    fn frame(&self, ctx: &Context) -> PopupFrame {
         PopupFrame::Bordered {
-            title: Line::from("Minimap (drag to pan)"),
+            title: tab_title(ctx.minimap_view, ctx.theme),
         }
     }
 
@@ -72,19 +84,21 @@ impl PopupContent for Minimap {
         }
     }
 
-    fn handle_key(&mut self, key: KeyEvent, _: Rect, _: &Context) -> Vec<Command> {
-        keybindings::lookup(key)
-            .filter(|command| {
-                matches!(
-                    command,
-                    Command::ScrollUp { .. }
-                        | Command::ScrollDown { .. }
-                        | Command::ScrollLeft { .. }
-                        | Command::ScrollRight { .. }
-                )
-            })
-            .into_iter()
-            .collect()
+    fn handle_key(&mut self, key: KeyEvent, _: Rect, ctx: &Context) -> Vec<Command> {
+        let view = ctx.minimap_view;
+        let command = match key.code {
+            KeyCode::Tab => Some(Command::SetMinimapView(next_tab(view))),
+            KeyCode::BackTab => Some(Command::SetMinimapView(previous_tab(view))),
+            _ => keybindings::lookup(key).and_then(|command| match command {
+                Command::OpenMinimap => Some(Command::SetMinimapView(next_tab(view))),
+                Command::ScrollUp { .. }
+                | Command::ScrollDown { .. }
+                | Command::ScrollLeft { .. }
+                | Command::ScrollRight { .. } => Some(command),
+                _ => None,
+            }),
+        };
+        command.into_iter().collect()
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, inner: Rect, ctx: &Context) -> Vec<Command> {
@@ -102,15 +116,23 @@ impl PopupContent for Minimap {
         if self.total_columns == 0 {
             return;
         }
-        let Some(composition) = &self.composition else {
-            Paragraph::new(Line::from(
-                "Composition needs a DNA or protein alignment."
-                    .set_style(ctx.theme.text_dim.italic()),
-            ))
-            .render(inner, buf);
-            return;
-        };
-        render_composition(buf, inner, composition, &ctx.theme.residues);
+        match ctx.minimap_view {
+            MinimapView::Composition => {
+                let Some(composition) = &self.composition else {
+                    render_note(
+                        buf,
+                        inner,
+                        "Composition needs a DNA or protein alignment.",
+                        ctx.theme,
+                    );
+                    return;
+                };
+                render_composition(buf, inner, composition, &ctx.theme.residues);
+            }
+            MinimapView::Entropy => {
+                render_plot(buf, inner, &self.entropy, ctx.theme.minimap_levels);
+            }
+        }
         if let Some(window_box) =
             highlight_box(inner, ctx.screen.window.columns.clone(), self.total_columns)
         {
@@ -118,6 +140,10 @@ impl PopupContent for Minimap {
             mark_box(buf, window_box, ctx.theme.text);
         }
     }
+}
+
+fn render_note(buffer: &mut Buffer, area: Rect, note: &str, theme: &Theme) {
+    Paragraph::new(Line::from(note.set_style(theme.text_dim.italic()))).render(area, buffer);
 }
 
 fn colour_shares(counts: &ColumnCounts, alignment_type: AlignmentType) -> [f32; COLOURS] {
@@ -128,6 +154,15 @@ fn colour_shares(counts: &ColumnCounts, alignment_type: AlignmentType) -> [f32; 
         }
     }
     shares
+}
+
+fn prefix_sums(values: impl Iterator<Item = f64>) -> Vec<f64> {
+    iter::once(0.0)
+        .chain(values.scan(0.0, |sum, value| {
+            *sum += value;
+            Some(*sum)
+        }))
+        .collect()
 }
 
 fn tint_box(buffer: &mut Buffer, area: Rect, tint: Color) {
@@ -196,6 +231,49 @@ fn render_composition(
         }
         draw_stack(buffer, x, area, &colours, &stack_ticks(&shares, ticks));
     }
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn render_plot(buffer: &mut Buffer, area: Rect, prefix_sums: &[f64], levels: [Color; 4]) {
+    let peaks = window_peaks(prefix_sums, usize::from(area.width));
+    let peak = peaks.iter().copied().fold(0.0, f64::max);
+    if peak <= 0.0 {
+        return;
+    }
+    Sparkline::default()
+        .data(peaks.iter().map(|&value| {
+            let fraction = value / peak;
+            let level = levels[((fraction * levels.len() as f64) as usize).min(levels.len() - 1)];
+            SparklineBar::from(bar_ticks(fraction, area.height)).style(Style::new().fg(level))
+        }))
+        .max(full_bar_ticks(area.height))
+        .render(area, buffer);
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn window_peaks(prefix_sums: &[f64], cells: usize) -> Vec<f64> {
+    let total_columns = prefix_sums.len() - 1;
+    let window = (WINDOW_CELLS * total_columns / cells.max(1)).clamp(1, total_columns);
+    let means: Vec<f64> = (0..total_columns)
+        .map(|column| {
+            let start = column
+                .saturating_sub(window / 2)
+                .min(total_columns - window);
+            (prefix_sums[start + window] - prefix_sums[start]) / window as f64
+        })
+        .collect();
+    (0..cells)
+        .map(|cell| {
+            means[cell_columns(cell, cells, total_columns)]
+                .iter()
+                .copied()
+                .fold(0.0, f64::max)
+        })
+        .collect()
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss)]
@@ -357,6 +435,20 @@ mod tests {
         assert_eq!(
             stack_ticks(&by_colour(colour_shares), total_ticks),
             by_colour(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::flat(&[2.0; 4], 2, &[2.0, 2.0])]
+    #[case::spike(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0], 12, &[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0])]
+    #[case::spike_at_start(&[4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 12, &[1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])]
+    #[case::spike_at_end(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0], 12, &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0])]
+    #[case::more_cells_than_columns(&[3.0, 1.0], 8, &[3.0, 3.0, 3.0, 3.0, 1.0, 1.0, 1.0, 1.0])]
+    #[case::window_wider_than_alignment(&[4.0, 0.0, 0.0, 0.0], 2, &[1.0, 1.0])]
+    fn window_peaks_works(#[case] values: &[f64], #[case] cells: usize, #[case] expected: &[f64]) {
+        assert_eq!(
+            window_peaks(&prefix_sums(values.iter().copied()), cells),
+            expected
         );
     }
 }

@@ -1,4 +1,8 @@
-use crate::{config::theme::ThemeChoice, session::DiffMode, ui::notification::Notification};
+use crate::{
+    config::theme::ThemeChoice,
+    session::DiffMode,
+    ui::{notification::Notification, popups::minimap::MinimapView},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -8,6 +12,7 @@ pub enum Command {
     OpenMinimap,
     OpenKeybinds,
     SetTheme(ThemeChoice),
+    SetMinimapView(MinimapView),
     ShowNotification(Notification),
     LoadAlignment(String),
     CheckForUpdate,

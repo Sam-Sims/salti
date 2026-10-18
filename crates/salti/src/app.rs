@@ -71,6 +71,7 @@ impl App {
                             gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
+                            minimap_view: self.ui.minimap_view,
                         },
                     ),
                     None => keybindings::lookup(key).into_iter().collect(),
@@ -86,6 +87,7 @@ impl App {
                             gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
+                            minimap_view: self.ui.minimap_view,
                         },
                     ),
                     None => mouse::handle(
@@ -194,6 +196,7 @@ impl App {
             Command::OpenKeybinds => self.ui.popup = Some(Popup::Keybinds(Keybinds::default())),
             Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(choice) => self.ui.set_theme(choice),
+            Command::SetMinimapView(view) => self.ui.minimap_view = view,
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
@@ -360,7 +363,7 @@ mod tests {
     use crate::{
         config::theme::Theme,
         test_utils::{buffer_text, session},
-        ui::{notification::NotificationLevel, selection::Selection},
+        ui::{notification::NotificationLevel, popups::minimap::MinimapView, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
@@ -622,14 +625,38 @@ mod tests {
 
     #[test]
     fn minimap_open() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_entropy() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_view_is_kept_across_loads() {
+        let mut app = app(DNA);
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Esc]);
+
+        app.finish_load("next.fasta".to_string(), Ok(alignment(&[b"ACGT"])));
+
+        assert_eq!(app.ui.minimap_view, MinimapView::Entropy);
+    }
+
+    fn minimap_app() -> App {
         let rows: Vec<Vec<u8>> = ["AA", "A-", "CN", "GT"]
             .iter()
             .map(|halves| halves.bytes().flat_map(|byte| [byte; 80]).collect())
             .collect();
-        let mut app = app(&rows.iter().map(Vec::as_slice).collect::<Vec<_>>());
-        type_text(&mut app, "m");
-
-        insta::assert_snapshot!(screen_text(&mut app));
+        app(&rows.iter().map(Vec::as_slice).collect::<Vec<_>>())
     }
 
     #[test]

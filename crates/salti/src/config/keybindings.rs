@@ -62,7 +62,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         command: Command::OpenMinimap,
         category: Category::General,
-        description: "Open minimap",
+        description: "Open minimap, or switch its view",
     },
     Binding {
         name: "cycle-diff-mode",

@@ -4,14 +4,18 @@ pub(crate) mod minimap;
 pub(crate) mod palette;
 mod text_input;
 
+use std::fmt::Display;
+
 use anyhow::{Context as _, Result};
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    text::Line,
+    symbols,
+    text::{Line, Span},
     widgets::{Block, Clear, Widget},
 };
+use strum::VariantArray;
 
 use crate::{
     command::Command,
@@ -20,7 +24,11 @@ use crate::{
     session::Session,
     ui::{
         layout::ScreenLayout,
-        popups::{keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
+        popups::{
+            keybinds::Keybinds,
+            minimap::{Minimap, MinimapView},
+            palette::PaletteState,
+        },
     },
 };
 
@@ -112,6 +120,7 @@ pub(crate) struct Context<'a> {
     pub(crate) gff: Option<&'a Gff>,
     pub(crate) theme: &'a Theme,
     pub(crate) screen: &'a ScreenLayout,
+    pub(crate) minimap_view: MinimapView,
 }
 
 impl Context<'_> {
@@ -125,5 +134,62 @@ fn block(frame: PopupFrame) -> Block<'static> {
     match frame {
         PopupFrame::Bordered { title } => Block::bordered().title(title),
         PopupFrame::Bare => Block::new(),
+    }
+}
+
+fn tab_title<T: VariantArray + Display + Copy + PartialEq>(
+    selected: T,
+    theme: &Theme,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (index, tab) in T::VARIANTS.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(symbols::line::VERTICAL, theme.text_muted));
+        }
+        let style = if *tab == selected {
+            theme.highlight
+        } else {
+            theme.text_muted
+        };
+        spans.extend([" ".into(), Span::styled(tab.to_string(), style), " ".into()]);
+    }
+    Line::from(spans)
+}
+
+fn next_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
+    step_tab(tab, 1)
+}
+
+fn previous_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
+    step_tab(tab, T::VARIANTS.len() - 1)
+}
+
+fn step_tab<T: VariantArray + Copy + PartialEq>(tab: T, step: usize) -> T {
+    let tabs = T::VARIANTS;
+    let index = tabs
+        .iter()
+        .position(|&variant| variant == tab)
+        .expect("a tab is one of its variants");
+    tabs[(index + step) % tabs.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::forward(MinimapView::Composition, MinimapView::Entropy)]
+    #[case::wraps(MinimapView::Entropy, MinimapView::Composition)]
+    fn next_tab_works(#[case] tab: MinimapView, #[case] expected: MinimapView) {
+        assert_eq!(next_tab(tab), expected);
+    }
+
+    #[rstest]
+    #[case::backward(MinimapView::Entropy, MinimapView::Composition)]
+    #[case::wraps(MinimapView::Composition, MinimapView::Entropy)]
+    fn previous_tab_works(#[case] tab: MinimapView, #[case] expected: MinimapView) {
+        assert_eq!(previous_tab(tab), expected);
     }
 }
