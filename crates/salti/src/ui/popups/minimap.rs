@@ -41,6 +41,7 @@ pub(crate) struct Minimap {
     total_columns: usize,
     composition: Option<Vec<[f32; COLOURS]>>,
     entropy: Vec<f64>,
+    differences: Option<Vec<f64>>,
     missing: Vec<f64>,
 }
 
@@ -49,14 +50,23 @@ impl Minimap {
         let (grid, layout) = (session.grid(), session.layout());
         let alignment_type = grid.alignment_type();
         let has_composition = alignment_type != AlignmentType::Generic;
-        let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, _| {
+        let reference = session.state().reference();
+        let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, col| {
             let shares = has_composition.then(|| colour_shares(&counts, alignment_type));
-            (shares, counts.entropy(), counts.missing_fraction())
+            let differing = reference.map(|row| counts.differing_fraction(grid.cell(row, col)));
+            (
+                shares,
+                counts.entropy(),
+                differing,
+                counts.missing_fraction(),
+            )
         });
         Self {
             total_columns: layout.columns().len(),
             composition: columns.iter().map(|&(shares, ..)| shares).collect(),
             entropy: prefix_sums(columns.iter().map(|&(_, entropy, ..)| entropy)),
+            differences: reference
+                .map(|_| prefix_sums(columns.iter().filter_map(|&(_, _, differing, _)| differing))),
             missing: prefix_sums(columns.iter().map(|&(.., missing)| missing)),
         }
     }
@@ -67,6 +77,7 @@ pub(crate) enum MinimapView {
     #[default]
     Composition,
     Entropy,
+    Differences,
     Missing,
 }
 
@@ -134,6 +145,13 @@ impl PopupContent for Minimap {
             }
             MinimapView::Entropy => {
                 render_plot(buf, inner, &self.entropy, ctx.theme.minimap_levels);
+            }
+            MinimapView::Differences => {
+                let Some(differences) = &self.differences else {
+                    render_note(buf, inner, "No reference selected.", ctx.theme);
+                    return;
+                };
+                render_plot(buf, inner, differences, ctx.theme.minimap_levels);
             }
             MinimapView::Missing => {
                 render_plot(buf, inner, &self.missing, ctx.theme.minimap_levels);

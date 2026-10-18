@@ -18,7 +18,7 @@ File: test.fasta | Status: Loaded | 4 alignments | Length: 160 | Positions: 1-63
 │              │                                                               │
 │              │                                                               │
 │              │                                                               │
-┌ Composition │ Entropy │ Missing ─────────────────────────────────────────────┐
+┌ Composition │ Entropy │ Differences │ Missing ───────────────────────────────┐
 │                                        ▃█████████████████████████████████████│
 │                                       ▁██████████████████████████████████████│
 │                                       ███████████████████████████████████████│

@@ -641,6 +641,25 @@ mod tests {
     }
 
     #[test]
+    fn minimap_differences() {
+        let mut app = minimap_app();
+        app.execute_commands(vec![Command::SetReference(Some(0))]);
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_differences_without_reference() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
     fn minimap_missing() {
         let mut app = minimap_app();
         type_text(&mut app, "m");
