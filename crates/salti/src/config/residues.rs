@@ -125,34 +125,82 @@ pub struct ResidueStyles {
 
 impl ResidueStyles {
     pub fn style(&self, alignment_type: AlignmentType, byte: u8) -> Style {
-        match (alignment_type, residue::classify(byte, alignment_type)) {
-            (AlignmentType::Generic, _) => generic(byte),
-            (_, Class::Gap) => self.gap,
-            (_, Class::Unknown) => self.unknown,
-            (_, Class::Ambiguous) => self.ambiguity,
-            (AlignmentType::Dna, Class::Residue) => self.base(byte),
-            (AlignmentType::Protein, Class::Residue) => self.amino_acid(byte),
+        match alignment_type {
+            AlignmentType::Generic => generic(byte),
+            _ => ResidueColour::of(alignment_type, byte)
+                .map_or_else(Style::new, |colour| self.get(colour)),
         }
     }
 
-    fn base(&self, byte: u8) -> Style {
-        residue::nucleotide_index(byte)
-            .map_or_else(Style::new, |index| [self.a, self.t, self.c, self.g][index])
+    pub fn get(&self, colour: ResidueColour) -> Style {
+        match colour {
+            ResidueColour::A => self.a,
+            ResidueColour::C => self.c,
+            ResidueColour::G => self.g,
+            ResidueColour::T => self.t,
+            ResidueColour::Hydrophobic => self.hydrophobic,
+            ResidueColour::Cysteine => self.cysteine,
+            ResidueColour::Positive => self.positive,
+            ResidueColour::Negative => self.negative,
+            ResidueColour::Polar => self.polar,
+            ResidueColour::Glycine => self.glycine,
+            ResidueColour::Proline => self.proline,
+            ResidueColour::Aromatic => self.aromatic,
+            ResidueColour::Ambiguity => self.ambiguity,
+            ResidueColour::Unknown => self.unknown,
+            ResidueColour::Gap => self.gap,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+pub enum ResidueColour {
+    A,
+    C,
+    G,
+    T,
+    Hydrophobic,
+    Cysteine,
+    Positive,
+    Negative,
+    Polar,
+    Glycine,
+    Proline,
+    Aromatic,
+    Ambiguity,
+    Unknown,
+    Gap,
+}
+
+impl ResidueColour {
+    pub fn of(alignment_type: AlignmentType, byte: u8) -> Option<Self> {
+        match (alignment_type, residue::classify(byte, alignment_type)) {
+            (AlignmentType::Generic, _) => None,
+            (_, Class::Gap) => Some(Self::Gap),
+            (_, Class::Unknown) => Some(Self::Unknown),
+            (_, Class::Ambiguous) => Some(Self::Ambiguity),
+            (AlignmentType::Dna, Class::Residue) => Self::base(byte),
+            (AlignmentType::Protein, Class::Residue) => Self::amino_acid(byte),
+        }
+    }
+
+    fn base(byte: u8) -> Option<Self> {
+        residue::nucleotide_index(byte).map(|index| [Self::A, Self::T, Self::C, Self::G][index])
     }
 
     // groups from clustal
     // http://www.jalview.org/help/html/colourSchemes/clustal.html
-    fn amino_acid(&self, byte: u8) -> Style {
+    fn amino_acid(byte: u8) -> Option<Self> {
         match byte.to_ascii_uppercase() {
-            b'A' | b'V' | b'L' | b'I' | b'M' | b'F' | b'W' => self.hydrophobic,
-            b'C' => self.cysteine,
-            b'K' | b'R' => self.positive,
-            b'D' | b'E' => self.negative,
-            b'S' | b'T' | b'N' | b'Q' => self.polar,
-            b'G' => self.glycine,
-            b'P' => self.proline,
-            b'H' | b'Y' => self.aromatic,
-            _ => Style::new(),
+            b'A' | b'V' | b'L' | b'I' | b'M' | b'F' | b'W' => Some(Self::Hydrophobic),
+            b'C' => Some(Self::Cysteine),
+            b'K' | b'R' => Some(Self::Positive),
+            b'D' | b'E' => Some(Self::Negative),
+            b'S' | b'T' | b'N' | b'Q' => Some(Self::Polar),
+            b'G' => Some(Self::Glycine),
+            b'P' => Some(Self::Proline),
+            b'H' | b'Y' => Some(Self::Aromatic),
+            _ => None,
         }
     }
 }
