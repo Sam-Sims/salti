@@ -188,8 +188,8 @@ impl App {
             Command::Quit => self.should_quit = true,
             Command::OpenPalette => self.ui.popup = Some(Popup::Palette(PaletteState::default())),
             Command::OpenMinimap => {
-                self.session()?;
-                self.ui.popup = Some(Popup::Minimap(Minimap));
+                let minimap = Minimap::new(self.session()?);
+                self.ui.popup = Some(Popup::Minimap(minimap));
             }
             Command::OpenKeybinds => self.ui.popup = Some(Popup::Keybinds(Keybinds::default())),
             Command::ClosePopup => self.ui.popup = None,
@@ -616,6 +616,18 @@ mod tests {
         let mut app = app(DNA);
         type_text(&mut app, ":jump-sequence ");
         press(&mut app, [KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_open() {
+        let rows: Vec<Vec<u8>> = ["AA", "A-", "CN", "GT"]
+            .iter()
+            .map(|halves| halves.bytes().flat_map(|byte| [byte; 80]).collect())
+            .collect();
+        let mut app = app(&rows.iter().map(Vec::as_slice).collect::<Vec<_>>());
+        type_text(&mut app, "m");
 
         insta::assert_snapshot!(screen_text(&mut app));
     }

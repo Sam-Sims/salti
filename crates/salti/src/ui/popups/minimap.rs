@@ -1,11 +1,23 @@
 use std::ops::Range;
 
 use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use libmsa::{AlignmentType, ColumnCounts};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Style, Styled},
+    symbols,
+    text::Line,
+    widgets::{Paragraph, Widget},
+};
+use strum::VariantArray;
 
 use crate::{
     command::Command,
-    config::{keybindings, theme::Theme},
+    config::{
+        keybindings,
+        residues::{ResidueColour, ResidueStyles},
+    },
     session::Session,
     ui::{
         cell_columns,
@@ -17,12 +29,25 @@ use crate::{
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
 
-/// number of sampled columns per minimap cell when collapsing
-const MINIMAP_COLUMN_SAMPLES_PER_CELL: usize = 8;
-const MINIMAP_ROW_SAMPLES: usize = 128;
+const COLOURS: usize = ResidueColour::VARIANTS.len();
 
 #[derive(Debug)]
-pub(crate) struct Minimap;
+pub(crate) struct Minimap {
+    composition: Option<Vec<[f32; COLOURS]>>,
+}
+
+impl Minimap {
+    pub(crate) fn new(session: &Session) -> Self {
+        let (grid, layout) = (session.grid(), session.layout());
+        let alignment_type = grid.alignment_type();
+        let composition = (alignment_type != AlignmentType::Generic).then(|| {
+            grid.map_column_counts(layout.rows(), layout.columns(), |counts, _| {
+                colour_shares(&counts, alignment_type)
+            })
+        });
+        Self { composition }
+    }
+}
 
 impl PopupContent for Minimap {
     fn frame(&self) -> PopupFrame<'_> {
@@ -70,7 +95,15 @@ impl PopupContent for Minimap {
         if total_columns == 0 {
             return;
         }
-        render_minimap_track(buf, inner, session, ctx.theme);
+        let Some(composition) = &self.composition else {
+            Paragraph::new(Line::from(
+                "Composition needs a DNA or protein alignment."
+                    .set_style(ctx.theme.text_dim.italic()),
+            ))
+            .render(inner, buf);
+            return;
+        };
+        render_composition(buf, inner, composition, &ctx.theme.residues);
         if let Some(window_box) =
             highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
         {
@@ -79,8 +112,14 @@ impl PopupContent for Minimap {
     }
 }
 
-fn sample(index: usize, samples: usize, len: usize) -> usize {
-    (2 * index + 1) * len / (2 * samples)
+fn colour_shares(counts: &ColumnCounts, alignment_type: AlignmentType) -> [f32; COLOURS] {
+    let mut shares = [0.0; COLOURS];
+    for (byte, share) in counts.composition() {
+        if let Some(colour) = ResidueColour::of(alignment_type, byte) {
+            shares[colour as usize] += share as f32;
+        }
+    }
+    shares
 }
 
 fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, style: Style) {
@@ -107,32 +146,84 @@ fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -
     })
 }
 
-fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, theme: &Theme) {
-    let layout = session.layout();
-    let grid = session.grid();
-    let (shown_rows, shown_columns) = (layout.rows(), layout.columns());
-    let empty = theme.minimap_empty;
-
-    let row_samples = shown_rows.len().min(MINIMAP_ROW_SAMPLES);
-    let rows: Vec<usize> = (0..row_samples)
-        .map(|index| shown_rows[sample(index, row_samples, shown_rows.len())])
+#[allow(clippy::cast_precision_loss)]
+fn render_composition(
+    buffer: &mut Buffer,
+    area: Rect,
+    composition: &[[f32; COLOURS]],
+    residues: &ResidueStyles,
+) {
+    let colours: Vec<Color> = ResidueColour::VARIANTS
+        .iter()
+        .map(|&colour| {
+            let style = residues.get(colour);
+            style.bg.or(style.fg).unwrap_or_default()
+        })
         .collect();
-    let column_samples = usize::from(area.width) * MINIMAP_COLUMN_SAMPLES_PER_CELL;
+    let cells = usize::from(area.width);
+    let ticks = usize::from(area.height) * 8;
+    for (cell, x) in (0..cells).zip(area.x..) {
+        let columns = &composition[cell_columns(cell, cells, composition.len())];
+        let mut shares = [0.0; COLOURS];
+        for column in columns {
+            for (share, column_share) in shares.iter_mut().zip(column) {
+                *share += column_share / columns.len() as f32;
+            }
+        }
+        draw_stack(buffer, x, area, &colours, &stack_ticks(&shares, ticks));
+    }
+}
 
-    for (block_index, block_x) in (area.x..area.right()).enumerate() {
-        let first = block_index * MINIMAP_COLUMN_SAMPLES_PER_CELL;
-        let columns: Vec<usize> = (first..first + MINIMAP_COLUMN_SAMPLES_PER_CELL)
-            .map(|index| shown_columns[sample(index, column_samples, shown_columns.len())])
-            .collect();
-        let block_colour = grid
-            .consensus(&rows, &columns, session.consensus_method)
-            .and_then(|byte| theme.residues.style(grid.alignment_type(), byte).bg)
-            .unwrap_or(empty);
+#[allow(clippy::cast_precision_loss, clippy::cast_sign_loss)]
+fn stack_ticks(shares: &[f32; COLOURS], ticks: usize) -> [usize; COLOURS] {
+    let exact = shares.map(|share| f64::from(share) * ticks as f64);
+    let mut allocated = exact.map(|exact| exact.floor() as usize);
+    let coloured = exact.iter().sum::<f64>().round() as usize;
+    let leftover = coloured.saturating_sub(allocated.iter().sum());
+    let mut by_remainder: Vec<usize> = (0..COLOURS).collect();
+    by_remainder.sort_by(|&a, &b| exact[b].fract().total_cmp(&exact[a].fract()));
+    for colour in by_remainder.into_iter().take(leftover) {
+        allocated[colour] += 1;
+    }
+    allocated
+}
 
-        buffer.set_style(
-            Rect::new(block_x, area.y, 1, area.height),
-            Style::new().bg(block_colour),
-        );
+fn draw_stack(buffer: &mut Buffer, x: u16, area: Rect, colours: &[Color], ticks: &[usize]) {
+    let colour_at = |tick: usize| {
+        let mut end = 0;
+        colours.iter().zip(ticks).find_map(|(&colour, &count)| {
+            end += count;
+            (tick < end).then_some((colour, end))
+        })
+    };
+    for (row, y) in (area.top()..area.bottom()).rev().enumerate() {
+        let bottom = row * 8;
+        let Some((lower, lower_end)) = colour_at(bottom) else {
+            break;
+        };
+        let eighths = (lower_end - bottom).min(8);
+        let cell = &mut buffer[(x, y)];
+        cell.set_symbol(eighths_symbol(eighths)).set_fg(lower);
+        if eighths < 8
+            && let Some((upper, _)) = colour_at(bottom + 7)
+        {
+            cell.set_bg(upper);
+        }
+    }
+}
+
+fn eighths_symbol(eighths: usize) -> &'static str {
+    let levels = symbols::bar::NINE_LEVELS;
+    match eighths {
+        0 => levels.empty,
+        1 => levels.one_eighth,
+        2 => levels.one_quarter,
+        3 => levels.three_eighths,
+        4 => levels.half,
+        5 => levels.five_eighths,
+        6 => levels.three_quarters,
+        7 => levels.seven_eighths,
+        _ => levels.full,
     }
 }
 
@@ -141,6 +232,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::{session::Position, test_utils::session};
 
     fn track(cells: u16) -> Rect {
         Rect::new(10, 2, cells, 5)
@@ -174,5 +266,73 @@ mod tests {
     #[case::empty_window(10, 5..5)]
     fn highlight_box_is_none(#[case] cells: u16, #[case] window: Range<usize>) {
         assert_eq!(highlight_box(track(cells), window, 100), None);
+    }
+
+    fn by_colour<T: Copy + Default>(values: &[(ResidueColour, T)]) -> [T; COLOURS] {
+        let mut by_colour = [T::default(); COLOURS];
+        for &(colour, value) in values {
+            by_colour[colour as usize] = value;
+        }
+        by_colour
+    }
+
+    #[test]
+    fn new_counts_shown_rows_and_columns() {
+        let mut session = session(&[b"C-", b"AA"]);
+        session
+            .update(Position::default(), |state| {
+                state.set_reference(Some(1));
+                state.set_gap_filter(Some(0.5))
+            })
+            .unwrap();
+
+        assert_eq!(
+            Minimap::new(&session).composition,
+            Some(vec![by_colour(&[(ResidueColour::C, 1.0)])])
+        );
+    }
+
+    #[test]
+    fn new_groups_shares_by_colour() {
+        let mut session = session(&[b"L", b"V", b"B", b"B"]);
+        session
+            .update(Position::default(), |state| {
+                state.set_alignment_type(AlignmentType::Protein)
+            })
+            .unwrap();
+
+        assert_eq!(
+            Minimap::new(&session).composition,
+            Some(vec![by_colour(&[(ResidueColour::Hydrophobic, 0.5)])])
+        );
+    }
+
+    #[test]
+    fn new_has_no_composition_for_generic() {
+        let mut session = session(&[b"AC"]);
+        session
+            .update(Position::default(), |state| {
+                state.set_alignment_type(AlignmentType::Generic)
+            })
+            .unwrap();
+
+        assert_eq!(Minimap::new(&session).composition, None);
+    }
+
+    #[rstest]
+    #[case::even(&[(ResidueColour::A, 0.5), (ResidueColour::C, 0.5)], 8, &[(ResidueColour::A, 4), (ResidueColour::C, 4)])]
+    #[case::largest_remainder(&[(ResidueColour::A, 0.2), (ResidueColour::C, 0.8)], 8, &[(ResidueColour::A, 2), (ResidueColour::C, 6)])]
+    #[case::tie_goes_to_earlier(&[(ResidueColour::A, 0.5), (ResidueColour::C, 0.5)], 7, &[(ResidueColour::A, 4), (ResidueColour::C, 3)])]
+    #[case::uncoloured_share(&[(ResidueColour::A, 0.5)], 8, &[(ResidueColour::A, 4)])]
+    #[case::nothing_counted(&[], 8, &[])]
+    fn stack_ticks_works(
+        #[case] colour_shares: &[(ResidueColour, f32)],
+        #[case] total_ticks: usize,
+        #[case] expected: &[(ResidueColour, usize)],
+    ) {
+        assert_eq!(
+            stack_ticks(&by_colour(colour_shares), total_ticks),
+            by_colour(expected)
+        );
     }
 }

@@ -36,7 +36,6 @@ pub struct Theme {
     pub selection_columns: Color,
     pub selection_ids: Color,
     pub minimap_window: Style,
-    pub minimap_empty: Color,
     pub residues: ResidueStyles,
 }
 
