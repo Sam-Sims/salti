@@ -35,6 +35,7 @@ const COLOURS: usize = ResidueColour::VARIANTS.len();
 
 #[derive(Debug)]
 pub(crate) struct Minimap {
+    total_columns: usize,
     composition: Option<Vec<[f32; COLOURS]>>,
 }
 
@@ -47,7 +48,10 @@ impl Minimap {
                 colour_shares(&counts, alignment_type)
             })
         });
-        Self { composition }
+        Self {
+            total_columns: layout.columns().len(),
+            composition,
+        }
     }
 }
 
@@ -84,17 +88,18 @@ impl PopupContent for Minimap {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, inner: Rect, ctx: &Context) -> Vec<Command> {
-        let session = ctx.session.expect("minimap opens only with an alignment");
-        let total_columns = session.layout().columns().len();
-        centre_on_pointer(mouse, inner, ctx.screen.window.columns.len(), total_columns)
-            .into_iter()
-            .collect()
+        centre_on_pointer(
+            mouse,
+            inner,
+            ctx.screen.window.columns.len(),
+            self.total_columns,
+        )
+        .into_iter()
+        .collect()
     }
 
     fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context) {
-        let session = ctx.session.expect("minimap opens only with an alignment");
-        let total_columns = session.layout().columns().len();
-        if total_columns == 0 {
+        if self.total_columns == 0 {
             return;
         }
         let Some(composition) = &self.composition else {
@@ -107,7 +112,7 @@ impl PopupContent for Minimap {
         };
         render_composition(buf, inner, composition, &ctx.theme.residues);
         if let Some(window_box) =
-            highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
+            highlight_box(inner, ctx.screen.window.columns.clone(), self.total_columns)
         {
             tint_box(buf, window_box, ctx.theme.selection_columns);
             mark_box(buf, window_box, ctx.theme.text);
