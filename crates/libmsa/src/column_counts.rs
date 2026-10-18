@@ -42,7 +42,7 @@ impl ColumnCounts {
     /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case.
     /// 0 when there are no residues
     pub fn entropy(&self) -> f64 {
-        self.residue_frequencies()
+        self.frequencies_in(&[Class::Residue])
             .fold(0.0, |entropy, (_, frequency)| {
                 entropy - frequency * frequency.ln()
             })
@@ -81,16 +81,14 @@ impl ColumnCounts {
         if residue::classify(reference, self.alignment_type) != Class::Residue {
             return 0.0;
         }
-        self.residue_frequencies()
+        self.frequencies_in(&[Class::Residue])
             .filter(|&(symbol, _)| !residue::same_residue(symbol, reference, self.alignment_type))
             .fold(0.0, |differing, (_, frequency)| differing + frequency)
     }
 
-    /// Returns each byte counted in the column and how often, in byte order
-    pub fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
-        (0..128)
-            .zip(self.counts.iter().copied())
-            .filter(|&(_, count)| count != 0)
+    /// Returns each byte's share of the column, in byte order
+    pub fn composition(&self) -> impl Iterator<Item = (u8, f64)> {
+        self.frequencies_in(Class::VARIANTS)
     }
 
     pub(crate) fn gap_fraction(&self) -> f64 {
@@ -98,7 +96,7 @@ impl ColumnCounts {
     }
 
     pub(crate) fn constant_fraction(&self) -> Option<f64> {
-        self.residue_frequencies()
+        self.frequencies_in(&[Class::Residue])
             .map(|(_, frequency)| frequency)
             .max_by(f64::total_cmp)
     }
@@ -121,13 +119,19 @@ impl ColumnCounts {
         f64::from(self.counts_in(part).iter().sum::<u32>()) / f64::from(whole)
     }
 
-    fn residue_frequencies(&self) -> impl Iterator<Item = (u8, f64)> {
-        let counts = self.counts_in(&[Class::Residue]);
+    fn frequencies_in(&self, classes: &[Class]) -> impl Iterator<Item = (u8, f64)> {
+        let counts = self.counts_in(classes);
         let total = f64::from(counts.iter().sum::<u32>());
         (0..128)
             .zip(counts)
             .filter(|&(_, count)| count != 0)
-            .map(move |(residue, count)| (residue, f64::from(count) / total))
+            .map(move |(symbol, count)| (symbol, f64::from(count) / total))
+    }
+
+    fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
+        (0..128)
+            .zip(self.counts.iter().copied())
+            .filter(|&(_, count)| count != 0)
     }
 }
 
@@ -387,13 +391,24 @@ mod tests {
         );
     }
 
-    #[test]
-    fn symbol_counts_works() {
+    #[rstest]
+    #[case::every_class(AlignmentType::Dna, b"aA-N", &[(b'-', 0.25), (b'A', 0.5), (b'N', 0.25)])]
+    #[case::generic_keeps_case(AlignmentType::Generic, b"aA", &[(b'A', 0.5), (b'a', 0.5)])]
+    fn composition_works(
+        #[case] alignment_type: AlignmentType,
+        #[case] symbols: &[u8],
+        #[case] expected: &[(u8, f64)],
+    ) {
         assert_eq!(
-            column(AlignmentType::Dna, b"aA-A")
-                .symbol_counts()
+            column(alignment_type, symbols)
+                .composition()
                 .collect::<Vec<_>>(),
-            [(b'-', 1), (b'A', 2), (b'a', 1)]
+            expected
         );
+    }
+
+    #[test]
+    fn composition_is_empty() {
+        assert_eq!(column(AlignmentType::Dna, b"").composition().count(), 0);
     }
 }
