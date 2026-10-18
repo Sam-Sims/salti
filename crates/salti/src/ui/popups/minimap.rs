@@ -8,6 +8,7 @@ use crate::{
     config::{keybindings, theme::Theme},
     session::Session,
     ui::{
+        cell_columns,
         mouse::centre_on_pointer,
         popups::{Context, PopupContent, PopupFrame},
     },
@@ -92,23 +93,18 @@ fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, style: Style) {
 }
 
 fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
-    if track_area.width == 0 {
-        return None;
-    }
-
-    let width = usize::from(track_area.width);
-    let start_offset = (window.start * width / total_columns).min(width - 1);
-    let end_offset = (window.end * width)
-        .div_ceil(total_columns)
-        .max(start_offset + 1)
-        .min(width);
-
-    Some(Rect::new(
-        track_area.x + start_offset as u16,
-        track_area.y,
-        (end_offset - start_offset) as u16,
-        track_area.height,
-    ))
+    let cells = usize::from(track_area.width);
+    let shows_window = |cell| {
+        let columns = cell_columns(cell, cells, total_columns);
+        columns.start.max(window.start) < columns.end.min(window.end)
+    };
+    let first = (0..cells).position(shows_window)?;
+    let last = (0..cells).rposition(shows_window)?;
+    Some(Rect {
+        x: track_area.x + first as u16,
+        width: (last + 1 - first) as u16,
+        ..track_area
+    })
 }
 
 fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, theme: &Theme) {
@@ -137,5 +133,46 @@ fn render_minimap_track(buffer: &mut Buffer, area: Rect, session: &Session, them
             Rect::new(block_x, area.y, 1, area.height),
             Style::new().bg(block_colour),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn track(cells: u16) -> Rect {
+        Rect::new(10, 2, cells, 5)
+    }
+
+    #[rstest]
+    #[case::inside_one_cell(10, 100, 32..38, 13, 1)]
+    #[case::across_cells(10, 100, 35..55, 13, 3)]
+    #[case::whole_alignment(10, 100, 0..100, 10, 10)]
+    #[case::column_over_several_cells(5, 3, 1..2, 12, 2)]
+    #[case::skips_cell_without_window_columns(2, 3, 1..2, 11, 1)]
+    fn highlight_box_works(
+        #[case] cells: u16,
+        #[case] total_columns: usize,
+        #[case] window: Range<usize>,
+        #[case] x: u16,
+        #[case] width: u16,
+    ) {
+        assert_eq!(
+            highlight_box(track(cells), window, total_columns),
+            Some(Rect {
+                x,
+                width,
+                ..track(cells)
+            })
+        );
+    }
+
+    #[rstest]
+    #[case::no_cells(0, 5..10)]
+    #[case::empty_window(10, 5..5)]
+    fn highlight_box_is_none(#[case] cells: u16, #[case] window: Range<usize>) {
+        assert_eq!(highlight_box(track(cells), window, 100), None);
     }
 }
