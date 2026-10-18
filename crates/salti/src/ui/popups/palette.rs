@@ -92,7 +92,7 @@ impl Default for PaletteState {
 }
 
 impl PopupContent for PaletteState {
-    fn frame(&self) -> PopupFrame<'_> {
+    fn frame(&self, _: &Context) -> PopupFrame {
         PopupFrame::Bare
     }
 

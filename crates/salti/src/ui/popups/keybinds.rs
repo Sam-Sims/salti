@@ -34,8 +34,10 @@ impl Keybinds {
 }
 
 impl PopupContent for Keybinds {
-    fn frame(&self) -> PopupFrame<'_> {
-        PopupFrame::Bordered { title: "Keybinds" }
+    fn frame(&self, _: &Context) -> PopupFrame {
+        PopupFrame::Bordered {
+            title: Line::from("Keybinds"),
+        }
     }
 
     fn area(&self, ctx: &Context) -> Rect {

@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    text::Line,
     widgets::{Block, Clear, Widget},
 };
 
@@ -53,7 +54,7 @@ impl Popup {
         let content = self.content();
         let area = content.area(ctx);
         let theme = ctx.theme;
-        let block = block(content.frame())
+        let block = block(content.frame(ctx))
             .border_style(theme.border)
             .style(theme.popup);
         let inner = block.inner(area);
@@ -71,7 +72,7 @@ impl Popup {
 
     fn inner(&self, ctx: &Context) -> Rect {
         let content = self.content();
-        block(content.frame()).inner(content.area(ctx))
+        block(content.frame(ctx)).inner(content.area(ctx))
     }
 
     fn content(&self) -> &dyn PopupContent {
@@ -92,7 +93,7 @@ impl Popup {
 }
 
 trait PopupContent {
-    fn frame(&self) -> PopupFrame<'_>;
+    fn frame(&self, ctx: &Context) -> PopupFrame;
     fn area(&self, ctx: &Context) -> Rect;
     fn handle_key(&mut self, key: KeyEvent, inner: Rect, ctx: &Context) -> Vec<Command>;
     fn handle_mouse(&mut self, _mouse: MouseEvent, _inner: Rect, _ctx: &Context) -> Vec<Command> {
@@ -101,9 +102,8 @@ trait PopupContent {
     fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context);
 }
 
-#[derive(Clone, Copy)]
-enum PopupFrame<'a> {
-    Bordered { title: &'a str },
+enum PopupFrame {
+    Bordered { title: Line<'static> },
     Bare,
 }
 
@@ -121,7 +121,7 @@ impl Context<'_> {
     }
 }
 
-fn block(frame: PopupFrame<'_>) -> Block<'_> {
+fn block(frame: PopupFrame) -> Block<'static> {
     match frame {
         PopupFrame::Bordered { title } => Block::bordered().title(title),
         PopupFrame::Bare => Block::new(),

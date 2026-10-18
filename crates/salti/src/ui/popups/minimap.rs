@@ -5,7 +5,7 @@ use libmsa::{AlignmentType, ColumnCounts};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Styled},
+    style::{Color, Style, Styled},
     symbols,
     text::Line,
     widgets::{Paragraph, Widget},
@@ -52,9 +52,9 @@ impl Minimap {
 }
 
 impl PopupContent for Minimap {
-    fn frame(&self) -> PopupFrame<'_> {
+    fn frame(&self, _: &Context) -> PopupFrame {
         PopupFrame::Bordered {
-            title: "Minimap (drag to pan)",
+            title: Line::from("Minimap (drag to pan)"),
         }
     }
 
@@ -110,16 +110,7 @@ impl PopupContent for Minimap {
             highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
         {
             tint_box(buf, window_box, ctx.theme.selection_columns);
-            for x in window_box.left()..window_box.right() {
-                for y in [inner.top().saturating_sub(1), inner.bottom()] {
-                    if let Some(cell) = buf.cell_mut((x, y))
-                        && cell.symbol() == symbols::line::HORIZONTAL
-                    {
-                        cell.set_symbol(symbols::line::THICK_HORIZONTAL)
-                            .set_style(ctx.theme.text);
-                    }
-                }
-            }
+            mark_box(buf, window_box, ctx.theme.text);
         }
     }
 }
@@ -142,6 +133,19 @@ fn tint_box(buffer: &mut Buffer, area: Rect, tint: Color) {
         }
         if let Some(bg) = blend(cell.bg, tint, MINIMAP_WINDOW_ALPHA) {
             cell.set_bg(bg);
+        }
+    }
+}
+
+fn mark_box(buffer: &mut Buffer, area: Rect, style: Style) {
+    for x in area.left()..area.right() {
+        for y in [area.top().saturating_sub(1), area.bottom()] {
+            if let Some(cell) = buffer.cell_mut((x, y))
+                && cell.symbol() == symbols::line::HORIZONTAL
+            {
+                cell.set_symbol(symbols::line::THICK_HORIZONTAL)
+                    .set_style(style);
+            }
         }
     }
 }
@@ -195,7 +199,7 @@ fn stack_ticks(shares: &[f32; COLOURS], ticks: usize) -> [usize; COLOURS] {
     let mut allocated = exact.map(|exact| exact.floor() as usize);
     let coloured = exact.iter().sum::<f64>().round() as usize;
     let leftover = coloured.saturating_sub(allocated.iter().sum());
-    let mut by_remainder: Vec<usize> = (0..COLOURS).collect();
+    let mut by_remainder: [usize; COLOURS] = std::array::from_fn(|colour| colour);
     by_remainder.sort_by(|&a, &b| exact[b].fract().total_cmp(&exact[a].fract()));
     for colour in by_remainder.into_iter().take(leftover) {
         allocated[colour] += 1;
