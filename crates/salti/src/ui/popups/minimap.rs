@@ -5,7 +5,7 @@ use libmsa::{AlignmentType, ColumnCounts};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style, Styled},
+    style::{Color, Styled},
     symbols,
     text::Line,
     widgets::{Paragraph, Widget},
@@ -23,11 +23,13 @@ use crate::{
         cell_columns,
         mouse::centre_on_pointer,
         popups::{Context, PopupContent, PopupFrame},
+        selection::blend,
     },
 };
 
 /// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
+const MINIMAP_WINDOW_ALPHA: f32 = 0.28;
 
 const COLOURS: usize = ResidueColour::VARIANTS.len();
 
@@ -107,7 +109,17 @@ impl PopupContent for Minimap {
         if let Some(window_box) =
             highlight_box(inner, ctx.screen.window.columns.clone(), total_columns)
         {
-            shade_highlight_box(buf, window_box, ctx.theme.minimap_window);
+            tint_box(buf, window_box, ctx.theme.selection_columns);
+            for x in window_box.left()..window_box.right() {
+                for y in [inner.top().saturating_sub(1), inner.bottom()] {
+                    if let Some(cell) = buf.cell_mut((x, y))
+                        && cell.symbol() == symbols::line::HORIZONTAL
+                    {
+                        cell.set_symbol(symbols::line::THICK_HORIZONTAL)
+                            .set_style(ctx.theme.text);
+                    }
+                }
+            }
         }
     }
 }
@@ -122,11 +134,14 @@ fn colour_shares(counts: &ColumnCounts, alignment_type: AlignmentType) -> [f32; 
     shares
 }
 
-fn shade_highlight_box(buffer: &mut Buffer, viewport_box: Rect, style: Style) {
-    for position in viewport_box.positions() {
-        if let Some(cell) = buffer.cell_mut(position) {
-            cell.set_char('▒');
-            cell.set_style(style);
+fn tint_box(buffer: &mut Buffer, area: Rect, tint: Color) {
+    for position in area.positions() {
+        let cell = &mut buffer[position];
+        if let Some(fg) = blend(cell.fg, tint, MINIMAP_WINDOW_ALPHA) {
+            cell.set_fg(fg);
+        }
+        if let Some(bg) = blend(cell.bg, tint, MINIMAP_WINDOW_ALPHA) {
+            cell.set_bg(bg);
         }
     }
 }

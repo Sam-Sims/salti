@@ -26,7 +26,6 @@ pub(super) const THEME: Theme = Theme {
     selection_rows: DEFAULT,
     selection_columns: DEFAULT,
     selection_ids: DEFAULT,
-    minimap_window: Style::new().fg(DEFAULT),
     residues: ResidueStyles {
         a: Style::new().fg(BLACK).bg(GREEN),
         t: Style::new().fg(BLACK).bg(RED),
