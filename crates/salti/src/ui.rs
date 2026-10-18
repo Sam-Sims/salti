@@ -137,6 +137,20 @@ pub(crate) fn cell_columns(cell: usize, cells: usize, total_columns: usize) -> R
     start..(start + 1).max((cell + 1) * total_columns / cells)
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+pub(crate) fn bar_ticks(fraction: f64, rows: u16) -> u64 {
+    debug_assert!((0.0..=1.0).contains(&fraction));
+    (fraction * full_bar_ticks(rows) as f64).round() as u64
+}
+
+pub(crate) fn full_bar_ticks(rows: u16) -> u64 {
+    u64::from(rows) * 8
+}
+
 struct EmptyState<'a> {
     loading: Option<&'a str>,
     theme: &'a Theme,
