@@ -86,6 +86,13 @@ impl ColumnCounts {
             .fold(0.0, |differing, (_, frequency)| differing + frequency)
     }
 
+    /// Returns each byte counted in the column and how often, in byte order
+    pub fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
+        (0..128)
+            .zip(self.counts.iter().copied())
+            .filter(|&(_, count)| count != 0)
+    }
+
     pub(crate) fn gap_fraction(&self) -> f64 {
         self.fraction(&[Class::Gap], Class::VARIANTS)
     }
@@ -121,12 +128,6 @@ impl ColumnCounts {
             .zip(counts)
             .filter(|&(_, count)| count != 0)
             .map(move |(residue, count)| (residue, f64::from(count) / total))
-    }
-
-    fn symbol_counts(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
-        (0..128)
-            .zip(self.counts.iter().copied())
-            .filter(|&(_, count)| count != 0)
     }
 }
 
@@ -383,6 +384,16 @@ mod tests {
         assert_eq!(
             column(AlignmentType::Dna, symbols).constant_fraction(),
             None
+        );
+    }
+
+    #[test]
+    fn symbol_counts_works() {
+        assert_eq!(
+            column(AlignmentType::Dna, b"aA-A")
+                .symbol_counts()
+                .collect::<Vec<_>>(),
+            [(b'-', 1), (b'A', 2), (b'a', 1)]
         );
     }
 }
