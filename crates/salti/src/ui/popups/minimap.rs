@@ -41,6 +41,7 @@ pub(crate) struct Minimap {
     total_columns: usize,
     composition: Option<Vec<[f32; COLOURS]>>,
     entropy: Vec<f64>,
+    missing: Vec<f64>,
 }
 
 impl Minimap {
@@ -50,12 +51,13 @@ impl Minimap {
         let has_composition = alignment_type != AlignmentType::Generic;
         let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, _| {
             let shares = has_composition.then(|| colour_shares(&counts, alignment_type));
-            (shares, counts.entropy())
+            (shares, counts.entropy(), counts.missing_fraction())
         });
         Self {
             total_columns: layout.columns().len(),
             composition: columns.iter().map(|&(shares, ..)| shares).collect(),
             entropy: prefix_sums(columns.iter().map(|&(_, entropy, ..)| entropy)),
+            missing: prefix_sums(columns.iter().map(|&(.., missing)| missing)),
         }
     }
 }
@@ -65,6 +67,7 @@ pub(crate) enum MinimapView {
     #[default]
     Composition,
     Entropy,
+    Missing,
 }
 
 impl PopupContent for Minimap {
@@ -131,6 +134,9 @@ impl PopupContent for Minimap {
             }
             MinimapView::Entropy => {
                 render_plot(buf, inner, &self.entropy, ctx.theme.minimap_levels);
+            }
+            MinimapView::Missing => {
+                render_plot(buf, inner, &self.missing, ctx.theme.minimap_levels);
             }
         }
         if let Some(window_box) =

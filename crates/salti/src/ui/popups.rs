@@ -181,14 +181,14 @@ mod tests {
 
     #[rstest]
     #[case::forward(MinimapView::Composition, MinimapView::Entropy)]
-    #[case::wraps(MinimapView::Entropy, MinimapView::Composition)]
+    #[case::wraps(MinimapView::Missing, MinimapView::Composition)]
     fn next_tab_works(#[case] tab: MinimapView, #[case] expected: MinimapView) {
         assert_eq!(next_tab(tab), expected);
     }
 
     #[rstest]
     #[case::backward(MinimapView::Entropy, MinimapView::Composition)]
-    #[case::wraps(MinimapView::Composition, MinimapView::Entropy)]
+    #[case::wraps(MinimapView::Composition, MinimapView::Missing)]
     fn previous_tab_works(#[case] tab: MinimapView, #[case] expected: MinimapView) {
         assert_eq!(previous_tab(tab), expected);
     }

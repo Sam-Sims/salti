@@ -641,6 +641,15 @@ mod tests {
     }
 
     #[test]
+    fn minimap_missing() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::BackTab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
     fn minimap_view_is_kept_across_loads() {
         let mut app = app(DNA);
         type_text(&mut app, "m");
