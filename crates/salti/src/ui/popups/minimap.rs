@@ -52,21 +52,21 @@ impl Minimap {
         let has_composition = alignment_type != AlignmentType::Generic;
         let reference = session.state().reference();
         let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, col| {
-            let shares = has_composition.then(|| colour_shares(&counts, alignment_type));
-            let differing = reference.map(|row| counts.differing_fraction(grid.cell(row, col)));
             (
-                shares,
+                colour_shares(&counts, alignment_type),
                 counts.entropy(),
-                differing,
+                reference.map_or(0.0, |row| counts.differing_fraction(grid.cell(row, col))),
                 counts.missing_fraction(),
             )
         });
         Self {
             total_columns: layout.columns().len(),
-            composition: columns.iter().map(|&(shares, ..)| shares).collect(),
+            composition: has_composition
+                .then(|| columns.iter().map(|&(shares, ..)| shares).collect()),
             entropy: prefix_sums(columns.iter().map(|&(_, entropy, ..)| entropy)),
             differences: reference
-                .map(|_| prefix_sums(columns.iter().filter_map(|&(_, _, differing, _)| differing))),
+                .is_some()
+                .then(|| prefix_sums(columns.iter().map(|&(_, _, differing, _)| differing))),
             missing: prefix_sums(columns.iter().map(|&(.., missing)| missing)),
         }
     }
@@ -82,10 +82,12 @@ pub(crate) enum MinimapView {
 }
 
 impl PopupContent for Minimap {
-    fn frame(&self, ctx: &Context) -> PopupFrame {
-        PopupFrame::Bordered {
-            title: tab_title(ctx.minimap_view, ctx.theme),
-        }
+    fn frame(&self) -> PopupFrame {
+        PopupFrame::Bordered
+    }
+
+    fn title(&self, width: u16, ctx: &Context) -> Line<'static> {
+        tab_title(ctx.minimap_view, width, ctx.theme)
     }
 
     fn area(&self, ctx: &Context) -> Rect {
@@ -282,19 +284,16 @@ fn render_plot(buffer: &mut Buffer, area: Rect, prefix_sums: &[f64], levels: [Co
 fn window_peaks(prefix_sums: &[f64], cells: usize) -> Vec<f64> {
     let total_columns = prefix_sums.len() - 1;
     let window = (WINDOW_CELLS * total_columns / cells.max(1)).clamp(1, total_columns);
-    let means: Vec<f64> = (0..total_columns)
-        .map(|column| {
-            let start = column
-                .saturating_sub(window / 2)
-                .min(total_columns - window);
-            (prefix_sums[start + window] - prefix_sums[start]) / window as f64
-        })
-        .collect();
+    let mean = |column: usize| {
+        let start = column
+            .saturating_sub(window / 2)
+            .min(total_columns - window);
+        (prefix_sums[start + window] - prefix_sums[start]) / window as f64
+    };
     (0..cells)
         .map(|cell| {
-            means[cell_columns(cell, cells, total_columns)]
-                .iter()
-                .copied()
+            cell_columns(cell, cells, total_columns)
+                .map(mean)
                 .fold(0.0, f64::max)
         })
         .collect()

@@ -34,10 +34,12 @@ impl Keybinds {
 }
 
 impl PopupContent for Keybinds {
-    fn frame(&self, ctx: &Context) -> PopupFrame {
-        PopupFrame::Bordered {
-            title: tab_title(self.tab, ctx.theme),
-        }
+    fn frame(&self) -> PopupFrame {
+        PopupFrame::Bordered
+    }
+
+    fn title(&self, width: u16, ctx: &Context) -> Line<'static> {
+        tab_title(self.tab, width, ctx.theme)
     }
 
     fn area(&self, ctx: &Context) -> Rect {
