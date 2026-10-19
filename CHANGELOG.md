@@ -53,7 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FASTA files are validated off the UI thread.
 - Notifications clear themselves instead of staying until the next key press. Errors show for 3s and other notifications for 1s, then fade out.
 - Cysteine (C) has its own protein colour, following Clustal's groups.
-- Generic alignments show a note in the minimap's Composition view instead of colours.
+- Generic alignments show a note in the minimap's Composition and Missing views, which need a DNA or protein alignment.
+- In generic alignments `-` is just another character rather than a gap, so it counts towards the consensus, `filter-constant` and the minimap.
+- `filter-gaps` can't be used on generic alignments, so switching to generic with `set-sequence-type` asks you to clear any gap filter first.
 - Better highlighting of the shaded minimap position.
 - In DNA and protein alignments the consensus counts upper and lower case as the same residue, and shows whichever case is more common in the column.
 - Conservation calculations now ignore `N`, `X` and ambiguity codes
