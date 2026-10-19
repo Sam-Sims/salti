@@ -11,7 +11,7 @@ use strum::VariantArray;
 use crate::{
     command::Command,
     config::keybindings::{Binding, Category, KEY_BINDINGS},
-    ui::popups::{COLUMN_GAP, Context, PopupContent, PopupFrame},
+    ui::popups::{COLUMN_GAP, Context, PopupContent, PopupFrame, next_tab, previous_tab},
 };
 
 #[derive(Debug, Default)]
@@ -26,10 +26,8 @@ impl Keybinds {
         bindings_in(self.tab).count().saturating_sub(list_height)
     }
 
-    fn select_tab(&mut self, index: usize) {
-        if let Some(&tab) = Category::VARIANTS.get(index) {
-            *self = Self { tab, scroll: 0 };
-        }
+    fn select_tab(&mut self, tab: Category) {
+        *self = Self { tab, scroll: 0 };
     }
 }
 
@@ -60,10 +58,9 @@ impl PopupContent for Keybinds {
     }
 
     fn handle_key(&mut self, key: KeyEvent, inner: Rect, _: &Context) -> Vec<Command> {
-        let index = self.tab as usize;
         match key.code {
-            KeyCode::Left if index > 0 => self.select_tab(index - 1),
-            KeyCode::Right => self.select_tab(index + 1),
+            KeyCode::Left | KeyCode::BackTab => self.select_tab(previous_tab(self.tab)),
+            KeyCode::Right | KeyCode::Tab => self.select_tab(next_tab(self.tab)),
             KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
             KeyCode::Down => self.scroll = (self.scroll + 1).min(self.max_scroll(inner)),
             _ => {}

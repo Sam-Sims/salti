@@ -701,7 +701,7 @@ mod tests {
     fn keybinds_last_tab() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
-        press(&mut app, [KeyCode::Right; 3]);
+        press(&mut app, [KeyCode::BackTab]);
 
         insta::assert_snapshot!(screen_text(&mut app));
     }
