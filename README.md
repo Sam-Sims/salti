@@ -70,6 +70,8 @@ Click a sequence or position to select it, or Ctrl+click to select a region. Hol
 
 Press `m` to open an overview of the entire alignment. Click or drag to move around.
 
+The minimap has four views: Composition, Entropy, Differences and Missing. Press `m` or `Tab` to switch to the next view and `Shift+Tab` for the previous one. It reopens on the last view you used. See [Minimaps](#minimaps) for what each one shows.
+
 ![minimap](assets/minimap.gif)
 
 </details>
@@ -220,7 +222,7 @@ Use `?` in app to open the help page.
 - `Left click` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
 - `Middle click + drag` - Pan.
-- `m` - Open the minimap
+- `m` - Open the minimap, or switch its view while it is open.
 - `t` - Toggle the translation overlay.
 - `Shift+t` - Toggle the protein view.
 - `Alt+1|2|3` - Change to forward reading frame `+1`, `+2` or `+3`.
@@ -284,6 +286,17 @@ In DNA and protein alignments upper and lower case "vote" together as one residu
 If there is a tie for most common character, the lowest ASCII value wins.
 
 The default is `majority-non-gap`.
+
+### Minimaps
+
+Each minimap view gives a quick overview of the whole alignment. It supports mouse input, and you can drag to pan around the alignment.
+
+- **Composition** (the default) - Each block is a stacked bar showing the mix of residues in that part of the alignment: A, C, G and T (or the protein colour groups), then ambiguity codes, `N` (or `X`) and gaps.
+- **Entropy** - How variable each region is. Low where columns are similar, and high where there is a lot of variation. Gaps, `N`, `X` and ambiguity codes are ignored in this mode.
+- **Differences** - How much each region differs from the reference, so you need to set one first with `set-reference`. Gaps, `N`, `X` and ambiguity codes are ignored in this mode.
+- **Missing** - How much of each region is gaps, `N`, `X` or ambiguity codes.
+
+Entropy, Differences and Missing are drawn as bar plots. Importantly the bars are relative rather than absolute - the tallest bar is always the most variable (or most different, or most missing) region in the given alignment. This means an alignment with only a handful of differences will still show full height bars, so keep this in mind when comparing two different alignments.
 
 ### Translation overlay vs protein view
 
