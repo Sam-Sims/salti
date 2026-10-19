@@ -316,6 +316,8 @@ Reading frame can be changed at any time using `Alt+1` to `Alt+6`, or the `set-t
 
 `filter-gaps` hides columns whose gap fraction is above the threshold you give it. The threshold is a percentage, so `filter-gaps 25` removes columns where 25% of positions are gaps. You can use `filter-gaps 0` to clear the filter.
 
+Gap filters need a DNA or protein alignment.
+
 Gap filtering changes the visible coordinate space. The ruler marks jumps where hidden columns have been skipped. A single jump is shown with an arrow pointing towards the side that has a jump. Dense regions of skipped columns are shown as a run of `~` characters rather than individual arrows.
 
 The translation overlay can't be used with any filter that hides columns, such as `filter-gaps` or `filter-constant`. Hiding columns would break up codons and cause frameshifts, so the overlay wouldn't show a meaningful translation. Turning on a filter while the overlay is on is rejected, and so is turning on the overlay while a filter is active. The protein view however (`toggle-protein-view`) does support column filtering.
@@ -328,7 +330,7 @@ Like gap filtering - removing columns can change the visible coordinate space - 
 
 `filter-constant 99` hides columns where 99% of the positions are the same and so on. `filter-constant 0` clears the filter.
 
-The fraction is taken over residues only: gaps, unknown characters and ambiguity codes are ignored, and DNA and protein ignore case.
+For DNA and protein alignments only actual residues are counted, so gaps, unknown characters (`N` or `X`) and ambiguity codes don't count towards the percentage. Upper and lower case count as the same residue, and in DNA `U` is normalised to `T`. Generic alignments don't have any of these rules, so every character counts exactly as it is.
 
 ### GFF support
 
@@ -362,6 +364,7 @@ If columns are filtered, features are projected onto the remaining visible colum
 - Input must be FASTA with equal sequence lengths across records. A file with bad records is reported once the whole file has been read.
 - Sequence type is auto-detected on load; you can override it if its wrong.
     - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it falls back to `generic` mode.
+    - `generic` treats every character the same, `-` included. This has quite a few behaviour implications - there are no gaps, unknowns or ambiguity codes, and letters are differentiated by case. So `majority-non-gap` acts like `majority`, `filter-constant` counts `-`, gap filters can't be used, and neither can the Composition and Missing minimap views.
 
 ### Update check:
 
