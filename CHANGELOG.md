@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 4 new minimap views Composition, Entropy, Differences (from the reference) and Missing. `m` or `Tab` switches to the next view and `Shift+Tab` to the previous one, and the minimap reopens on the last view used.
 - An `auto` theme, now the default. At startup it checks whether the terminal is light or dark, and picks `everforest-light` or `everforest-dark` to match.
 - Two new themes: `everforest-light` and `solarized-dark`.
 - A `--theme` flag and `SALTI_THEME` variable to always start with a given theme, which skips the light/dark check.
 - Live theme previews in `set-theme` as you type or tab through the names. `Enter` applies the theme.
-- A keybinds popup, opened with `?` or `keybinds`, with one tab per category. `Left`/`Right` switch tabs.
+- A keybinds popup, opened with `?` or `keybinds`, with one tab per category. `Left`/`Right` or `Tab`/`Shift+Tab` switch tabs.
 - Reverse complement translation, with frames `-1`, `-2` and `-3` in `set-translation-frame`, bound to `Alt+4`, `Alt+5` and `Alt+6`.
 - A `d` keybind that cycles the diff mode through off, reference and consensus, skipping reference when none is set. The new mode is shown as a notification.
 - Typing a bare number in the command palette (`:42`) jumps to that position.
@@ -31,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** Alignments containing non-ASCII characters fail to load with an error.
 - **Breaking:** Invalid GFF files fail to load with an error.
 - **Breaking:** An open popup (the command palette, the minimap or the keybinds popup) takes all keyboard and mouse input.
-  - `Esc` closes any popup, including the minimap. `m` opens the minimap but no longer closes it.
+  - `Esc` closes any popup, including the minimap. `m` opens the minimap, and switches its view once open, instead of closing it.
   - Other global keys do nothing while a popup is open. For example, with the minimap open, `q` no longer quits and `:` no longer opens the palette.
   - Clicks outside a popup are ignored.
   - In the minimap, arrow keys still scroll the alignment, but `Alt+Left`/`Alt+Right` no longer scroll the sequence names.
@@ -52,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FASTA files are validated off the UI thread.
 - Notifications clear themselves instead of staying until the next key press. Errors show for 3s and other notifications for 1s, then fade out.
 - Cysteine (C) has its own protein colour, following Clustal's groups.
-- The minimap colours each block by the consensus of the columns it covers, using the current consensus method.
+- Generic alignments show a note in the minimap's Composition view instead of colours.
+- Better highlighting of the shaded minimap position.
 - In DNA and protein alignments the consensus counts upper and lower case as the same residue, and shows whichever case is more common in the column.
 - Conservation calculations now ignore `N`, `X` and ambiguity codes
 - Generic alignments show the `Conservation:` row with a note that conservation needs a DNA or protein alignment, instead of hiding the row.
