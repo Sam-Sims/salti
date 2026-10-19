@@ -21,7 +21,7 @@ ratatui = "0.30.2"
 tokio-stream = "0.1.18"
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = "0.7"
-paraseq = { version = "0.4.8", features = ["url", "ssh"] }
+paraseq = { version = "0.6.1", features = ["url", "ssh"] }
 libmsa = { path = "../libmsa", version = "0.3.0" }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 nucleo-matcher = "0.3.1"
