@@ -26,9 +26,10 @@ pub(super) const THEME: Theme = Theme {
         .fg(BASE01)
         .bg(BASE15)
         .add_modifier(Modifier::BOLD),
-    selection_rows: BASE2,
-    selection_columns: BASE2,
+    selection_rows: BASE03,
+    selection_columns: BASE03,
     selection_ids: BLUE,
+    minimap_window: BASE00,
     minimap_levels: [BLUE, CYAN, YELLOW, RED],
     residues: ResidueStyles {
         a: Style::new().fg(BASE03).bg(GREEN),

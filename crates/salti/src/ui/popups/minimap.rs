@@ -172,7 +172,7 @@ impl PopupContent for Minimap {
         if let Some(window_box) =
             highlight_box(inner, ctx.screen.window.columns.clone(), self.total_columns)
         {
-            tint_box(buf, window_box, ctx.theme.selection_columns);
+            tint_box(buf, window_box, ctx.theme.minimap_window);
             mark_box(buf, window_box, ctx.theme.text);
         }
     }

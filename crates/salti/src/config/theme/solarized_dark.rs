@@ -29,6 +29,7 @@ pub(super) const THEME: Theme = Theme {
     selection_rows: BASE02,
     selection_columns: BASE02,
     selection_ids: BLUE,
+    minimap_window: BASE0,
     minimap_levels: [BLUE, CYAN, YELLOW, RED],
     residues: ResidueStyles {
         a: Style::new().fg(BASE03).bg(GREEN),

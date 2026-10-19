@@ -362,7 +362,7 @@ If columns are filtered, features are projected onto the remaining visible colum
 ### Data/Rendering
 
 - Input must be FASTA with equal sequence lengths across records. A file with bad records is reported once the whole file has been read.
-- Sequence type is auto-detected on load; you can override it if its wrong.
+- Sequence type is auto-detected on load, but you can override it if its wrong.
     - It samples up to 100 random alignments and compares NT and AA character fractions. If neither crosses 50%, it falls back to `generic` mode.
     - `generic` treats every character the same, `-` included. This has quite a few behaviour implications - there are no gaps, unknowns or ambiguity codes, and letters are differentiated by case. So `majority-non-gap` acts like `majority`, `filter-constant` counts `-`, gap filters can't be used, and neither can the Composition and Missing minimap views.
 
