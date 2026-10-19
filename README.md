@@ -122,7 +122,7 @@ Change theme with set-theme.
 <details>
 <summary><b>Transparent support for HTTP/SSH/Compressed files</b></summary>
 
-Open compressed FASTA files, or load them straight from a URL or over SSH:
+Open compressed FASTA files (gzip, bgzip, bzip2, xz or zstd), or load them straight from a URL or over SSH:
 ```
 :load sequences.fasta.gz
 :load https://example.com/alignment.fasta
