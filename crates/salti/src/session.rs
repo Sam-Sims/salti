@@ -116,8 +116,15 @@ impl ViewState {
         match &mut self.mode {
             ViewMode::Plain {
                 alignment_type: current,
-                ..
-            } => *current = alignment_type,
+                filter,
+            } => {
+                ensure!(
+                    alignment_type != libmsa::AlignmentType::Generic
+                        || filter.max_gap_fraction.is_none(),
+                    "Generic alignments have no gaps. Clear the gap filter first"
+                );
+                *current = alignment_type;
+            }
             ViewMode::TranslationOverlay => ensure!(
                 alignment_type.supports_translation(),
                 "The translation overlay needs a DNA alignment. Turn it off with t first"
@@ -130,9 +137,17 @@ impl ViewState {
     }
 
     pub fn set_gap_filter(&mut self, fraction: Option<f64>) -> Result<()> {
-        match self.filter_mut() {
-            Some(filter) => filter.max_gap_fraction = fraction,
-            None => ensure_no_filter_in_overlay(fraction)?,
+        match &mut self.mode {
+            ViewMode::Plain {
+                alignment_type: libmsa::AlignmentType::Generic,
+                ..
+            } if fraction.is_some() => bail!(
+                "Gap filters need a DNA or protein alignment. Use set-sequence-type if the type was detected incorrectly"
+            ),
+            ViewMode::Plain { filter, .. } | ViewMode::ProteinView { filter } => {
+                filter.max_gap_fraction = fraction;
+            }
+            ViewMode::TranslationOverlay => ensure_no_filter_in_overlay(fraction)?,
         }
         Ok(())
     }
@@ -429,6 +444,10 @@ mod tests {
         state.set_alignment_type(libmsa::AlignmentType::Protein)
     }
 
+    fn set_generic(state: &mut ViewState) -> Result<()> {
+        state.set_alignment_type(libmsa::AlignmentType::Generic)
+    }
+
     fn at_column(column: usize) -> Position {
         Position {
             column,
@@ -548,6 +567,14 @@ mod tests {
     #[case::constant_filter_in_overlay(
         ViewState::toggle_translation_overlay,
         |state: &mut ViewState| state.set_constant_filter(Some(0.5))
+    )]
+    #[case::gap_filter_in_generic(
+        set_generic,
+        |state: &mut ViewState| state.set_gap_filter(Some(0.5))
+    )]
+    #[case::generic_with_gap_filter(
+        |state: &mut ViewState| state.set_gap_filter(Some(0.5)),
+        set_generic
     )]
     fn view_state_rejects(#[case] setup: Change, #[case] change: Change) {
         let mut state = session(&[b"ATG"]).state().clone();

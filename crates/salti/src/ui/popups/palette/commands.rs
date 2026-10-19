@@ -137,7 +137,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
         name: "filter-constant",
         aliases: &[],
-        doc: "Hide columns when a counted position reaches the given percentage. Gaps and unknowns are ignored. Use 0 to disable it.",
+        doc: "Hide columns when a counted position reaches the given percentage. DNA and protein ignore gaps and unknowns. Use 0 to disable it.",
         action: Action::Required {
             run: |_, argument| Ok(Command::SetConstantFilter(parse_percentage(argument)?)),
             completer: Some(completers::constant_percentages),

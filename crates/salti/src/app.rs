@@ -669,6 +669,16 @@ mod tests {
     }
 
     #[test]
+    fn minimap_missing_generic() {
+        let mut app = minimap_app();
+        app.execute_commands(vec![Command::SetActiveType(libmsa::AlignmentType::Generic)]);
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::BackTab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
     fn minimap_view_is_kept_across_loads() {
         let mut app = app(DNA);
         type_text(&mut app, "m");

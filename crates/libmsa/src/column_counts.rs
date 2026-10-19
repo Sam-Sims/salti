@@ -66,7 +66,7 @@ impl ColumnCounts {
     /// Returns the fraction of the column's cells that are gaps, unknown symbols or ambiguity
     /// codes
     ///
-    /// 0 when the column is empty
+    /// 0 when the column is empty or the grid is generic
     pub fn missing_fraction(&self) -> f64 {
         self.fraction(
             &[Class::Gap, Class::Unknown, Class::Ambiguous],
@@ -238,6 +238,12 @@ mod tests {
         b"aaTT",
         b'T'
     )]
+    #[case::generic_non_gap_counts_gaps(
+        AlignmentType::Generic,
+        ConsensusMethod::MajorityNonGap,
+        b"---AA",
+        b'-'
+    )]
     fn consensus_works(
         #[case] alignment_type: AlignmentType,
         #[case] method: ConsensusMethod,
@@ -270,6 +276,7 @@ mod tests {
     #[case::outside_alphabet(AlignmentType::Dna, b"????", 0.0)]
     #[case::protein(AlignmentType::Protein, b"MMKK", 2f64.ln())]
     #[case::generic_keeps_case(AlignmentType::Generic, b"Aa", 2f64.ln())]
+    #[case::generic_counts_gaps(AlignmentType::Generic, b"A-", 2f64.ln())]
     fn entropy_works(
         #[case] alignment_type: AlignmentType,
         #[case] symbols: &[u8],
@@ -324,7 +331,7 @@ mod tests {
     #[case::all_kinds(AlignmentType::Dna, b"-NRA", 0.75)]
     #[case::empty(AlignmentType::Dna, b"", 0.0)]
     #[case::protein_unknown(AlignmentType::Protein, b"MMXx", 0.5)]
-    #[case::generic_counts_only_gaps(AlignmentType::Generic, b"NN-A", 0.25)]
+    #[case::generic_has_none(AlignmentType::Generic, b"NN-A", 0.0)]
     fn missing_fraction_works(
         #[case] alignment_type: AlignmentType,
         #[case] symbols: &[u8],
@@ -366,10 +373,15 @@ mod tests {
         assert_eq!(column(AlignmentType::Dna, symbols).gap_fraction(), expected);
     }
 
+    #[test]
+    fn gap_fraction_is_zero_for_generic() {
+        assert_eq!(column(AlignmentType::Generic, b"--").gap_fraction(), 0.0);
+    }
+
     #[rstest]
     #[case::dna_ignores_gaps_and_n(AlignmentType::Dna, b"AANn--T", 2.0 / 3.0)]
     #[case::protein_ignores_gaps_and_x(AlignmentType::Protein, b"MMXx--K", 2.0 / 3.0)]
-    #[case::generic_counts_n(AlignmentType::Generic, b"NN-A", 2.0 / 3.0)]
+    #[case::generic_counts_n_and_gaps(AlignmentType::Generic, b"NN-A", 0.5)]
     #[case::constant(AlignmentType::Dna, b"AAAA", 1.0)]
     #[case::merges_case(AlignmentType::Dna, b"AaAa", 1.0)]
     #[case::leaves_out_ambiguous(AlignmentType::Dna, b"CYCC", 1.0)]

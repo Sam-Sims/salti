@@ -42,14 +42,14 @@ pub(crate) struct Minimap {
     composition: Option<Vec<[f32; COLOURS]>>,
     entropy: Vec<f64>,
     differences: Option<Vec<f64>>,
-    missing: Vec<f64>,
+    missing: Option<Vec<f64>>,
 }
 
 impl Minimap {
     pub(crate) fn new(session: &Session) -> Self {
         let (grid, layout) = (session.grid(), session.layout());
         let alignment_type = grid.alignment_type();
-        let has_composition = alignment_type != AlignmentType::Generic;
+        let is_generic = alignment_type == AlignmentType::Generic;
         let reference = session.state().reference();
         let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, col| {
             (
@@ -61,13 +61,14 @@ impl Minimap {
         });
         Self {
             total_columns: layout.columns().len(),
-            composition: has_composition
+            composition: (!is_generic)
                 .then(|| columns.iter().map(|&(shares, ..)| shares).collect()),
             entropy: prefix_sums(columns.iter().map(|&(_, entropy, ..)| entropy)),
             differences: reference
                 .is_some()
                 .then(|| prefix_sums(columns.iter().map(|&(_, _, differing, _)| differing))),
-            missing: prefix_sums(columns.iter().map(|&(.., missing)| missing)),
+            missing: (!is_generic)
+                .then(|| prefix_sums(columns.iter().map(|&(.., missing)| missing))),
         }
     }
 }
@@ -156,7 +157,16 @@ impl PopupContent for Minimap {
                 render_plot(buf, inner, differences, ctx.theme.minimap_levels);
             }
             MinimapView::Missing => {
-                render_plot(buf, inner, &self.missing, ctx.theme.minimap_levels);
+                let Some(missing) = &self.missing else {
+                    render_note(
+                        buf,
+                        inner,
+                        "Missing data needs a DNA or protein alignment.",
+                        ctx.theme,
+                    );
+                    return;
+                };
+                render_plot(buf, inner, missing, ctx.theme.minimap_levels);
             }
         }
         if let Some(window_box) =
@@ -433,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn new_has_no_composition_for_generic() {
+    fn new_has_no_composition_or_missing_for_generic() {
         let mut session = session(&[b"AC"]);
         session
             .update(Position::default(), |state| {
@@ -441,7 +451,8 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(Minimap::new(&session).composition, None);
+        let minimap = Minimap::new(&session);
+        assert_eq!((minimap.composition, minimap.missing), (None, None));
     }
 
     #[rstest]

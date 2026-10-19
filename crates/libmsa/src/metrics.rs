@@ -298,7 +298,7 @@ mod tests {
 
     #[rstest]
     #[case::dna(AlignmentType::Dna, &[2, 3, 5])]
-    #[case::generic(AlignmentType::Generic, &[2, 3, 4])]
+    #[case::generic(AlignmentType::Generic, &[1, 2, 3, 4, 5])]
     fn kept_columns_uses_grid_alignment_type(
         #[case] alignment_type: AlignmentType,
         #[case] expected: &[usize],

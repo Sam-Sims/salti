@@ -45,11 +45,13 @@ pub enum Class {
 
 /// Returns what `byte` is in an alignment of `kind`
 ///
-/// `-` is a gap for every type. DNA has an unknown symbol and ambiguity codes, protein has
-/// only an unknown symbol, and generic has neither. Case is ignored
+/// `-` is a gap in DNA and protein. DNA has an unknown symbol and ambiguity codes, and protein
+/// has only an unknown symbol. Generic has none of these, so every byte is a residue. Case is
+/// ignored
 #[inline]
 pub const fn classify(byte: u8, kind: AlignmentType) -> Class {
     match (kind, byte.to_ascii_uppercase()) {
+        (AlignmentType::Generic, _) => Class::Residue,
         (_, GAP) => Class::Gap,
         (AlignmentType::Dna, b'N') | (AlignmentType::Protein, UNKNOWN_AMINO_ACID) => Class::Unknown,
         (
@@ -238,7 +240,7 @@ mod tests {
     #[case::protein_unknown(AlignmentType::Protein, b'x', Class::Unknown)]
     #[case::protein_r_is_residue(AlignmentType::Protein, b'R', Class::Residue)]
     #[case::protein_n_is_residue(AlignmentType::Protein, b'N', Class::Residue)]
-    #[case::generic_gap(AlignmentType::Generic, b'-', Class::Gap)]
+    #[case::generic_gap_is_residue(AlignmentType::Generic, b'-', Class::Residue)]
     #[case::generic_n_is_residue(AlignmentType::Generic, b'N', Class::Residue)]
     #[case::generic_ambiguous_is_residue(AlignmentType::Generic, b'R', Class::Residue)]
     #[case::dna_three_base_ambiguous(AlignmentType::Dna, b'V', Class::Ambiguous)]
