@@ -1,8 +1,6 @@
-use std::path::Path;
-
 use anyhow::{Result, ensure, format_err};
 use libmsa::{Alignment, Sequence};
-use paraseq::fasta;
+use paraseq::{BoxedReader, ReaderBuilder, fasta};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
@@ -25,7 +23,7 @@ pub fn read(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
                 .to_string();
             sequences.push(Sequence {
                 id,
-                residues: record.seq().to_vec(),
+                residues: record.seq().into_owned(),
             });
         }
     }
@@ -48,14 +46,15 @@ fn is_ssh_path(input: &str) -> bool {
     input.starts_with("ssh://")
 }
 
-fn open_fasta_reader(input: &str) -> Result<fasta::Reader<paraseq::BoxedReader>> {
-    if is_http_url(input) {
-        return fasta::Reader::from_url(input).map_err(Into::into);
-    }
-    if is_ssh_path(input) {
-        return fasta::Reader::from_ssh(input).map_err(Into::into);
-    }
-    fasta::Reader::from_path(Path::new(input)).map_err(Into::into)
+fn open_fasta_reader(input: &str) -> Result<fasta::Reader<BoxedReader>> {
+    let builder = if is_http_url(input) {
+        ReaderBuilder::url(input)
+    } else if is_ssh_path(input) {
+        ReaderBuilder::ssh(input)
+    } else {
+        ReaderBuilder::path(input)
+    };
+    Ok(builder.build_fasta()?)
 }
 
 #[cfg(test)]
@@ -75,9 +74,11 @@ mod tests {
         read(file.path().to_str().unwrap(), cancel)
     }
 
-    #[test]
-    fn read_works() {
-        let file = fasta_file(b">seq1\nA-CG\n>seq2\nTGCA\n");
+    #[rstest]
+    #[case::lf(b">seq1\nA-CG\n>seq2\nTGCA\n")]
+    #[case::crlf(b">seq1\r\nA-CG\r\n>seq2\r\nTGCA\r\n")]
+    fn read_works(#[case] content: &[u8]) {
+        let file = fasta_file(content);
 
         let alignment = parse(&file, &CancellationToken::new()).unwrap();
 
