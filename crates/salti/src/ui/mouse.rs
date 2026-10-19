@@ -6,7 +6,7 @@ use crate::{
     gff::Gff,
     session::Session,
     ui::{
-        UiState,
+        UiState, cell_columns,
         layout::{ScreenLayout, Window, screen_rows},
         panes::gff,
         selection::Selection,
@@ -232,9 +232,9 @@ fn selection_from_anchors(anchor: Selection, current: Selection) -> Selection {
 }
 
 fn column_at(mouse_x: u16, area: Rect, total_columns: usize) -> usize {
-    let offset = usize::from(mouse_x.saturating_sub(area.x));
-    let column = offset.saturating_mul(total_columns) / usize::from(area.width);
-    column.min(total_columns.saturating_sub(1))
+    let cells = usize::from(area.width);
+    let cell = usize::from(mouse_x.saturating_sub(area.x)).min(cells - 1);
+    cell_columns(cell, cells, total_columns).start
 }
 
 #[cfg(test)]

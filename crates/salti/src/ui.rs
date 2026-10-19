@@ -8,7 +8,7 @@ pub(crate) mod panes;
 pub(crate) mod popups;
 pub(crate) mod selection;
 
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 
 use ratatui::{
     buffer::{Buffer, CellWidth},
@@ -26,7 +26,7 @@ use crate::{
         bars::{BottomStatusBar, InputBar, TopStatusBar},
         layout::ScreenLayout,
         notification::{Notification, Notifications},
-        popups::{Context, Popup},
+        popups::{Context, Popup, minimap::MinimapView},
         selection::Selection,
     },
 };
@@ -84,6 +84,7 @@ pub fn render(
                 gff,
                 theme,
                 screen,
+                minimap_view: ui.minimap_view,
             },
         );
     }
@@ -99,6 +100,7 @@ pub struct UiState {
     pub position: Position,
     pub loading: Option<String>,
     pub gff_tooltip: Option<String>,
+    pub(crate) minimap_view: MinimapView,
 }
 
 impl UiState {
@@ -129,6 +131,26 @@ pub(crate) fn input_name(input: &str) -> &str {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(input)
+}
+
+pub(crate) fn cell_columns(cell: usize, cells: usize, total_columns: usize) -> Range<usize> {
+    debug_assert!(cell < cells);
+    let start = cell * total_columns / cells;
+    start..(start + 1).max((cell + 1) * total_columns / cells)
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+pub(crate) fn bar_ticks(fraction: f64, rows: u16) -> u64 {
+    debug_assert!((0.0..=1.0).contains(&fraction));
+    (fraction * full_bar_ticks(rows) as f64).round() as u64
+}
+
+pub(crate) fn full_bar_ticks(rows: u16) -> u64 {
+    u64::from(rows) * 8
 }
 
 struct EmptyState<'a> {
@@ -297,6 +319,21 @@ mod tests {
         ui.notify(Notification::info("Loaded alignment"));
 
         insta::assert_snapshot!(render_text(Some(&session), ui));
+    }
+
+    #[rstest]
+    #[case::fewer_cells(4, 10, vec![0..2, 2..5, 5..7, 7..10])]
+    #[case::one_column_per_cell(3, 3, vec![0..1, 1..2, 2..3])]
+    #[case::more_cells_repeat_columns(5, 3, vec![0..1, 0..1, 1..2, 1..2, 2..3])]
+    fn cell_columns_works(
+        #[case] cells: usize,
+        #[case] total_columns: usize,
+        #[case] expected: Vec<Range<usize>>,
+    ) {
+        let columns: Vec<_> = (0..cells)
+            .map(|cell| cell_columns(cell, cells, total_columns))
+            .collect();
+        assert_eq!(columns, expected);
     }
 
     #[rstest]

@@ -7,20 +7,20 @@ expression: screen_text(&mut app)
 │              │1       10                                                     │
 │              │.   .    |                                                     │
 │1 s0          │ATGAAATTTCCC                                                   │
-│2 s1          │AT┌Keybinds───────────────────────────────────┐                │
-│3 s2          │AT│ General │ Navigation │ Translation        │                │
-│              │  │q            Quit application              │                │
-│              │  │:            Open command palette          │                │
-│              │  │?            Show key bindings             │                │
-│              │  │m            Open minimap                  │                │
-│              │  │d            Cycle diff mode               │                │
-│              │  │                                           │                │
-│              │  │                                           │                │
-│              │  │                                           │                │
-│              │  │                                           │                │
-│              │  │                                           │                │
-├──────────────┼──│                                           │────────────────┤
-│Reference Sequ│No│                                           │                │
-│Consensus Sequ│AT└───────────────────────────────────────────┘                │
+│2 s1          │A┌ General │ Navigation │ Translation ─────────┐               │
+│3 s2          │A│q            Quit application                │               │
+│              │ │:            Open command palette            │               │
+│              │ │?            Show key bindings               │               │
+│              │ │m            Open minimap, or switch its view│               │
+│              │ │d            Cycle diff mode                 │               │
+│              │ │                                             │               │
+│              │ │                                             │               │
+│              │ │                                             │               │
+│              │ │                                             │               │
+│              │ │                                             │               │
+│              │ │                                             │               │
+├──────────────┼─│                                             │───────────────┤
+│Reference Sequ│N└─────────────────────────────────────────────┘               │
+│Consensus Sequ│ATGAAATTTCCC                                                   │
 │Conservation: │███▅▅▃██████                                                   │
 └──────────────┴───────────────────────────────────────────────────────────────┘

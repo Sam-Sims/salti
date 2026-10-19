@@ -10,10 +10,11 @@ use ratatui::{
 use crate::{
     config::theme::Theme,
     session::{Session, WindowColumns},
-    ui::panes::{render_pane, stretch},
+    ui::{
+        bar_ticks, full_bar_ticks,
+        panes::{render_pane, stretch},
+    },
 };
-
-const FULL_BAR_HEIGHT: u64 = 8;
 
 pub(crate) struct ConsensusAlignmentPane<'a> {
     pub(crate) session: &'a Session,
@@ -44,13 +45,10 @@ impl Widget for ConsensusAlignmentPane<'_> {
 
         match &columns.conservation {
             Some(conservation) => Sparkline::default()
-                .data(
-                    columns
-                        .cells
-                        .iter()
-                        .map(|cell| cell.map(|cell| bar_height(conservation[cell.index]))),
-                )
-                .max(FULL_BAR_HEIGHT)
+                .data(columns.cells.iter().map(|cell| {
+                    cell.map(|cell| bar_ticks(conservation[cell.index], conservation_area.height))
+                }))
+                .max(full_bar_ticks(conservation_area.height))
                 .style(theme.accent_alt)
                 .render(conservation_area, buf),
             None => Paragraph::new(Line::from(
@@ -83,16 +81,6 @@ impl Widget for ConsensusSequenceIdPane<'_> {
             .style(self.theme.base)
             .render(inner_area, buf);
     }
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
-fn bar_height(value: f64) -> u64 {
-    debug_assert!((0.0..=1.0).contains(&value));
-    (value * FULL_BAR_HEIGHT as f64).round() as u64
 }
 
 #[cfg(test)]

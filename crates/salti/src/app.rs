@@ -71,6 +71,7 @@ impl App {
                             gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
+                            minimap_view: self.ui.minimap_view,
                         },
                     ),
                     None => keybindings::lookup(key).into_iter().collect(),
@@ -86,6 +87,7 @@ impl App {
                             gff: self.gff.as_ref(),
                             theme: &self.ui.theme,
                             screen: &self.screen,
+                            minimap_view: self.ui.minimap_view,
                         },
                     ),
                     None => mouse::handle(
@@ -188,12 +190,13 @@ impl App {
             Command::Quit => self.should_quit = true,
             Command::OpenPalette => self.ui.popup = Some(Popup::Palette(PaletteState::default())),
             Command::OpenMinimap => {
-                self.session()?;
-                self.ui.popup = Some(Popup::Minimap(Minimap));
+                let minimap = Minimap::new(self.session()?);
+                self.ui.popup = Some(Popup::Minimap(minimap));
             }
             Command::OpenKeybinds => self.ui.popup = Some(Popup::Keybinds(Keybinds::default())),
             Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(choice) => self.ui.set_theme(choice),
+            Command::SetMinimapView(view) => self.ui.minimap_view = view,
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment(input) => self.load(input),
             Command::LoadGff { path } => {
@@ -360,7 +363,7 @@ mod tests {
     use crate::{
         config::theme::Theme,
         test_utils::{buffer_text, session},
-        ui::{notification::NotificationLevel, selection::Selection},
+        ui::{notification::NotificationLevel, popups::minimap::MinimapView, selection::Selection},
     };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
@@ -621,6 +624,70 @@ mod tests {
     }
 
     #[test]
+    fn minimap_open() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_entropy() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_differences() {
+        let mut app = minimap_app();
+        app.execute_commands(vec![Command::SetReference(Some(0))]);
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_differences_without_reference() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Tab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_missing() {
+        let mut app = minimap_app();
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::BackTab]);
+
+        insta::assert_snapshot!(screen_text(&mut app));
+    }
+
+    #[test]
+    fn minimap_view_is_kept_across_loads() {
+        let mut app = app(DNA);
+        type_text(&mut app, "m");
+        press(&mut app, [KeyCode::Tab, KeyCode::Esc]);
+
+        app.finish_load("next.fasta".to_string(), Ok(alignment(&[b"ACGT"])));
+
+        assert_eq!(app.ui.minimap_view, MinimapView::Entropy);
+    }
+
+    fn minimap_app() -> App {
+        let rows: Vec<Vec<u8>> = ["AA", "A-", "CN", "GT"]
+            .iter()
+            .map(|halves| halves.bytes().flat_map(|byte| [byte; 80]).collect())
+            .collect();
+        app(&rows.iter().map(Vec::as_slice).collect::<Vec<_>>())
+    }
+
+    #[test]
     #[cfg(not(target_os = "macos"))]
     fn keybinds_open() {
         let mut app = app(DNA);
@@ -634,7 +701,7 @@ mod tests {
     fn keybinds_last_tab() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
-        press(&mut app, [KeyCode::Right; 3]);
+        press(&mut app, [KeyCode::BackTab]);
 
         insta::assert_snapshot!(screen_text(&mut app));
     }

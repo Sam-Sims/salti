@@ -1,0 +1,27 @@
+---
+source: crates/salti/src/app.rs
+expression: screen_text(&mut app)
+---
+File: test.fasta | Status: Loaded | 4 alignments | Length: 160 | Positions: 1-63
+┌──────────────┬───────────────────────────────────────────────────────────────┐
+│              │1       10        20        30        40        50        60   │
+│              │.   .    |    .    |    .    |    .    |    .    |    .    |   │
+│1 s0          │AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA│
+│2 s1          │AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA│
+│3 s2          │CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC│
+│4 s3          │GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG│
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+│              │                                                               │
+┌ Composition │ Entropy │ Differences │ Missing ───────────────────────────────┐
+│██████████████████████████████████████████████████████████████████████████████│
+│▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆│
+│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│
+│███████████████████████████████████████▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂│
+│██████████████████████████████████████████████████████████████████████████████│
+└━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━───────────────────────────────────────────────┘

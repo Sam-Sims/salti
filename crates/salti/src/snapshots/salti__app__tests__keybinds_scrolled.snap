@@ -1,13 +1,13 @@
 ---
 source: crates/salti/src/app.rs
-expression: screen_text(&app)
+expression: screen_text(&mut app)
 ---
  File: test.fasta | Status: Loaded | 3 alignments | Length: 12 | Positions: 1-12
-┌──────────────┬──┌Keybinds───────────────────────────────────┐────────────────┐
-│              │1 │ General │ Navigation │ Translation        │                │
-├──────────────┼──│Shift+Right  Fast scroll right             │────────────────┤
-│Reference Sequ│No│Alt+Left     Scroll names left             │                │
-│Consensus Sequ│AT│Alt+Right    Scroll names right            │                │
-│Conservation: │██│Home         Jump to start of alignment    │                │
-└──────────────┴──│End          Jump to end of alignment      │────────────────┘
-                  └───────────────────────────────────────────┘
+┌──────────────┬─┌ General │ Navigation │ Translation ─────────┐───────────────┐
+│              │1│Shift+Left   Fast scroll left                │               │
+├──────────────┼─│Shift+Right  Fast scroll right               │───────────────┤
+│Reference Sequ│N│Alt+Left     Scroll names left               │               │
+│Consensus Sequ│A│Alt+Right    Scroll names right              │               │
+│Conservation: │█│Home         Jump to start of alignment      │               │
+└──────────────┴─│End          Jump to end of alignment        │───────────────┘
+                 └─────────────────────────────────────────────┘

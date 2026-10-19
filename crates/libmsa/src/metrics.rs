@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 
-use crate::{ColumnCounts, ConsensusMethod, Grid};
+use crate::{ColumnCounts, Grid};
 
 const PARALLEL_MIN_CELLS: usize = 1 << 16;
 const MIN_ROWS_PER_JOB: usize = 128;
@@ -30,27 +30,6 @@ impl Grid<'_> {
                 })
             })
             .collect()
-    }
-
-    /// Returns the consensus of every cell in `rows` and `cols` counted together
-    ///
-    /// Ids may repeat, and each occurrence is counted. `None` when nothing is counted, which
-    /// includes empty `rows` or `cols`
-    ///
-    /// # Panics
-    ///
-    /// If an id in `rows` or `cols` is out of range, as for [`cells`](Self::cells)
-    pub fn consensus(self, rows: &[usize], cols: &[usize], method: ConsensusMethod) -> Option<u8> {
-        let pooled = count_blocks(self, rows, cols)
-            .flat_map_iter(|(_, counts)| counts)
-            .reduce(
-                || [0; 128],
-                |mut pooled, counts| {
-                    add_counts(&mut pooled, &counts);
-                    pooled
-                },
-            );
-        ColumnCounts::new(pooled, self.alignment_type()).consensus(method)
     }
 
     /// Returns the ids of the columns that pass `filter` over `rows`, in ascending order
@@ -281,53 +260,6 @@ mod tests {
                 counts.consensus(ConsensusMethod::Majority)
             });
         assert_eq!(consensus, [Some(b'P'), Some(b'M')]);
-    }
-
-    #[rstest]
-    #[case::subset(&[2], &[0, 1, 2], ConsensusMethod::Majority, b'T')]
-    #[case::pools_rows_and_cols(&[0, 1], &[0, 1, 2, 3], ConsensusMethod::Majority, b'A')]
-    #[case::cols_repeated(&[0], &[1, 1, 0], ConsensusMethod::Majority, b'C')]
-    #[case::majority(&[3], &[0, 1, 2, 3], ConsensusMethod::Majority, b'-')]
-    #[case::majority_non_gap(&[3], &[0, 1, 2, 3], ConsensusMethod::MajorityNonGap, b'T')]
-    fn consensus_works(
-        #[case] rows: &[usize],
-        #[case] cols: &[usize],
-        #[case] method: ConsensusMethod,
-        #[case] expected: u8,
-    ) {
-        let alignment = sample();
-        assert_eq!(
-            alignment
-                .grid(AlignmentType::Dna)
-                .consensus(rows, cols, method),
-            Some(expected)
-        );
-    }
-
-    #[test]
-    fn consensus_pools_across_blocks() {
-        let row = [vec![b'A'; 128], vec![b'C'; 129]].concat();
-        let alignment = dna(&[&row]);
-        let cols: Vec<usize> = (0..row.len()).collect();
-        assert_eq!(
-            alignment
-                .grid(AlignmentType::Dna)
-                .consensus(&[0], &cols, ConsensusMethod::Majority),
-            Some(b'C')
-        );
-    }
-
-    #[rstest]
-    #[case::no_rows(&[], &[0, 1])]
-    #[case::no_cols(&[0, 1], &[])]
-    fn consensus_is_none(#[case] rows: &[usize], #[case] cols: &[usize]) {
-        let alignment = sample();
-        assert_eq!(
-            alignment
-                .grid(AlignmentType::Dna)
-                .consensus(rows, cols, ConsensusMethod::Majority),
-            None
-        );
     }
 
     fn filter_sample() -> Alignment {

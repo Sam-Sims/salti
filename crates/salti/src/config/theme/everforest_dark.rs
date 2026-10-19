@@ -29,8 +29,7 @@ pub(super) const THEME: Theme = Theme {
     selection_rows: BG1,
     selection_columns: BG2,
     selection_ids: AQUA,
-    minimap_window: Style::new().fg(BG1),
-    minimap_empty: BG1,
+    minimap_levels: [BLUE, AQUA, YELLOW, RED],
     residues: ResidueStyles {
         a: Style::new().fg(BG0).bg(GREEN),
         t: Style::new().fg(BG0).bg(RED),

@@ -73,7 +73,7 @@ fn shade(buf: &mut Buffer, area: Rect, tint: Color, alpha: f32) {
 }
 
 fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32) {
-    match blend_background(cell.bg, tint, alpha) {
+    match blend(cell.bg, tint, alpha) {
         Some(background) => {
             cell.set_bg(background);
         }
@@ -83,7 +83,7 @@ fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32
     }
 }
 
-fn blend_background(base: Color, tint: Color, alpha: f32) -> Option<Color> {
+pub(crate) fn blend(base: Color, tint: Color, alpha: f32) -> Option<Color> {
     match (base, tint) {
         (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Some(Rgb(
             interpolate(red, red_tint, alpha),
