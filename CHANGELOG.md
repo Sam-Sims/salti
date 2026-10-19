@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generic alignments show the `Conservation:` row with a note that conservation needs a DNA or protein alignment, instead of hiding the row.
 - `filter-constant` ignores case and ambiguity codes (in DNA/protein alignments)
 - Diff view now ignores case in DNA and protein.
+- In DNA alignments `U` is normalised to `T` in the diff view, consensus, conservation, filters and the minimap.
 - The GFF pane's scrollbar matches the alignment's, and scrollbars no longer draw a background.
 - Column stats (consensus, conservation, etc.) are only calculated for the part of the alignment on screen.
 - Consensus, conservation and column filtering are faster, especially on alignments with many sequences.
