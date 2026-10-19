@@ -62,7 +62,7 @@ pub const fn classify(byte: u8, kind: AlignmentType) -> Class {
 
 /// Returns true if `a` and `b` are the same residue for `kind`
 ///
-/// DNA and protein ignore case, generic compares bytes exactly
+/// DNA and protein ignore case, and DNA treats `U` as `T`. Generic compares bytes exactly
 #[inline]
 pub const fn same_residue(a: u8, b: u8, kind: AlignmentType) -> bool {
     fold(a, kind) == fold(b, kind)
@@ -118,9 +118,10 @@ pub(crate) const fn is_detection_protein(byte: u8) -> bool {
 
 #[inline]
 pub(crate) const fn fold(byte: u8, kind: AlignmentType) -> u8 {
-    match kind {
-        AlignmentType::Dna | AlignmentType::Protein => byte.to_ascii_uppercase(),
-        AlignmentType::Generic => byte,
+    match (kind, byte.to_ascii_uppercase()) {
+        (AlignmentType::Dna, b'U') => b'T',
+        (AlignmentType::Dna | AlignmentType::Protein, upper) => upper,
+        (AlignmentType::Generic, _) => byte,
     }
 }
 
@@ -151,6 +152,7 @@ mod tests {
     #[case::dna_same(AlignmentType::Dna, b'A', b'A')]
     #[case::dna_case(AlignmentType::Dna, b'a', b'A')]
     #[case::dna_unknown_case(AlignmentType::Dna, b'n', b'N')]
+    #[case::dna_u_is_t(AlignmentType::Dna, b'u', b'T')]
     #[case::protein_case(AlignmentType::Protein, b'l', b'L')]
     #[case::generic_same(AlignmentType::Generic, b'a', b'a')]
     fn same_residue_works(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
@@ -162,6 +164,8 @@ mod tests {
     #[case::unknown_vs_base(AlignmentType::Dna, b'N', b'A')]
     #[case::gap_vs_residue(AlignmentType::Dna, b'-', b'A')]
     #[case::generic_case(AlignmentType::Generic, b'a', b'A')]
+    #[case::protein_u_is_not_t(AlignmentType::Protein, b'U', b'T')]
+    #[case::generic_u_is_not_t(AlignmentType::Generic, b'U', b'T')]
     fn same_residue_rejects(#[case] kind: AlignmentType, #[case] a: u8, #[case] b: u8) {
         assert!(!same_residue(a, b, kind));
     }

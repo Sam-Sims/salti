@@ -25,7 +25,8 @@ impl ColumnCounts {
 
     /// Returns the most common byte under `method`
     ///
-    /// For DNA and protein the vote merges case first, and then the most common case wins.
+    /// For DNA and protein the vote merges case first (and DNA merges `U` into `T`), and then
+    /// the most common byte of the winner is returned.
     ///
     /// `None` when nothing is counted, such as an all-gap column under
     /// [`ConsensusMethod::MajorityNonGap`]
@@ -39,7 +40,8 @@ impl ColumnCounts {
 
     /// Returns the Shannon entropy of the column's residues
     ///
-    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case.
+    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case, and
+    /// DNA treats `U` as `T`.
     /// 0 when there are no residues
     pub fn entropy(&self) -> f64 {
         self.frequencies_in(&[Class::Residue])
@@ -75,7 +77,8 @@ impl ColumnCounts {
     /// Returns the fraction of the column's residues that aren't the same residue as
     /// `reference`
     ///
-    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case.
+    /// Gaps, unknown symbols and ambiguity codes are left out, DNA and protein ignore case, and
+    /// DNA treats `U` as `T`.
     /// 0 when there are no residues or `reference` isn't a residue
     pub fn differing_fraction(&self, reference: u8) -> f64 {
         if residue::classify(reference, self.alignment_type) != Class::Residue {
@@ -226,6 +229,7 @@ mod tests {
     #[case::split_case_vote(AlignmentType::Dna, ConsensusMethod::Majority, b"AAaaGGG", b'A')]
     #[case::soft_masked(AlignmentType::Dna, ConsensusMethod::Majority, b"aaaA", b'a')]
     #[case::case_tie_picks_upper(AlignmentType::Dna, ConsensusMethod::Majority, b"AAaa", b'A')]
+    #[case::merges_u_into_t(AlignmentType::Dna, ConsensusMethod::Majority, b"UUUTTCCCC", b'U')]
     #[case::protein_merges_case(AlignmentType::Protein, ConsensusMethod::Majority, b"mmK", b'm')]
     #[case::generic_keeps_case(AlignmentType::Generic, ConsensusMethod::Majority, b"AAaaGGG", b'G')]
     #[case::generic_tie_compares_bytes(
@@ -260,6 +264,7 @@ mod tests {
     #[case::four_even(AlignmentType::Dna, b"ACGT", 4f64.ln())]
     #[case::leaves_out_gaps_and_no_information(AlignmentType::Dna, b"AA--NNRY", 0.0)]
     #[case::merges_case(AlignmentType::Dna, b"AaAa", 0.0)]
+    #[case::merges_u_into_t(AlignmentType::Dna, b"UuTt", 0.0)]
     #[case::empty(AlignmentType::Dna, b"", 0.0)]
     #[case::no_residues(AlignmentType::Dna, b"NN--", 0.0)]
     #[case::outside_alphabet(AlignmentType::Dna, b"????", 0.0)]
