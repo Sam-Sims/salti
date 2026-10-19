@@ -2,16 +2,17 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::{Buffer, CellWidth},
     layout::{Constraint, Rect},
-    macros::vertical,
     text::{Line, Span},
-    widgets::{Paragraph, Tabs, Widget},
+    widgets::{Paragraph, Widget},
 };
 use strum::VariantArray;
 
 use crate::{
     command::Command,
     config::keybindings::{Binding, Category, KEY_BINDINGS},
-    ui::popups::{COLUMN_GAP, Context, PopupContent, PopupFrame, next_tab, previous_tab},
+    ui::popups::{
+        COLUMN_GAP, Context, PopupContent, PopupFrame, next_tab, previous_tab, tab_title,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -22,8 +23,9 @@ pub(crate) struct Keybinds {
 
 impl Keybinds {
     fn max_scroll(&self, inner: Rect) -> usize {
-        let list_height = usize::from(inner.height.saturating_sub(1));
-        bindings_in(self.tab).count().saturating_sub(list_height)
+        bindings_in(self.tab)
+            .count()
+            .saturating_sub(usize::from(inner.height))
     }
 
     fn select_tab(&mut self, tab: Category) {
@@ -32,9 +34,9 @@ impl Keybinds {
 }
 
 impl PopupContent for Keybinds {
-    fn frame(&self, _: &Context) -> PopupFrame {
+    fn frame(&self, ctx: &Context) -> PopupFrame {
         PopupFrame::Bordered {
-            title: Line::from("Keybinds"),
+            title: tab_title(self.tab, ctx.theme),
         }
     }
 
@@ -50,7 +52,7 @@ impl PopupContent for Keybinds {
             .max()
             .unwrap_or_default();
         let width = key_width() + COLUMN_GAP + description_width + 2;
-        let height = longest_tab + 3;
+        let height = longest_tab + 2;
         ctx.screen.frame.overlay_area.centered(
             Constraint::Length(u16::try_from(width).unwrap_or(u16::MAX)),
             Constraint::Length(u16::try_from(height).unwrap_or(u16::MAX)),
@@ -70,13 +72,6 @@ impl PopupContent for Keybinds {
 
     fn render(&self, inner: Rect, buf: &mut Buffer, ctx: &Context) {
         let theme = ctx.theme;
-        let [tabs_area, list_area] = inner.layout(&vertical![==1, *=1]);
-        Tabs::new(Category::VARIANTS.iter().map(ToString::to_string))
-            .select(self.tab as usize)
-            .style(theme.text_muted)
-            .highlight_style(theme.highlight)
-            .render(tabs_area, buf);
-
         let column_width = key_width() + COLUMN_GAP;
         let scroll = self.scroll.min(self.max_scroll(inner));
         let lines: Vec<Line> = bindings_in(self.tab)
@@ -88,7 +83,7 @@ impl PopupContent for Keybinds {
                 ])
             })
             .collect();
-        Paragraph::new(lines).render(list_area, buf);
+        Paragraph::new(lines).render(inner, buf);
     }
 }
 

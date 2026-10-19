@@ -7,9 +7,8 @@ expression: screen_text(&mut app)
 │              │1       10                                                     │
 │              │.   .    |                                                     │
 │1 s0          │ATGAAATTTCCC                                                   │
-│2 s1          │A┌Keybinds─────────────────────────────────────┐               │
-│3 s2          │A│ General │ Navigation │ Translation          │               │
-│              │ │t            Toggle the translation overlay  │               │
+│2 s1          │A┌ General │ Navigation │ Translation ─────────┐               │
+│3 s2          │A│t            Toggle the translation overlay  │               │
 │              │ │T            Toggle the protein view         │               │
 │              │ │Alt+1        Set translation frame +1        │               │
 │              │ │Alt+2        Set translation frame +2        │               │
@@ -19,8 +18,9 @@ expression: screen_text(&mut app)
 │              │ │Alt+6        Set translation frame -3        │               │
 │              │ │                                             │               │
 │              │ │                                             │               │
+│              │ │                                             │               │
 ├──────────────┼─│                                             │───────────────┤
-│Reference Sequ│N│                                             │               │
-│Consensus Sequ│A└─────────────────────────────────────────────┘               │
+│Reference Sequ│N└─────────────────────────────────────────────┘               │
+│Consensus Sequ│ATGAAATTTCCC                                                   │
 │Conservation: │███▅▅▃██████                                                   │
 └──────────────┴───────────────────────────────────────────────────────────────┘
