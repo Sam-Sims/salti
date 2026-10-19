@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Protein gaps and unknown residues (`X`) use the DNA gap and `N` colours, so gaps and `X` look different.
 - Consensus ties are no longer broken at random. The residue with the lowest ASCII value wins.
 - salti exits if its terminal input closes, instead of hanging.
+- FASTA files with Windows line endings (CRLF) load correctly. Previously `\r` was kept in sequence names and residues.
 
 ## [0.9.0] - 2026-05-13
 
