@@ -52,7 +52,7 @@ impl App {
             should_quit: false,
             screen,
         };
-        if let Some(input) = startup.file_path {
+        if let Some(input) = startup.input {
             app.load(input);
         }
         if startup.update_check {
@@ -371,7 +371,7 @@ mod tests {
 
     fn app(sequences: &[&[u8]]) -> App {
         let mut app = App::new(StartupState {
-            file_path: None,
+            input: None,
             update_check: false,
             theme: Theme::default(),
             auto_theme: None,

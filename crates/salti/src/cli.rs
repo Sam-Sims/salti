@@ -5,15 +5,6 @@ use clap::{
 
 use crate::config::theme::{self, Theme, ThemeChoice, ThemeName};
 
-#[derive(Debug)]
-pub struct StartupState {
-    /// Input source (file path, URL, or SSH path)
-    pub file_path: Option<String>,
-    pub update_check: bool,
-    pub theme: Theme,
-    pub auto_theme: Option<ThemeName>,
-}
-
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -22,10 +13,9 @@ pub struct StartupState {
 )]
 pub struct Cli {
     /// Input source: file path, URL (http/https), or SSH path (ssh://)
-    #[arg(value_name = "INPUT")]
-    pub file: Option<String>,
+    pub input: Option<String>,
 
-    /// Enable debug logging to `salti.log`
+    /// Enable debug logging to salti.log
     #[arg(long)]
     pub debug: bool,
 
@@ -33,21 +23,30 @@ pub struct Cli {
     #[arg(long, env = "SALTI_SKIP_UPDATE_CHECK", value_parser = FalseyValueParser::new())]
     pub skip_update_check: bool,
 
-    /// Theme to start with: `auto` picks a light or dark theme to match the terminal
+    /// Theme to start with: auto picks a light or dark theme to match the terminal
     #[arg(long, env = "SALTI_THEME", default_value = "auto", value_parser = theme_parser())]
     pub theme: ThemeChoice,
 }
 
 impl Cli {
-    pub fn startup_state(self) -> StartupState {
+    pub fn into_startup_state(self) -> StartupState {
         let auto_theme = theme::auto_theme(self.theme);
         StartupState {
-            file_path: self.file,
+            input: self.input,
             update_check: !self.skip_update_check,
             theme: Theme::builtin(self.theme.resolve(auto_theme)),
             auto_theme,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct StartupState {
+    /// a file path, URL or SSH path
+    pub input: Option<String>,
+    pub update_check: bool,
+    pub theme: Theme,
+    pub auto_theme: Option<ThemeName>,
 }
 
 fn theme_parser() -> impl TypedValueParser<Value = ThemeChoice> {

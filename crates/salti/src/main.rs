@@ -42,9 +42,9 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let startup = cli.startup_state();
+    let startup = cli.into_startup_state();
     info!(
-        has_input_file = startup.file_path.is_some(),
+        has_input_file = startup.input.is_some(),
         update_check = startup.update_check,
         "startup state: "
     );
