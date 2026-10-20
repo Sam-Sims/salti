@@ -8,38 +8,60 @@ use crate::{
 pub enum Command {
     Quit,
     OpenPalette,
-    ClosePopup,
     OpenMinimap,
     OpenKeybinds,
+    ClosePopup,
     SetTheme(ThemeChoice),
     SetMinimapView(MinimapView),
     ShowNotification(Notification),
-    LoadAlignment(String),
+    LoadAlignment {
+        input: String,
+    },
+    LoadGff {
+        path: String,
+    },
     CheckForUpdate,
-    ScrollDown { amount: usize },
-    ScrollUp { amount: usize },
-    ScrollLeft { amount: usize },
-    ScrollRight { amount: usize },
-    ScrollNamesLeft { amount: usize },
-    ScrollNamesRight { amount: usize },
+
+    ScrollDown {
+        amount: usize,
+    },
+    ScrollUp {
+        amount: usize,
+    },
+    ScrollLeft {
+        amount: usize,
+    },
+    ScrollRight {
+        amount: usize,
+    },
+    ScrollNamesLeft {
+        amount: usize,
+    },
+    ScrollNamesRight {
+        amount: usize,
+    },
+    /// a position among the shown columns, after filters
+    JumpToVisibleColumn(usize),
+    /// a column in the alignment; jumps to the first shown column at or after it
     JumpToColumn(usize),
-    JumpToIndex(usize),
-    JumpToSequence(usize),
+    /// an index into the loaded GFF's features
     JumpToFeature(usize),
+    /// a row in the alignment
+    JumpToSequence(usize),
     JumpToEnd,
+
+    PinSequence(usize),
+    UnpinSequence(usize),
+    SetReference(Option<usize>),
     SetRowFilter(Option<String>),
     SetGapFilter(Option<f64>),
     SetConstantFilter(Option<f64>),
     ClearAllFilters,
-    PinSequence(usize),
-    UnpinSequence(usize),
-    SetReference(Option<usize>),
-    SetConsensusMethod(libmsa::ConsensusMethod),
-    SetActiveType(libmsa::AlignmentType),
-    SetTranslationFrame(libmsa::ReadingFrame),
-    SetDiffMode(DiffMode),
-    CycleDiffMode,
     ToggleTranslationOverlay,
     ToggleProteinView,
-    LoadGff { path: String },
+    SetTranslationFrame(libmsa::ReadingFrame),
+    SetActiveType(libmsa::AlignmentType),
+    SetConsensusMethod(libmsa::ConsensusMethod),
+    SetDiffMode(DiffMode),
+    CycleDiffMode,
 }

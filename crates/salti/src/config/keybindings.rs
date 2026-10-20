@@ -156,7 +156,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "jump-start",
         code: KeyCode::Home,
         modifiers: KeyModifiers::NONE,
-        command: Command::JumpToIndex(0),
+        command: Command::JumpToVisibleColumn(0),
         category: Category::Navigation,
         description: "Jump to start of alignment",
     },

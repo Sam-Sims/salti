@@ -103,7 +103,9 @@ pub(crate) fn centre_on_pointer(
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
             let column = column_at(mouse.column, area, total_columns);
-            Some(Command::JumpToIndex(column.saturating_sub(window_span / 2)))
+            Some(Command::JumpToVisibleColumn(
+                column.saturating_sub(window_span / 2),
+            ))
         }
         _ => None,
     }
@@ -520,7 +522,10 @@ mod tests {
             mouse_event(LEFT_DOWN, area.x + 1, area.y),
         );
 
-        assert!(matches!(commands.as_slice(), [Command::JumpToIndex(_)]));
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::JumpToVisibleColumn(_)]
+        ));
     }
 
     const TRACK_AREA: Rect = Rect::new(10, 0, 10, 1);
@@ -548,7 +553,7 @@ mod tests {
     ) {
         assert_eq!(
             centre_on_pointer(mouse_event(kind, x, 0), TRACK_AREA, 10, 100),
-            expected.map(Command::JumpToIndex)
+            expected.map(Command::JumpToVisibleColumn)
         );
     }
 }

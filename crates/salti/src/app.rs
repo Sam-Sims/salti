@@ -161,7 +161,7 @@ impl App {
             Command::SetTheme(choice) => self.ui.set_theme(choice),
             Command::SetMinimapView(view) => self.ui.minimap_view = view,
             Command::ShowNotification(notification) => self.ui.notify(notification),
-            Command::LoadAlignment(input) => self.load(input),
+            Command::LoadAlignment { input } => self.load(input),
             Command::LoadGff { path } => {
                 self.gff = Some(gff::parse(Path::new(&path))?);
                 self.ui
@@ -181,7 +181,7 @@ impl App {
                 self.ui.position.name = self.ui.position.name.saturating_sub(amount);
             }
             Command::ScrollNamesRight { amount } => self.ui.position.name += amount,
-            Command::JumpToIndex(index) => self.ui.position.column = index,
+            Command::JumpToVisibleColumn(index) => self.ui.position.column = index,
             Command::JumpToColumn(column) => {
                 self.ui.position.column = self
                     .session()?

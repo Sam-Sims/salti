@@ -205,7 +205,11 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["load"],
         doc: "Load an alignment file using a file path argument.",
         action: Action::Required {
-            run: |_, argument| Ok(Command::LoadAlignment(argument.to_string())),
+            run: |_, argument| {
+                Ok(Command::LoadAlignment {
+                    input: argument.to_string(),
+                })
+            },
             completer: Some(completers::filename),
         },
     },
