@@ -46,7 +46,7 @@ impl Widget for SequenceIdPane<'_> {
             .map(|pos| match pos {
                 Some(pos) => {
                     let row = layout.rows()[pos];
-                    let style = if pos < layout.pinned() {
+                    let style = if pos < layout.pinned_count() {
                         theme.accent
                     } else {
                         theme.text

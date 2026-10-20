@@ -43,7 +43,7 @@ pub(crate) fn session_with_ids(sequences: &[(&str, &[u8])]) -> Session {
 pub(crate) fn full_window(session: &Session) -> Window {
     let layout = session.layout();
     Window {
-        pinned: 0..layout.pinned(),
+        pinned: 0..layout.pinned_count(),
         rows: 0..layout.main().len(),
         columns: 0..layout.columns().len(),
         names: 0..session.base_alignment().max_id_len(),

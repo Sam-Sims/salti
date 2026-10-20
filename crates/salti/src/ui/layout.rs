@@ -58,7 +58,7 @@ impl ScreenLayout {
         let app = AppLayout::new(frame.content_area, gff_height, local_feature_rows);
 
         let available_sequence_rows = usize::from(app.alignment_pane_sequence_rows.height);
-        let pinned = session.map_or(0, |session| session.layout().pinned());
+        let pinned = session.map_or(0, |session| session.layout().pinned_count());
         let shown_pinned = pinned.min(available_sequence_rows.saturating_sub(1));
         let divider = usize::from(shown_pinned > 0);
         let scrollable_height = available_sequence_rows - shown_pinned - divider;
@@ -100,7 +100,7 @@ pub fn screen_rows(
     layout: &Layout,
     window: &Window,
 ) -> impl Iterator<Item = Option<usize>> + use<> {
-    let offset = layout.pinned();
+    let offset = layout.pinned_count();
     let divider = (!window.pinned.is_empty()).then_some(None);
     let main = window.rows.clone().map(move |i| Some(offset + i));
     window.pinned.clone().map(Some).chain(divider).chain(main)

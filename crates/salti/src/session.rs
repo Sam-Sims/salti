@@ -3,45 +3,212 @@ mod layout;
 use std::{ops::Range, range::RangeInclusive};
 
 use anyhow::{Result, bail, ensure};
-pub(crate) use layout::Layout;
+pub use layout::Layout;
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    strum::Display,
-    strum::EnumString,
-    strum::VariantArray,
-)]
-#[strum(serialize_all = "lowercase")]
-pub enum DiffMode {
-    #[default]
-    Off,
-    Reference,
-    Consensus,
+#[derive(Debug)]
+pub struct Session {
+    base_alignment: libmsa::Alignment,
+    source: String,
+    // setting this directly would leave layout showing the old view
+    // update through Session::update
+    state: ViewState,
+    layout: Layout,
+    // setting DiffMode::Reference directly would be wrong if no reference row was set
+    // update through set_diff_mode or cycle_diff_mode
+    diff_mode: DiffMode,
+    pub consensus_method: libmsa::ConsensusMethod,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ViewMode {
-    Plain {
-        alignment_type: libmsa::AlignmentType,
-        filter: libmsa::ColumnFilter,
-    },
-    TranslationOverlay,
-    ProteinView {
-        filter: libmsa::ColumnFilter,
-    },
-}
+impl Session {
+    pub fn new(base_alignment: libmsa::Alignment, source: String) -> Self {
+        let state = ViewState {
+            frame: libmsa::ReadingFrame::Frame1,
+            row_regex_filter: None,
+            mode: ViewMode::Plain {
+                alignment_type: base_alignment.detected_type(),
+                filter: libmsa::ColumnFilter::default(),
+            },
+            pinned: Vec::new(),
+            reference: None,
+        };
+        let layout = Layout::new(&base_alignment, &state);
 
-impl ViewMode {
-    pub fn filter(self) -> libmsa::ColumnFilter {
-        match self {
-            Self::Plain { filter, .. } | Self::ProteinView { filter } => filter,
-            Self::TranslationOverlay => libmsa::ColumnFilter::default(),
+        Self {
+            base_alignment,
+            source,
+            state,
+            layout,
+            diff_mode: DiffMode::default(),
+            consensus_method: libmsa::ConsensusMethod::default(),
+        }
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// changes the view, keeping the same column and row at the top left where they're still shown
+    /// if the change fails, nothing changes
+    pub fn update(
+        &mut self,
+        position: Position,
+        change: impl FnOnce(&mut ViewState) -> Result<()>,
+    ) -> Result<Position> {
+        let columns = self.layout.columns();
+        let nt = columns
+            .get(position.column)
+            .or(columns.last())
+            .map(|&column| self.nt_start(column));
+        let top = self.layout.main().get(position.row).copied();
+
+        let mut next = self.state.clone();
+        change(&mut next)?;
+        self.layout = Layout::new(&self.base_alignment, &next);
+        self.state = next;
+        if self.diff_mode == DiffMode::Reference && self.state.reference().is_none() {
+            self.diff_mode = DiffMode::default();
+        }
+
+        Ok(Position {
+            column: nt.map_or(position.column, |nt| {
+                self.layout
+                    .column_position(self.column_range_at(nt..nt + 1).start)
+            }),
+            row: top.map_or(0, |row| self.layout.row_position(row)),
+            ..position
+        })
+    }
+
+    pub fn diff_mode(&self) -> DiffMode {
+        self.diff_mode
+    }
+
+    pub fn set_diff_mode(&mut self, mode: DiffMode) -> Result<()> {
+        ensure!(
+            mode != DiffMode::Reference || self.state.reference().is_some(),
+            "No reference sequence is set. Set one with set-reference"
+        );
+        self.diff_mode = mode;
+        Ok(())
+    }
+
+    pub fn cycle_diff_mode(&mut self) {
+        self.diff_mode = match self.diff_mode {
+            DiffMode::Off if self.state.reference().is_some() => DiffMode::Reference,
+            DiffMode::Off | DiffMode::Reference => DiffMode::Consensus,
+            DiffMode::Consensus => DiffMode::Off,
+        };
+    }
+
+    pub fn state(&self) -> &ViewState {
+        &self.state
+    }
+
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    pub fn base_alignment(&self) -> &libmsa::Alignment {
+        &self.base_alignment
+    }
+
+    pub fn grid(&self) -> libmsa::Grid<'_> {
+        self.state.grid(&self.base_alignment)
+    }
+
+    pub fn window_columns(&self, window: Range<usize>) -> WindowColumns<'_> {
+        let (grid, columns, cells): (libmsa::Grid<'_>, Vec<usize>, Vec<Option<Cell>>) =
+            match self.state.mode {
+                ViewMode::TranslationOverlay if !window.is_empty() => {
+                    let frame = self.state.frame;
+                    let last_column = self.base_alignment.width() - 1;
+                    let protein_window = self.protein_columns(window.clone());
+                    let cells = window
+                        .map(|nt| {
+                            let protein_column = frame.protein_col(nt)?;
+                            let codon_start = frame.nt_range(protein_column).start;
+                            Some(Cell {
+                                index: protein_column - protein_window.start,
+                                centre: nt == (codon_start + 1).min(last_column),
+                            })
+                        })
+                        .collect();
+                    (
+                        self.base_alignment.translated_grid(frame),
+                        protein_window.collect(),
+                        cells,
+                    )
+                }
+                _ => {
+                    let columns = self.layout.columns()[window].to_vec();
+                    let cells = (0..columns.len())
+                        .map(|index| {
+                            Some(Cell {
+                                index,
+                                centre: true,
+                            })
+                        })
+                        .collect();
+                    (self.grid(), columns, cells)
+                }
+            };
+        let method = self.consensus_method;
+        let (consensus, conservation): (Vec<u8>, Vec<Option<f64>>) = grid
+            .map_column_counts(self.layout.rows(), &columns, |counts, _| {
+                (
+                    counts.consensus(method).unwrap_or(b' '),
+                    counts.conservation(),
+                )
+            })
+            .into_iter()
+            .unzip();
+        WindowColumns {
+            grid,
+            columns,
+            cells,
+            consensus,
+            conservation: conservation.into_iter().collect(),
+        }
+    }
+
+    pub fn column_range_at(&self, nt: Range<usize>) -> Range<usize> {
+        match self.state.mode {
+            ViewMode::ProteinView { .. } => self.protein_columns(nt),
+            ViewMode::Plain { .. } | ViewMode::TranslationOverlay => nt,
+        }
+    }
+
+    pub fn protein_columns(&self, nt: Range<usize>) -> Range<usize> {
+        self.state
+            .frame
+            .protein_range(nt, self.base_alignment.width())
+    }
+
+    /// in the translation overlay a selection grows to cover whole codons
+    /// other modes leave it as is
+    pub fn selection_columns(&self, columns: RangeInclusive<usize>) -> RangeInclusive<usize> {
+        if !matches!(self.state.mode, ViewMode::TranslationOverlay) {
+            return columns;
+        }
+        let frame = self.state.frame;
+        let last_column = self.base_alignment.width() - 1;
+        let start = frame
+            .protein_col(columns.start)
+            .map_or(columns.start, |protein_column| {
+                frame.nt_range(protein_column).start
+            });
+        let end = frame
+            .protein_col(columns.last)
+            .map_or(columns.last, |protein_column| {
+                frame.nt_range(protein_column).end - 1
+            });
+        (start..=end.min(last_column)).into()
+    }
+
+    fn nt_start(&self, column: usize) -> usize {
+        match self.state.mode {
+            ViewMode::ProteinView { .. } => self.state.frame.nt_range(column).start,
+            ViewMode::Plain { .. } | ViewMode::TranslationOverlay => column,
         }
     }
 }
@@ -50,8 +217,14 @@ impl ViewMode {
 pub struct ViewState {
     pub frame: libmsa::ReadingFrame,
     pub row_regex_filter: Option<regex::Regex>,
+    // setting this directly could turn on the overlay with a column filter, which toggles refuse
+    // update through the toggle_* and set_* methods or clear_column_filter
     mode: ViewMode,
+    // pushing a row directly could pin it twice, or pin the reference row
+    // update through pin, unpin or set_reference
     pinned: Vec<usize>,
+    // setting this directly would leave the reference row pinned as well
+    // update through set_reference
     reference: Option<usize>,
 }
 
@@ -167,6 +340,10 @@ impl ViewState {
     }
 
     pub fn pin(&mut self, row: usize) {
+        debug_assert!(
+            Some(row) != self.reference && !self.pinned.contains(&row),
+            "row {row} is already pinned or is the reference"
+        );
         self.pinned.push(row);
     }
 
@@ -179,7 +356,10 @@ impl ViewState {
         self.reference = row;
     }
 
-    pub(super) fn grid<'a>(&self, base_alignment: &'a libmsa::Alignment) -> libmsa::Grid<'a> {
+    fn grid<'alignment>(
+        &self,
+        base_alignment: &'alignment libmsa::Alignment,
+    ) -> libmsa::Grid<'alignment> {
         match self.mode {
             ViewMode::Plain { alignment_type, .. } => base_alignment.grid(alignment_type),
             ViewMode::TranslationOverlay => base_alignment.grid(libmsa::AlignmentType::Dna),
@@ -193,6 +373,75 @@ impl ViewState {
             ViewMode::TranslationOverlay => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ViewMode {
+    Plain {
+        alignment_type: libmsa::AlignmentType,
+        filter: libmsa::ColumnFilter,
+    },
+    TranslationOverlay,
+    ProteinView {
+        filter: libmsa::ColumnFilter,
+    },
+}
+
+impl ViewMode {
+    pub fn filter(self) -> libmsa::ColumnFilter {
+        match self {
+            Self::Plain { filter, .. } | Self::ProteinView { filter } => filter,
+            Self::TranslationOverlay => libmsa::ColumnFilter::default(),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantArray,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum DiffMode {
+    #[default]
+    Off,
+    Reference,
+    Consensus,
+}
+
+/// how far the panes are scrolled: the top row, the left column, and how far the names are
+/// scrolled sideways
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Position {
+    pub row: usize,
+    pub column: usize,
+    pub name: usize,
+}
+
+#[derive(Debug)]
+pub struct WindowColumns<'alignment> {
+    pub grid: libmsa::Grid<'alignment>,
+    pub columns: Vec<usize>,
+    /// what each screen column shows, left to right
+    /// `None` in the translation overlay where a nucleotide isn't part of a whole codon
+    pub cells: Vec<Option<Cell>>,
+    pub consensus: Vec<u8>,
+    pub conservation: Option<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cell {
+    /// which of `WindowColumns::columns` this screen column shows
+    pub index: usize,
+    /// whether to draw the residue letter here
+    /// in the translation overlay only the middle of each codon draws it, so each amino acid shows once
+    pub centre: bool,
 }
 
 fn ensure_no_filter_in_overlay(fraction: Option<f64>) -> Result<()> {
@@ -211,228 +460,10 @@ fn ensure_translatable(alignment_type: libmsa::AlignmentType) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Position {
-    pub row: usize,
-    pub column: usize,
-    pub name: usize,
-}
-
-#[derive(Debug)]
-pub struct Session {
-    base_alignment: libmsa::Alignment,
-    source: String,
-    state: ViewState,
-    layout: Layout,
-    diff_mode: DiffMode,
-    pub consensus_method: libmsa::ConsensusMethod,
-}
-
-impl Session {
-    pub fn new(base_alignment: libmsa::Alignment, source: String) -> Self {
-        let state = ViewState {
-            frame: libmsa::ReadingFrame::Frame1,
-            row_regex_filter: None,
-            mode: ViewMode::Plain {
-                alignment_type: base_alignment.detected_type(),
-                filter: libmsa::ColumnFilter::default(),
-            },
-            pinned: Vec::new(),
-            reference: None,
-        };
-        let layout = Layout::build(&base_alignment, &state);
-
-        Self {
-            base_alignment,
-            source,
-            state,
-            layout,
-            diff_mode: DiffMode::default(),
-            consensus_method: libmsa::ConsensusMethod::default(),
-        }
-    }
-
-    pub fn source(&self) -> &str {
-        &self.source
-    }
-
-    pub fn update(
-        &mut self,
-        position: Position,
-        change: impl FnOnce(&mut ViewState) -> Result<()>,
-    ) -> Result<Position> {
-        let columns = self.layout.columns();
-        let nt = columns
-            .get(position.column)
-            .or(columns.last())
-            .map(|&column| self.nt_start(column));
-        let top = self.layout.main().get(position.row).copied();
-
-        let mut next = self.state.clone();
-        change(&mut next)?;
-        self.layout = Layout::build(&self.base_alignment, &next);
-        self.state = next;
-        if self.diff_mode == DiffMode::Reference && self.state.reference().is_none() {
-            self.diff_mode = DiffMode::default();
-        }
-
-        Ok(Position {
-            column: nt.map_or(position.column, |nt| {
-                self.layout
-                    .column_position(self.column_range_at(nt..nt + 1).start)
-            }),
-            row: top.map_or(0, |row| self.layout.row_position(row)),
-            ..position
-        })
-    }
-
-    pub fn diff_mode(&self) -> DiffMode {
-        self.diff_mode
-    }
-
-    pub fn set_diff_mode(&mut self, mode: DiffMode) -> Result<()> {
-        if mode == DiffMode::Reference && self.state.reference().is_none() {
-            bail!("No reference sequence is set. Set one with set-reference");
-        }
-        self.diff_mode = mode;
-        Ok(())
-    }
-
-    pub fn cycle_diff_mode(&mut self) {
-        self.diff_mode = match self.diff_mode {
-            DiffMode::Off if self.state.reference().is_some() => DiffMode::Reference,
-            DiffMode::Off | DiffMode::Reference => DiffMode::Consensus,
-            DiffMode::Consensus => DiffMode::Off,
-        };
-    }
-
-    pub fn state(&self) -> &ViewState {
-        &self.state
-    }
-
-    pub fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    pub fn base_alignment(&self) -> &libmsa::Alignment {
-        &self.base_alignment
-    }
-
-    pub fn grid(&self) -> libmsa::Grid<'_> {
-        self.state.grid(&self.base_alignment)
-    }
-
-    pub fn window_columns(&self, window: Range<usize>) -> WindowColumns<'_> {
-        let (grid, columns, cells) = match self.state.mode {
-            ViewMode::TranslationOverlay if !window.is_empty() => {
-                let frame = self.state.frame;
-                let last_column = self.base_alignment.width() - 1;
-                let protein_window = self.protein_columns(window.clone());
-                let cells = window
-                    .map(|nt| {
-                        let protein_column = frame.protein_col(nt)?;
-                        let codon_start = frame.nt_range(protein_column).start;
-                        Some(Cell {
-                            index: protein_column - protein_window.start,
-                            centre: nt == (codon_start + 1).min(last_column),
-                        })
-                    })
-                    .collect();
-                (
-                    self.base_alignment.translated_grid(frame),
-                    protein_window.collect(),
-                    cells,
-                )
-            }
-            _ => {
-                let columns = self.layout.columns()[window].to_vec();
-                let cells = (0..columns.len())
-                    .map(|index| {
-                        Some(Cell {
-                            index,
-                            centre: true,
-                        })
-                    })
-                    .collect();
-                (self.grid(), columns, cells)
-            }
-        };
-        let method = self.consensus_method;
-        let (consensus, conservation): (Vec<u8>, Vec<Option<f64>>) = grid
-            .map_column_counts(self.layout.rows(), &columns, |counts, _| {
-                (
-                    counts.consensus(method).unwrap_or(b' '),
-                    counts.conservation(),
-                )
-            })
-            .into_iter()
-            .unzip();
-        WindowColumns {
-            grid,
-            columns,
-            cells,
-            consensus,
-            conservation: conservation.into_iter().collect(),
-        }
-    }
-
-    fn nt_start(&self, column: usize) -> usize {
-        match self.state.mode {
-            ViewMode::ProteinView { .. } => self.state.frame.nt_range(column).start,
-            ViewMode::Plain { .. } | ViewMode::TranslationOverlay => column,
-        }
-    }
-
-    pub fn protein_columns(&self, nt: Range<usize>) -> Range<usize> {
-        self.state
-            .frame
-            .protein_range(nt, self.base_alignment.width())
-    }
-
-    pub fn column_range_at(&self, nt: Range<usize>) -> Range<usize> {
-        match self.state.mode {
-            ViewMode::ProteinView { .. } => self.protein_columns(nt),
-            ViewMode::Plain { .. } | ViewMode::TranslationOverlay => nt,
-        }
-    }
-
-    pub fn selection_columns(&self, columns: RangeInclusive<usize>) -> RangeInclusive<usize> {
-        if !matches!(self.state.mode, ViewMode::TranslationOverlay) {
-            return columns;
-        }
-        let frame = self.state.frame;
-        let last_column = self.base_alignment.width() - 1;
-        let start = frame
-            .protein_col(columns.start)
-            .map_or(columns.start, |protein_column| {
-                frame.nt_range(protein_column).start
-            });
-        let end = frame
-            .protein_col(columns.last)
-            .map_or(columns.last, |protein_column| {
-                frame.nt_range(protein_column).end - 1
-            });
-        (start..=end.min(last_column)).into()
-    }
-}
-
-#[derive(Debug)]
-pub struct WindowColumns<'a> {
-    pub grid: libmsa::Grid<'a>,
-    pub columns: Vec<usize>,
-    pub cells: Vec<Option<Cell>>,
-    pub consensus: Vec<u8>,
-    pub conservation: Option<Vec<f64>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cell {
-    pub index: usize,
-    pub centre: bool,
-}
-
 #[cfg(test)]
 mod tests {
+    use std::ops;
+
     use rstest::rstest;
 
     use super::*;
@@ -695,8 +726,8 @@ mod tests {
     #[case::clipped_to_width(libmsa::ReadingFrame::Frame1, 9..=9, 9..=9)]
     fn selection_columns_widens_to_codons_in_overlay(
         #[case] frame: libmsa::ReadingFrame,
-        #[case] columns: std::ops::RangeInclusive<usize>,
-        #[case] expected: std::ops::RangeInclusive<usize>,
+        #[case] columns: ops::RangeInclusive<usize>,
+        #[case] expected: ops::RangeInclusive<usize>,
     ) {
         let mut session = session(&[b"ATGATGATGA"]);
         session
