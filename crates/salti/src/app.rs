@@ -3,6 +3,7 @@ use std::{path::Path, time::Duration};
 use anyhow::{Context, Result};
 use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::{Frame, layout::Rect};
+use regex::Regex;
 use tracing::debug;
 
 use crate::{
@@ -10,15 +11,14 @@ use crate::{
     command::Command,
     config::keybindings,
     gff::{self, Gff},
-    jobs::{JobEvent, Jobs},
+    jobs::{JobEvent, Jobs, UpdateCheckTrigger},
     session::{Position, Session, ViewState},
     ui::{
-        UiState, input_name,
+        self, UiState,
         layout::ScreenLayout,
         mouse::{self, MouseTracker},
         notification::Notification,
         popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
-        render,
     },
     update::{CRATE_VERSION, UpdateResult},
 };
@@ -41,6 +41,7 @@ impl App {
             auto_theme: startup.auto_theme,
             ..UiState::default()
         };
+        // the real size arrives with the first resize event
         let screen = ScreenLayout::new(Rect::default(), None, None, &mut ui.position);
         let mut app = Self {
             session: None,
@@ -55,7 +56,7 @@ impl App {
             app.load(input);
         }
         if startup.update_check {
-            app.jobs.check_for_update(false);
+            app.jobs.check_for_update(UpdateCheckTrigger::Startup);
         }
         app
     }
@@ -103,8 +104,8 @@ impl App {
             }
             Event::Resize(area) => self.rebuild_layout(area),
             Event::Job(JobEvent::Loaded { input, result }) => self.finish_load(input, result),
-            Event::Job(JobEvent::UpdateChecked { result, requested }) => {
-                self.finish_update_check(result, requested);
+            Event::Job(JobEvent::UpdateChecked { result, trigger }) => {
+                self.finish_update_check(result, trigger);
             }
         }
     }
@@ -114,7 +115,7 @@ impl App {
     }
 
     pub(crate) fn draw(&mut self, frame: &mut Frame, delta: Duration) {
-        render(
+        ui::render(
             frame.buffer_mut(),
             &self.screen,
             self.session.as_ref(),
@@ -124,51 +125,13 @@ impl App {
         );
     }
 
+    /// true while a notification is still moving, so the loop keeps drawing without new input
     pub(crate) fn is_animating(&self) -> bool {
         self.ui.notifications.is_animating()
     }
 
     pub(crate) fn should_quit(&self) -> bool {
         self.should_quit
-    }
-
-    fn rebuild_layout(&mut self, area: Rect) {
-        self.screen = ScreenLayout::new(
-            area,
-            self.session.as_ref(),
-            self.gff.as_ref(),
-            &mut self.ui.position,
-        );
-    }
-
-    fn finish_load(&mut self, input: String, result: Result<libmsa::Alignment, String>) {
-        self.ui.loading = None;
-        match result {
-            Ok(alignment) => {
-                self.session = Some(Session::new(alignment, input));
-                self.ui.clear_transient_state();
-                self.mouse_tracker.clear_anchors();
-                self.ui.position = Position::default();
-                self.rebuild_layout(self.screen.area);
-            }
-            Err(error) => self.ui.notify(Notification::error(format!(
-                "Failed to load {}: {error}",
-                input_name(&input)
-            ))),
-        }
-    }
-
-    fn finish_update_check(&mut self, result: Option<UpdateResult>, requested: bool) {
-        let message = match result {
-            Some(UpdateResult::UpdateAvailable(latest)) => {
-                format!(
-                    "A new version of salti is available: {latest} (installed: {CRATE_VERSION})"
-                )
-            }
-            Some(UpdateResult::UpToDate) if requested => "salti is up to date".to_string(),
-            Some(UpdateResult::UpToDate) | None => return,
-        };
-        self.ui.notify(Notification::info(message));
     }
 
     fn execute_commands(&mut self, commands: Vec<Command>) {
@@ -204,7 +167,7 @@ impl App {
                 self.ui
                     .notify(Notification::info(format!("Loaded GFF file: {path}")));
             }
-            Command::CheckForUpdate => self.jobs.check_for_update(true),
+            Command::CheckForUpdate => self.jobs.check_for_update(UpdateCheckTrigger::Requested),
 
             Command::ScrollDown { amount } => self.ui.position.row += amount,
             Command::ScrollUp { amount } => {
@@ -250,54 +213,54 @@ impl App {
                 self.ui.position.column =
                     self.session()?.layout().columns().len().saturating_sub(1);
             }
-            Command::PinSequence(row) => self.apply(|s| {
-                s.pin(row);
+            Command::PinSequence(row) => self.apply(|view| {
+                view.pin(row);
                 Ok(())
             })?,
-            Command::UnpinSequence(row) => self.apply(|s| {
-                s.unpin(row);
+            Command::UnpinSequence(row) => self.apply(|view| {
+                view.unpin(row);
                 Ok(())
             })?,
-            Command::SetReference(row) => self.apply(|s| {
-                s.set_reference(row);
+            Command::SetReference(row) => self.apply(|view| {
+                view.set_reference(row);
                 Ok(())
             })?,
             Command::SetRowFilter(pattern) => {
                 let regex = pattern
                     .as_deref()
-                    .map(regex::Regex::new)
+                    .map(Regex::new)
                     .transpose()
                     .context("Invalid row filter pattern")?;
-                self.apply(|s| {
-                    s.row_regex_filter = regex;
+                self.apply(|view| {
+                    view.row_regex_filter = regex;
                     Ok(())
                 })?;
             }
-            Command::SetGapFilter(fraction) => self.apply(|s| s.set_gap_filter(fraction))?,
+            Command::SetGapFilter(fraction) => self.apply(|view| view.set_gap_filter(fraction))?,
             Command::SetConstantFilter(fraction) => {
-                self.apply(|s| s.set_constant_filter(fraction))?;
+                self.apply(|view| view.set_constant_filter(fraction))?;
             }
-            Command::ClearAllFilters => self.apply(|s| {
-                s.row_regex_filter = None;
-                s.clear_column_filter();
+            Command::ClearAllFilters => self.apply(|view| {
+                view.row_regex_filter = None;
+                view.clear_column_filter();
                 Ok(())
             })?,
             Command::ToggleTranslationOverlay => {
-                let mut selection = self.ui.selection;
+                let selection = self.ui.selection;
                 self.apply(ViewState::toggle_translation_overlay)?;
                 let session = self.session()?;
-                if let Some(selection) = &mut selection {
+                self.ui.selection = selection.map(|mut selection| {
                     selection.columns = session.selection_columns(selection.columns);
-                }
-                self.ui.selection = selection;
+                    selection
+                });
             }
             Command::ToggleProteinView => self.apply(ViewState::toggle_protein_view)?,
-            Command::SetTranslationFrame(frame) => self.apply(|s| {
-                s.frame = frame;
+            Command::SetTranslationFrame(frame) => self.apply(|view| {
+                view.frame = frame;
                 Ok(())
             })?,
             Command::SetActiveType(alignment_type) => {
-                self.apply(|s| s.set_alignment_type(alignment_type))?;
+                self.apply(|view| view.set_alignment_type(alignment_type))?;
             }
             Command::SetConsensusMethod(method) => self.session_mut()?.consensus_method = method,
             Command::SetDiffMode(mode) => self.session_mut()?.set_diff_mode(mode)?,
@@ -313,9 +276,44 @@ impl App {
         Ok(())
     }
 
-    fn clear_mouse_selection(&mut self) {
+    fn finish_load(&mut self, input: String, result: Result<libmsa::Alignment, String>) {
+        self.ui.loading = None;
+        match result {
+            Ok(alignment) => {
+                self.session = Some(Session::new(alignment, input));
+                self.ui.clear_transient_state();
+                self.mouse_tracker.clear_anchors();
+                self.ui.position = Position::default();
+                self.rebuild_layout(self.screen.area);
+            }
+            Err(error) => self.ui.notify(Notification::error(format!(
+                "Failed to load {}: {error}",
+                ui::input_name(&input)
+            ))),
+        }
+    }
+
+    fn finish_update_check(&mut self, result: Option<UpdateResult>, trigger: UpdateCheckTrigger) {
+        let message = match (result, trigger) {
+            (Some(UpdateResult::UpdateAvailable(latest)), _) => {
+                format!(
+                    "A new version of salti is available: {latest} (installed: {CRATE_VERSION})"
+                )
+            }
+            (Some(UpdateResult::UpToDate), UpdateCheckTrigger::Requested) => {
+                "salti is up to date".to_string()
+            }
+            (Some(UpdateResult::UpToDate), UpdateCheckTrigger::Startup) | (None, _) => return,
+        };
+        self.ui.notify(Notification::info(message));
+    }
+
+    fn apply(&mut self, change: impl FnOnce(&mut ViewState) -> Result<()>) -> Result<()> {
+        let position = self.ui.position;
+        self.ui.position = self.session_mut()?.update(position, change)?;
         self.ui.selection = None;
         self.mouse_tracker.clear_anchors();
+        Ok(())
     }
 
     fn session(&self) -> Result<&Session> {
@@ -330,16 +328,18 @@ impl App {
             .context("No alignment is loaded. Open one with load-alignment")
     }
 
-    fn apply(&mut self, change: impl FnOnce(&mut ViewState) -> Result<()>) -> Result<()> {
-        let position = self.ui.position;
-        self.ui.position = self.session_mut()?.update(position, change)?;
-        self.clear_mouse_selection();
-        Ok(())
-    }
-
     fn load(&mut self, input: String) {
         self.ui.loading = Some(input.clone());
         self.jobs.load(input);
+    }
+
+    fn rebuild_layout(&mut self, area: Rect) {
+        self.screen = ScreenLayout::new(
+            area,
+            self.session.as_ref(),
+            self.gff.as_ref(),
+            &mut self.ui.position,
+        );
     }
 }
 
@@ -512,12 +512,18 @@ mod tests {
     }
 
     #[rstest]
-    #[case::available_at_startup(Some(UpdateResult::UpdateAvailable("99.0.0".to_string())), false)]
-    #[case::up_to_date_requested(Some(UpdateResult::UpToDate), true)]
-    fn finish_update_check_notifies(#[case] result: Option<UpdateResult>, #[case] requested: bool) {
+    #[case::available_at_startup(
+        Some(UpdateResult::UpdateAvailable("99.0.0".to_string())),
+        UpdateCheckTrigger::Startup
+    )]
+    #[case::up_to_date_requested(Some(UpdateResult::UpToDate), UpdateCheckTrigger::Requested)]
+    fn finish_update_check_notifies(
+        #[case] result: Option<UpdateResult>,
+        #[case] trigger: UpdateCheckTrigger,
+    ) {
         let mut app = app(DNA);
 
-        app.finish_update_check(result, requested);
+        app.finish_update_check(result, trigger);
 
         assert_eq!(
             app.ui
@@ -529,15 +535,15 @@ mod tests {
     }
 
     #[rstest]
-    #[case::up_to_date_at_startup(Some(UpdateResult::UpToDate), false)]
-    #[case::failed(None, true)]
+    #[case::up_to_date_at_startup(Some(UpdateResult::UpToDate), UpdateCheckTrigger::Startup)]
+    #[case::failed(None, UpdateCheckTrigger::Requested)]
     fn finish_update_check_is_silent(
         #[case] result: Option<UpdateResult>,
-        #[case] requested: bool,
+        #[case] trigger: UpdateCheckTrigger,
     ) {
         let mut app = app(DNA);
 
-        app.finish_update_check(result, requested);
+        app.finish_update_check(result, trigger);
 
         assert_eq!(
             app.ui
@@ -694,7 +700,8 @@ mod tests {
             .iter()
             .map(|halves| halves.bytes().flat_map(|byte| [byte; 80]).collect())
             .collect();
-        app(&rows.iter().map(Vec::as_slice).collect::<Vec<_>>())
+        let sequences: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
+        app(&sequences)
     }
 
     #[test]

@@ -46,13 +46,13 @@ impl Jobs {
         });
     }
 
-    pub fn check_for_update(&self, requested: bool) {
+    pub fn check_for_update(&self, trigger: UpdateCheckTrigger) {
         self.spawn(self.all.child_token(), async move {
             let result = update::check_for_update()
                 .await
                 .inspect_err(|error| debug!(error = ?error, "Update check failed"))
                 .ok();
-            JobEvent::UpdateChecked { result, requested }
+            JobEvent::UpdateChecked { result, trigger }
         });
     }
 
@@ -92,8 +92,15 @@ pub enum JobEvent {
     },
     UpdateChecked {
         result: Option<UpdateResult>,
-        requested: bool,
+        trigger: UpdateCheckTrigger,
     },
+}
+
+/// why an update check ran, so a check the user asked for can report that salti is up to date
+#[derive(Debug)]
+pub enum UpdateCheckTrigger {
+    Startup,
+    Requested,
 }
 
 #[derive(Debug)]
