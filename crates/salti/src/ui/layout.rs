@@ -10,16 +10,11 @@ use tracing::debug;
 use crate::{
     gff::Gff,
     session::{Layout, Position, Session},
-    ui::panes::{gff::feature_row_count, local_feature_track::local_feature_row_count},
+    ui::panes::{gff, local_feature_track},
 };
 
-/// fixed height (rows) for the bottom consensus pane.
-/// the remaining vertical space is used for the alignment pane.
 const CONSENSUS_PANE_HEIGHT_ROWS: u16 = 5;
-/// fixed height (rows) for the alignment ruler above sequence rows.
 const RULER_HEIGHT_ROWS: u16 = 2;
-/// width percentage for the left sequence ID pane (used in alignment and consensus panes).
-/// the remaining horizontal space is used for sequence content.
 const SEQUENCE_ID_PANE_WIDTH_PERCENT: u16 = 20;
 
 #[derive(Debug)]
@@ -46,8 +41,8 @@ impl ScreenLayout {
 
         let (gff_height, local_feature_rows) = match (gff, session) {
             (Some(gff), Some(session)) => {
-                let gff_rows = feature_row_count(gff, session, visible_width).max(1);
-                let local_rows = local_feature_row_count(gff, session, &columns);
+                let gff_rows = gff::feature_row_count(gff, session, visible_width).max(1);
+                let local_rows = local_feature_track::row_count(gff, session, &columns);
                 (
                     gff_pane_height(gff_rows),
                     u16::try_from(local_rows).unwrap_or(u16::MAX),
@@ -66,6 +61,7 @@ impl ScreenLayout {
         let rows = fit(&mut position.row, scrollable_height, main_rows);
 
         let row_count = session.map_or(0, |session| session.base_alignment().row_count());
+        // the row number and the space after it, `12 ` for 12 rows
         let number_prefix_width = row_count.max(1).ilog10() as usize + 2;
         let name_visible_width = usize::from(Block::bordered().inner(app.sequence_id_pane).width)
             .saturating_sub(number_prefix_width);
@@ -96,25 +92,14 @@ impl ScreenLayout {
     }
 }
 
-pub fn screen_rows(
-    layout: &Layout,
-    window: &Window,
-) -> impl Iterator<Item = Option<usize>> + use<> {
-    let offset = layout.pinned_count();
-    let divider = (!window.pinned.is_empty()).then_some(None);
-    let main = window.rows.clone().map(move |i| Some(offset + i));
-    window.pinned.clone().map(Some).chain(divider).chain(main)
-}
-
-pub(crate) fn split_alignment_header(inner: Rect, local_feature_rows: u16) -> [Rect; 3] {
-    inner.layout(&vertical![==local_feature_rows, ==RULER_HEIGHT_ROWS, *=1])
-}
-
 #[derive(Debug, Default)]
 pub struct Window {
     pub pinned: Range<usize>,
+    /// which main rows are on screen, counted after the pinned ones
     pub rows: Range<usize>,
+    /// which visible columns are on screen
     pub columns: Range<usize>,
+    /// how far the names are scrolled, in characters
     pub names: Range<usize>,
 }
 
@@ -192,6 +177,26 @@ impl AppLayout {
     }
 }
 
+/// the layout row on each screen row, top to bottom, with `None` for the line under the pinned
+/// rows
+pub fn screen_rows(
+    layout: &Layout,
+    window: &Window,
+) -> impl Iterator<Item = Option<usize>> + use<> {
+    let offset = layout.pinned_count();
+    let divider = (!window.pinned.is_empty()).then_some(None);
+    let main = window.rows.clone().map(move |i| Some(offset + i));
+    window.pinned.clone().map(Some).chain(divider).chain(main)
+}
+
+/// splits the inside of the alignment pane into the local feature rows, the ruler and the
+/// sequences, top to bottom
+///
+/// the sequence ID pane splits the same way, so its rows line up with the sequences
+pub fn split_alignment_header(inner: Rect, local_feature_rows: u16) -> [Rect; 3] {
+    inner.layout(&vertical![==local_feature_rows, ==RULER_HEIGHT_ROWS, *=1])
+}
+
 fn split_id_pane(area: Rect) -> [Rect; 2] {
     area.layout(&horizontal![==SEQUENCE_ID_PANE_WIDTH_PERCENT%, *=1].spacing(Spacing::Overlap(1)))
 }
@@ -205,8 +210,10 @@ fn gff_pane_height(feature_row_count: usize) -> u16 {
     if feature_row_count == 0 {
         return 0;
     }
-    let inner = u16::try_from(feature_row_count).unwrap_or(u16::MAX.saturating_sub(3));
-    inner.saturating_add(3)
+    // two borders and the navigation row
+    u16::try_from(feature_row_count)
+        .unwrap_or(u16::MAX)
+        .saturating_add(3)
 }
 
 #[cfg(test)]
@@ -320,10 +327,9 @@ mod tests {
             ..Window::default()
         };
 
-        assert_eq!(
-            screen_rows(session.layout(), &window).collect::<Vec<_>>(),
-            expected
-        );
+        let rows: Vec<Option<usize>> = screen_rows(session.layout(), &window).collect();
+
+        assert_eq!(rows, expected);
     }
 
     #[rstest]

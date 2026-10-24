@@ -10,6 +10,8 @@ use ratatui::{
 #[derive(Debug, Default)]
 pub(super) struct TextInput {
     text: String,
+    // a cursor off a character boundary would panic on the next edit
+    // move it through handle_key or set_text
     cursor: usize,
 }
 
@@ -23,6 +25,7 @@ impl TextInput {
         self.cursor = self.text.len();
     }
 
+    /// false when the key isn't for the input, so the palette can use it
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);

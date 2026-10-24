@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -12,39 +10,40 @@ use crate::{
     config::theme::Theme,
     session::{Session, ViewMode},
     ui::{
-        input_name,
+        self,
         layout::Window,
         notification::{Notification, NotificationLevel},
         selection::Selection,
-        truncate_label,
     },
 };
 
-/// maximum displayed character count for a selected sequence name in the status bar before truncation
-const STATUS_BAR_SELECTED_NAME_MAX_CHARS: usize = 25;
+// longer sequence names are cut short with `...` in the selection status
+const SELECTED_NAME_WIDTH: usize = 25;
 
-pub(crate) struct TopStatusBar<'a> {
-    pub(crate) session: Option<&'a Session>,
-    pub(crate) window: &'a Window,
-    pub(crate) loading: Option<&'a str>,
-    pub(crate) theme: &'a Theme,
+pub struct TopStatusBar<'frame> {
+    pub session: Option<&'frame Session>,
+    pub window: &'frame Window,
+    pub loading: Option<&'frame str>,
+    pub theme: &'frame Theme,
 }
 
 impl TopStatusBar<'_> {
     fn spans(&self) -> Vec<Span<'static>> {
         let theme = self.theme;
         let session = self.session;
-        let file_name = session.map_or("Unknown", |session| input_name(session.source()));
+        let file_name = session.map_or("Unknown", |session| ui::input_name(session.source()));
         let loading_status = match (self.loading, session) {
-            (Some(input), _) => format!("Loading {}", input_name(input)).set_style(theme.text_dim),
+            (Some(input), _) => {
+                format!("Loading {}", ui::input_name(input)).set_style(theme.text_dim)
+            }
             (None, Some(_)) => Span::styled("Status: Loaded", theme.success),
             (None, None) => Span::styled("Status: Idle", theme.text_dim),
         };
 
         let layout = session.map(Session::layout);
-        let alignment_count = layout.map_or(0, |layout| layout.rows().len());
+        let sequence_count = layout.map_or(0, |layout| layout.rows().len());
         let alignment_length = session.map_or(0, |session| session.grid().width());
-        let shown = layout
+        let shown: &[usize] = layout
             .map(|layout| &layout.columns()[self.window.columns.clone()])
             .unwrap_or_default();
         let position_range = match (shown.first(), shown.last()) {
@@ -57,7 +56,7 @@ impl TopStatusBar<'_> {
             Span::raw(" | "),
             loading_status,
             Span::raw(" | "),
-            format!("{alignment_count} alignments").set_style(theme.text),
+            format!("{sequence_count} sequences").set_style(theme.text),
             Span::raw(" | "),
             format!("Length: {alignment_length}").set_style(theme.text),
             Span::raw(" | "),
@@ -74,21 +73,23 @@ impl Widget for TopStatusBar<'_> {
     }
 }
 
-pub(crate) struct BottomStatusBar<'a> {
-    pub(crate) session: Option<&'a Session>,
-    pub(crate) selection: Option<Selection>,
-    pub(crate) theme: &'a Theme,
+pub struct BottomStatusBar<'frame> {
+    pub session: Option<&'frame Session>,
+    pub selection: Option<Selection>,
+    pub theme: &'frame Theme,
 }
 
 impl BottomStatusBar<'_> {
     fn spans(&self) -> Vec<Span<'static>> {
+        use std::fmt::Write as _;
+
         let Some(session) = self.session else {
             return Vec::new();
         };
         let theme = self.theme;
         let (state, layout) = (session.state(), session.layout());
         let filter = state.mode().filter();
-        let mut parts = Vec::new();
+        let mut parts: Vec<Span<'static>> = Vec::new();
 
         if state.row_regex_filter.is_some() || filter.is_active() {
             let mut text = String::from("Filters:");
@@ -113,12 +114,12 @@ impl BottomStatusBar<'_> {
         }
 
         if let Some(selection) = self.selection {
-            let count = selection.rows.last - selection.rows.start + 1;
+            let rows = selection.rows.last - selection.rows.start + 1;
             let first = layout.columns()[selection.columns.start];
             let last = layout.columns()[selection.columns.last];
             let columns = range_label(first + 1, last + 1);
 
-            let text = if count == 1 {
+            let text = if rows == 1 {
                 let protein = session.protein_columns(first..last + 1);
                 let position = if matches!(state.mode(), ViewMode::TranslationOverlay)
                     && !protein.is_empty()
@@ -132,10 +133,10 @@ impl BottomStatusBar<'_> {
                     .id(layout.rows()[selection.rows.start]);
                 format!(
                     "Selected: {} @ {position}",
-                    truncate_label(name, STATUS_BAR_SELECTED_NAME_MAX_CHARS)
+                    ui::truncate_label(name, SELECTED_NAME_WIDTH)
                 )
             } else {
-                format!("{count} sequence(s) selected @ {columns}")
+                format!("{rows} sequence(s) selected @ {columns}")
             };
             parts.push(text.set_style(theme.text));
         }
@@ -156,9 +157,9 @@ impl Widget for BottomStatusBar<'_> {
     }
 }
 
-pub(crate) struct InputBar<'a> {
-    pub(crate) notification: Option<&'a Notification>,
-    pub(crate) theme: &'a Theme,
+pub struct InputBar<'frame> {
+    pub notification: Option<&'frame Notification>,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for InputBar<'_> {
@@ -200,12 +201,15 @@ fn notification_prefix(level: NotificationLevel, theme: &Theme) -> (&'static str
 
 #[cfg(test)]
 mod tests {
-    use std::ops;
+    use std::ops::RangeInclusive;
+
+    use anyhow::Result;
+    use regex::Regex;
 
     use super::*;
     use crate::{
         session::{Position, ViewState},
-        test_utils::{full_window, session_with_numbered_ids},
+        test_utils::{full_window, selection, session_with_numbered_ids},
     };
 
     fn status_text(spans: &[Span<'_>]) -> String {
@@ -237,10 +241,7 @@ mod tests {
         )
     }
 
-    fn changed(
-        sequences: &[&[u8]],
-        change: impl FnOnce(&mut ViewState) -> anyhow::Result<()>,
-    ) -> Session {
+    fn changed(sequences: &[&[u8]], change: impl FnOnce(&mut ViewState) -> Result<()>) -> Session {
         let mut session = session_with_numbered_ids(sequences);
         session.update(Position::default(), change).unwrap();
         session
@@ -248,14 +249,10 @@ mod tests {
 
     fn bottom_with_selection(
         session: &Session,
-        rows: ops::RangeInclusive<usize>,
-        columns: ops::RangeInclusive<usize>,
+        rows: RangeInclusive<usize>,
+        columns: RangeInclusive<usize>,
     ) -> String {
-        let selection = Selection {
-            rows: rows.into(),
-            columns: columns.into(),
-        };
-        bottom(session, Some(selection))
+        bottom(session, Some(selection(rows, columns)))
     }
 
     #[test]
@@ -283,7 +280,7 @@ mod tests {
     #[test]
     fn bottom_protein_filters() {
         let session = changed(&[b"ATGAAATTT", b"ATG---TTT", b"ATGAAGTTT"], |state| {
-            state.row_regex_filter = Some(regex::Regex::new("seq1|seq2").unwrap());
+            state.row_regex_filter = Some(Regex::new("seq1|seq2").unwrap());
             state.frame = libmsa::ReadingFrame::Frame2;
             state.toggle_protein_view()?;
             state.set_gap_filter(Some(0.5))
@@ -346,7 +343,7 @@ mod tests {
     #[test]
     fn bottom_rows_filtered() {
         let session = changed(&[b"ACGTACGT", b"ACGTACGT", b"ACGTACGT"], |state| {
-            state.row_regex_filter = Some(regex::Regex::new("seq[13]").unwrap());
+            state.row_regex_filter = Some(Regex::new("seq[13]").unwrap());
             Ok(())
         });
 

@@ -16,27 +16,31 @@ use crate::{
 const MIN_LABEL_WIDTH: usize = 2;
 
 #[derive(Debug, Clone)]
-pub(super) struct DisplayFeature<'a> {
-    pub(super) feature: &'a Feature,
-    pub(super) columns: Range<usize>,
-    pub(super) colour_idx: usize,
+pub struct DisplayFeature<'gff> {
+    pub feature: &'gff Feature,
+    /// the visible columns it covers
+    pub columns: Range<usize>,
+    /// counts only shown features, so neighbours on screen get different colours
+    pub colour_idx: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PlacedFeature<'a> {
-    pub(super) feature: &'a Feature,
-    pub(super) span: Range<usize>,
-    pub(super) row: usize,
-    pub(super) colour_idx: usize,
+pub struct PlacedFeature<'gff> {
+    pub feature: &'gff Feature,
+    /// the screen cells it covers, from the left of the track
+    pub span: Range<usize>,
+    pub row: usize,
+    pub colour_idx: usize,
 }
 
-pub(super) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<DisplayFeature<'a>> {
+/// the features that cover at least one visible column, coloured in order
+pub fn display<'gff>(gff: &'gff Gff, session: &Session) -> Vec<DisplayFeature<'gff>> {
     let layout = session.layout();
     gff.features
         .iter()
         .filter_map(|feature| {
-            let cols = session.column_range_at(feature.range.clone());
-            let shown = layout.column_position(cols.start)..layout.column_position(cols.end);
+            let columns = session.column_range_at(feature.range.clone());
+            let shown = layout.column_position(columns.start)..layout.column_position(columns.end);
             (!shown.is_empty()).then_some((feature, shown))
         })
         .enumerate()
@@ -48,12 +52,7 @@ pub(super) fn display_features<'a>(gff: &'a Gff, session: &Session) -> Vec<Displ
         .collect()
 }
 
-pub(super) fn render_features(
-    placed_features: &[PlacedFeature<'_>],
-    area: Rect,
-    theme: &Theme,
-    buf: &mut Buffer,
-) {
+pub fn render(placed_features: &[PlacedFeature<'_>], area: Rect, theme: &Theme, buf: &mut Buffer) {
     Clear.render(area, buf);
     buf.set_style(area, theme.base);
     let width = usize::from(area.width);
@@ -63,6 +62,7 @@ pub(super) fn render_features(
         if usize::from(area.height) <= placed.row || span.is_empty() {
             continue;
         }
+        // features take the four nucleotide colours in turn until proper palette support
         let style = theme
             .residues
             .style(AlignmentType::Dna, b"ATCG"[placed.colour_idx % 4]);
@@ -93,26 +93,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        gff::FeatureType,
         session::{Position, ViewState},
-        test_utils::session,
+        test_utils::{genes, session},
     };
 
     type Change = fn(&mut ViewState) -> Result<()>;
-
-    fn gff(ranges: &[Range<usize>]) -> Gff {
-        Gff {
-            features: ranges
-                .iter()
-                .map(|range| Feature {
-                    name: format!("gene{}", range.start),
-                    kind: FeatureType::Gene,
-                    range: range.clone(),
-                    strand: Strand::Forward,
-                })
-                .collect(),
-        }
-    }
 
     fn gap_filter(state: &mut ViewState) -> Result<()> {
         state.set_gap_filter(Some(0.0))
@@ -126,9 +111,9 @@ mod tests {
     fn shown_columns(sequence: &[u8], change: Change, feature: Range<usize>) -> Vec<Range<usize>> {
         let mut session = session(&[sequence]);
         session.update(Position::default(), change).unwrap();
-        let gff = gff(&[feature]);
+        let gff = genes(&[feature]);
 
-        display_features(&gff, &session)
+        display(&gff, &session)
             .into_iter()
             .map(|display| display.columns)
             .collect()
@@ -140,7 +125,7 @@ mod tests {
     #[case::clipped_past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 6..11, 6..8)]
     #[case::protein_view(b"ATGAAATTTCC", ViewState::toggle_protein_view, 3..9, 1..3)]
     #[case::protein_view_after_offset(b"AAATGAAATTT", protein_view_frame3, 0..5, 0..1)]
-    fn display_features_works(
+    fn display_works(
         #[case] sequence: &[u8],
         #[case] change: Change,
         #[case] feature: Range<usize>,
@@ -153,24 +138,23 @@ mod tests {
     #[case::hidden_by_filter(b"-A-CC--G", gap_filter, 5..7)]
     #[case::past_end(b"ACGTACGT", |_: &mut ViewState| Ok(()), 10..12)]
     #[case::before_frame_offset(b"AAATGAAATTT", protein_view_frame3, 0..2)]
-    fn display_features_hides(
+    fn display_hides(
         #[case] sequence: &[u8],
         #[case] change: Change,
         #[case] feature: Range<usize>,
     ) {
-        assert_eq!(
-            shown_columns(sequence, change, feature),
-            Vec::<Range<usize>>::new()
-        );
+        let expected: [Range<usize>; 0] = [];
+
+        assert_eq!(shown_columns(sequence, change, feature), expected);
     }
 
     #[test]
-    fn display_features_colours_only_shown_features() {
+    fn display_colours_only_shown_features() {
         let mut session = session(&[b"-A-CC--G"]);
         session.update(Position::default(), gap_filter).unwrap();
-        let gff = gff(&[5..7, 1..2, 3..5]);
+        let gff = genes(&[5..7, 1..2, 3..5]);
 
-        let colours: Vec<(usize, usize)> = display_features(&gff, &session)
+        let colours: Vec<(usize, usize)> = display(&gff, &session)
             .into_iter()
             .map(|display| (display.feature.range.start, display.colour_idx))
             .collect();

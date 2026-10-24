@@ -3,7 +3,7 @@ use std::ops::Range;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Styled,
+    macros::vertical,
     text::Line,
     widgets::{Paragraph, Widget},
 };
@@ -15,47 +15,34 @@ use crate::{
     ui::{
         layout::Window,
         panes::{
-            features::{DisplayFeature, PlacedFeature, display_features, render_features},
-            render_column_scrollbar, render_pane,
+            self,
+            features::{self, DisplayFeature, PlacedFeature},
         },
     },
 };
 
-pub(crate) struct GffPane<'a> {
-    pub(crate) gff: &'a Gff,
-    pub(crate) session: &'a Session,
-    pub(crate) window: &'a Window,
-    pub(crate) theme: &'a Theme,
+pub struct GffPane<'frame> {
+    pub gff: &'frame Gff,
+    pub session: &'frame Session,
+    pub window: &'frame Window,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for GffPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(self.theme, None, area, buf);
+        let inner_area = panes::render_pane(self.theme, None, area, buf);
 
         let track =
             FeatureTrack::for_alignment(self.gff, self.session, usize::from(inner_area.width));
-        let content_rows = Rect {
-            width: u16::try_from(track.width).unwrap_or(u16::MAX),
-            ..inner_area
-        };
+        let content_rows = content_area(inner_area, track.total_columns);
         if content_rows.is_empty() {
             return;
         }
+        let [feature_rows, navigation_row] = split_navigation_row(content_rows);
 
-        let feature_rows = Rect {
-            height: content_rows.height.saturating_sub(1),
-            ..content_rows
-        };
-        let navigation_row = Rect::new(
-            content_rows.x,
-            content_rows.y + feature_rows.height,
-            content_rows.width,
-            1,
-        );
+        features::render(&track.placed_features, feature_rows, self.theme, buf);
 
-        render_features(&track.placed_features, feature_rows, self.theme, buf);
-
-        render_column_scrollbar(
+        panes::render_column_scrollbar(
             self.theme,
             track.total_columns,
             &self.window.columns,
@@ -65,14 +52,16 @@ impl Widget for GffPane<'_> {
     }
 }
 
-pub(crate) struct GffInfoPane<'a> {
-    pub(crate) tooltip: Option<&'a str>,
-    pub(crate) theme: &'a Theme,
+pub struct GffInfoPane<'frame> {
+    pub tooltip: Option<&'frame str>,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for GffInfoPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(
+        use ratatui::style::Styled;
+
+        let inner_area = panes::render_pane(
             self.theme,
             Some(Line::from("Feature Info".set_style(self.theme.text_muted))),
             area,
@@ -98,18 +87,15 @@ impl Widget for GffInfoPane<'_> {
     }
 }
 
-pub(crate) fn tooltip_at(
+pub fn tooltip_at(
     gff: &Gff,
     session: &Session,
-    gff_inner: Rect,
+    inner_area: Rect,
     mouse_x: u16,
     mouse_y: u16,
 ) -> Option<String> {
-    let track = FeatureTrack::for_alignment(gff, session, usize::from(gff_inner.width));
-    let feature_rows = Rect {
-        height: gff_inner.height.saturating_sub(1),
-        ..gff_inner
-    };
+    let track = FeatureTrack::for_alignment(gff, session, usize::from(inner_area.width));
+    let [feature_rows, _] = split_navigation_row(inner_area);
     if !feature_rows.contains((mouse_x, mouse_y).into()) {
         return None;
     }
@@ -120,47 +106,38 @@ pub(crate) fn tooltip_at(
     track.feature_at(x, row).map(format_tooltip)
 }
 
-pub(crate) fn feature_row_count(gff: &Gff, session: &Session, width: usize) -> usize {
+/// how many rows the features need when the whole alignment is squeezed into `width` cells
+pub fn feature_row_count(gff: &Gff, session: &Session, width: usize) -> usize {
     FeatureTrack::for_alignment(gff, session, width).row_count()
 }
 
-pub(crate) fn gff_content_area(area: Rect, total_columns: usize) -> Rect {
+/// the part of `area` the features are drawn in
+///
+/// it's narrower than `area` when the alignment has fewer columns than cells, so features are never
+/// stretched
+pub fn content_area(area: Rect, total_columns: usize) -> Rect {
     let width = area
         .width
         .min(u16::try_from(total_columns).unwrap_or(u16::MAX));
     Rect { width, ..area }
 }
 
-fn format_tooltip(feature: &Feature) -> String {
-    let length = feature.range.len();
-    format!(
-        "{} ({}) — {}\n{}-{} • {} nt",
-        feature.name,
-        feature.kind,
-        feature.strand,
-        feature.range.start + 1,
-        feature.range.end,
-        length,
-    )
-}
-
+// the features squeezed into the GFF pane, which always shows the whole alignment
 #[derive(Debug, Clone)]
-struct FeatureTrack<'a> {
-    placed_features: Vec<PlacedFeature<'a>>,
+struct FeatureTrack<'gff> {
+    placed_features: Vec<PlacedFeature<'gff>>,
     total_columns: usize,
-    width: usize,
 }
 
-impl<'a> FeatureTrack<'a> {
-    fn for_alignment(gff: &'a Gff, session: &Session, available_width: usize) -> Self {
+impl<'gff> FeatureTrack<'gff> {
+    fn for_alignment(gff: &'gff Gff, session: &Session, available_width: usize) -> Self {
         let total_columns = session.layout().columns().len();
         let width = available_width.min(total_columns);
         let placed_features =
-            placed_features(&display_features(gff, session), width, total_columns);
+            placed_features(&features::display(gff, session), width, total_columns);
         Self {
             placed_features,
             total_columns,
-            width,
         }
     }
 
@@ -172,7 +149,7 @@ impl<'a> FeatureTrack<'a> {
             .unwrap_or(0)
     }
 
-    fn feature_at(&self, x: usize, row: usize) -> Option<&'a Feature> {
+    fn feature_at(&self, x: usize, row: usize) -> Option<&'gff Feature> {
         self.placed_features
             .iter()
             .find(|placed_feature| placed_feature.row == row && placed_feature.span.contains(&x))
@@ -180,12 +157,29 @@ impl<'a> FeatureTrack<'a> {
     }
 }
 
-fn placed_features<'a>(
-    display_features: &[DisplayFeature<'a>],
+fn format_tooltip(feature: &Feature) -> String {
+    format!(
+        "{} ({}) — {}\n{}-{} • {} nt",
+        feature.name,
+        feature.kind,
+        feature.strand,
+        feature.range.start + 1,
+        feature.range.end,
+        feature.range.len(),
+    )
+}
+
+// the features sit above the navigation row along the bottom
+fn split_navigation_row(area: Rect) -> [Rect; 2] {
+    area.layout(&vertical![*=1, ==1])
+}
+
+fn placed_features<'gff>(
+    display_features: &[DisplayFeature<'gff>],
     width: usize,
     total_columns: usize,
-) -> Vec<PlacedFeature<'a>> {
-    let mut res = Vec::new();
+) -> Vec<PlacedFeature<'gff>> {
+    let mut placed: Vec<PlacedFeature<'gff>> = Vec::new();
     let mut alternating_row = 0;
     let mut stack_offset = 0;
 
@@ -194,18 +188,20 @@ fn placed_features<'a>(
             continue;
         };
 
-        let same_as_previous = res
+        let same_as_previous = placed
             .last()
-            .is_some_and(|placed_feature: &PlacedFeature<'_>| placed_feature.span == span);
+            .is_some_and(|placed_feature| placed_feature.span == span);
         let row = if same_as_previous {
+            // features with the same span stack below each other
             stack_offset += 1;
             alternating_row + stack_offset
         } else {
-            alternating_row = res.len() % 2;
+            // the rest alternate rows so neighbours don't touch
+            alternating_row = placed.len() % 2;
             stack_offset = 0;
             alternating_row
         };
-        res.push(PlacedFeature {
+        placed.push(PlacedFeature {
             feature: display_feature.feature,
             span,
             row,
@@ -213,7 +209,7 @@ fn placed_features<'a>(
         });
     }
 
-    res
+    placed
 }
 
 fn feature_span(
@@ -232,6 +228,7 @@ fn feature_span(
         .saturating_mul(width)
         .div_ceil(total_columns)
         .min(width);
+    // at least one cell, leaving a gap before the next feature
     Some(start..start + (end - start).saturating_sub(1).max(1))
 }
 

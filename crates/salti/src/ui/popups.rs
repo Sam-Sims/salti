@@ -1,12 +1,12 @@
 mod fuzzy;
-pub(crate) mod keybinds;
-pub(crate) mod minimap;
-pub(crate) mod palette;
+pub mod keybinds;
+pub mod minimap;
+pub mod palette;
 mod text_input;
 
 use std::fmt::Display;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use ratatui::{
     buffer::Buffer,
@@ -28,22 +28,22 @@ use crate::{
         popups::{
             keybinds::Keybinds,
             minimap::{Minimap, MinimapView},
-            palette::PaletteState,
+            palette::Palette,
         },
     },
 };
 
-const COLUMN_GAP: usize = 2;
+pub const COLUMN_GAP: usize = 2;
 
 #[derive(Debug)]
-pub(crate) enum Popup {
-    Palette(PaletteState),
+pub enum Popup {
+    Palette(Palette),
     Minimap(Minimap),
     Keybinds(Keybinds),
 }
 
 impl Popup {
-    pub(crate) fn handle_key(&mut self, key: KeyEvent, ctx: &Context) -> Vec<Command> {
+    pub fn handle_key(&mut self, key: KeyEvent, ctx: &Context) -> Vec<Command> {
         if key.code == KeyCode::Esc {
             return vec![Command::ClosePopup];
         }
@@ -51,7 +51,7 @@ impl Popup {
         self.content_mut().handle_key(key, inner, ctx)
     }
 
-    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent, ctx: &Context) -> Vec<Command> {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, ctx: &Context) -> Vec<Command> {
         let inner = self.inner(ctx);
         if !inner.contains((mouse.column, mouse.row).into()) {
             return Vec::new();
@@ -59,7 +59,7 @@ impl Popup {
         self.content_mut().handle_mouse(mouse, inner, ctx)
     }
 
-    pub(crate) fn render(&self, buf: &mut Buffer, ctx: &Context) {
+    pub fn render(&self, buf: &mut Buffer, ctx: &Context) {
         let content = self.content();
         let area = content.area(ctx);
         let frame = content.frame();
@@ -75,7 +75,7 @@ impl Popup {
         content.render(inner, buf, ctx);
     }
 
-    pub(super) fn theme_preview(&self) -> Option<ThemeChoice> {
+    pub fn theme_preview(&self) -> Option<ThemeChoice> {
         match self {
             Self::Palette(palette) => palette.theme_preview(),
             Self::Minimap(_) | Self::Keybinds(_) => None,
@@ -104,7 +104,24 @@ impl Popup {
     }
 }
 
-trait PopupContent {
+pub struct Context<'frame> {
+    pub session: Option<&'frame Session>,
+    pub gff: Option<&'frame Gff>,
+    pub theme: &'frame Theme,
+    pub screen: &'frame ScreenLayout,
+    pub minimap_view: MinimapView,
+}
+
+impl Context<'_> {
+    fn session(&self) -> Result<&Session> {
+        use anyhow::Context as _;
+
+        self.session
+            .context("No alignment is loaded. Open one with load-alignment")
+    }
+}
+
+pub trait PopupContent {
     fn frame(&self) -> PopupFrame;
     fn title(&self, _width: u16, _ctx: &Context) -> Line<'static> {
         Line::default()
@@ -118,34 +135,12 @@ trait PopupContent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum PopupFrame {
+pub enum PopupFrame {
     Bordered,
     Bare,
 }
 
-pub(crate) struct Context<'a> {
-    pub(crate) session: Option<&'a Session>,
-    pub(crate) gff: Option<&'a Gff>,
-    pub(crate) theme: &'a Theme,
-    pub(crate) screen: &'a ScreenLayout,
-    pub(crate) minimap_view: MinimapView,
-}
-
-impl Context<'_> {
-    fn session(&self) -> Result<&Session> {
-        self.session
-            .context("No alignment is loaded. Open one with load-alignment")
-    }
-}
-
-fn block(frame: PopupFrame) -> Block<'static> {
-    match frame {
-        PopupFrame::Bordered => Block::bordered(),
-        PopupFrame::Bare => Block::new(),
-    }
-}
-
-fn tab_title<T: VariantArray + Display + Copy + PartialEq>(
+pub fn tab_title<T: VariantArray + Display + Copy + PartialEq>(
     selected: T,
     width: u16,
     theme: &Theme,
@@ -173,12 +168,19 @@ fn tab_title<T: VariantArray + Display + Copy + PartialEq>(
     }
 }
 
-fn next_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
+pub fn next_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
     step_tab(tab, 1)
 }
 
-fn previous_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
+pub fn previous_tab<T: VariantArray + Copy + PartialEq>(tab: T) -> T {
     step_tab(tab, T::VARIANTS.len() - 1)
+}
+
+fn block(frame: PopupFrame) -> Block<'static> {
+    match frame {
+        PopupFrame::Bordered => Block::bordered(),
+        PopupFrame::Bare => Block::new(),
+    }
 }
 
 fn step_tab<T: VariantArray + Copy + PartialEq>(tab: T, step: usize) -> T {

@@ -6,29 +6,29 @@ use tachyonfx::{ColorSpace, Effect, fx};
 const FADE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Notification {
-    pub(crate) level: NotificationLevel,
-    pub(crate) message: String,
+pub struct Notification {
+    pub level: NotificationLevel,
+    pub message: String,
 }
 
 impl Notification {
-    pub(crate) fn info(message: impl Into<String>) -> Self {
+    pub fn info(message: String) -> Self {
         Self {
             level: NotificationLevel::Info,
-            message: message.into(),
+            message,
         }
     }
 
-    pub(crate) fn error(message: impl Into<String>) -> Self {
+    pub fn error(message: String) -> Self {
         Self {
             level: NotificationLevel::Error,
-            message: message.into(),
+            message,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotificationLevel {
+pub enum NotificationLevel {
     Error,
     #[allow(dead_code)]
     Warning,
@@ -36,6 +36,7 @@ pub(crate) enum NotificationLevel {
 }
 
 impl NotificationLevel {
+    // how long the notification stays before it starts to fade
     fn hold(self) -> Duration {
         match self {
             NotificationLevel::Error => Duration::from_secs(3),
@@ -45,12 +46,15 @@ impl NotificationLevel {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Notifications {
+pub struct Notifications {
     shown: Option<Shown>,
 }
 
 impl Notifications {
-    pub(crate) fn notify(&mut self, notification: Notification, bg: Color) {
+    /// fades into `background` once it's been up long enough
+    ///
+    /// an error stays until it fades, so a later info or warning can't hide it
+    pub fn notify(&mut self, notification: Notification, background: Color) {
         let error_shown = self
             .shown
             .as_ref()
@@ -58,21 +62,22 @@ impl Notifications {
         if error_shown && notification.level != NotificationLevel::Error {
             return;
         }
-        let out = match bg {
-            Color::Rgb(..) => fx::fade_to_fg(bg, FADE).with_color_space(ColorSpace::Rgb),
+        // terminals without RGB colours dissolve instead
+        let fade_out = match background {
+            Color::Rgb(..) => fx::fade_to_fg(background, FADE).with_color_space(ColorSpace::Rgb),
             _ => fx::dissolve(FADE),
         };
         self.shown = Some(Shown {
-            effect: fx::sequence(&[fx::sleep(notification.level.hold()), out]),
+            effect: fx::sequence(&[fx::sleep(notification.level.hold()), fade_out]),
             notification,
         });
     }
 
-    pub(crate) fn shown(&self) -> Option<&Notification> {
+    pub fn shown(&self) -> Option<&Notification> {
         self.shown.as_ref().map(|shown| &shown.notification)
     }
 
-    pub(crate) fn advance(&mut self, delta: Duration, buf: &mut Buffer, area: Rect) {
+    pub fn advance(&mut self, delta: Duration, buf: &mut Buffer, area: Rect) {
         let Some(shown) = &mut self.shown else {
             return;
         };
@@ -82,7 +87,7 @@ impl Notifications {
         }
     }
 
-    pub(crate) fn is_animating(&self) -> bool {
+    pub fn is_animating(&self) -> bool {
         self.shown.is_some()
     }
 }
@@ -100,20 +105,20 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case::first(None, Notification::info(""), NotificationLevel::Info)]
+    #[case::first(None, Notification::info(String::new()), NotificationLevel::Info)]
     #[case::info_replaces_info(
-        Some(Notification::info("")),
-        Notification::info(""),
+        Some(Notification::info(String::new())),
+        Notification::info(String::new()),
         NotificationLevel::Info
     )]
     #[case::error_replaces_info(
-        Some(Notification::info("")),
-        Notification::error(""),
+        Some(Notification::info(String::new())),
+        Notification::error(String::new()),
         NotificationLevel::Error
     )]
     #[case::info_keeps_error(
-        Some(Notification::error("")),
-        Notification::info(""),
+        Some(Notification::error(String::new())),
+        Notification::info(String::new()),
         NotificationLevel::Error
     )]
     fn notify_works(
@@ -135,8 +140,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case::info(Notification::info("x"), Duration::from_millis(2900))]
-    #[case::error(Notification::error("x"), Duration::from_millis(4900))]
+    #[case::info(Notification::info("x".to_string()), Duration::from_millis(2900))]
+    #[case::error(Notification::error("x".to_string()), Duration::from_millis(4900))]
     fn advance_clears_after_fade(
         #[case] notification: Notification,
         #[case] shown_until: Duration,

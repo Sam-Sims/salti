@@ -1,4 +1,4 @@
-use std::{iter, ops::Range};
+use std::{array, iter, ops::Range};
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use libmsa::{AlignmentType, ColumnCounts};
@@ -21,23 +21,21 @@ use crate::{
     },
     session::Session,
     ui::{
-        bar_ticks, cell_columns, full_bar_ticks,
-        mouse::centre_on_pointer,
-        popups::{Context, PopupContent, PopupFrame, next_tab, previous_tab, tab_title},
-        selection::blend,
+        self, mouse,
+        popups::{self, Context, PopupContent, PopupFrame},
+        selection,
     },
 };
 
-/// maximum height of the minimap in rows
 const MINIMAP_HEIGHT_ROWS: u16 = 7;
 const MINIMAP_WINDOW_ALPHA: f32 = 0.28;
-/// width in cells of the sliding window a plot cell takes its peak mean from
+// width in cells of the sliding window a plot cell takes its peak mean from
 const WINDOW_CELLS: usize = 4;
 
 const COLOURS: usize = ResidueColour::VARIANTS.len();
 
 #[derive(Debug)]
-pub(crate) struct Minimap {
+pub struct Minimap {
     total_columns: usize,
     composition: Option<Vec<[f32; COLOURS]>>,
     entropy: Vec<f64>,
@@ -46,16 +44,16 @@ pub(crate) struct Minimap {
 }
 
 impl Minimap {
-    pub(crate) fn new(session: &Session) -> Self {
+    pub fn new(session: &Session) -> Self {
         let (grid, layout) = (session.grid(), session.layout());
         let alignment_type = grid.alignment_type();
         let is_generic = alignment_type == AlignmentType::Generic;
         let reference = session.state().reference();
-        let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, col| {
+        let columns = grid.map_column_counts(layout.rows(), layout.columns(), |counts, column| {
             (
                 colour_shares(&counts, alignment_type),
                 counts.entropy(),
-                reference.map_or(0.0, |row| counts.differing_fraction(grid.cell(row, col))),
+                reference.map_or(0.0, |row| counts.differing_fraction(grid.cell(row, column))),
                 counts.missing_fraction(),
             )
         });
@@ -73,22 +71,13 @@ impl Minimap {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::Display, strum::VariantArray)]
-pub(crate) enum MinimapView {
-    #[default]
-    Composition,
-    Entropy,
-    Differences,
-    Missing,
-}
-
 impl PopupContent for Minimap {
     fn frame(&self) -> PopupFrame {
         PopupFrame::Bordered
     }
 
     fn title(&self, width: u16, ctx: &Context) -> Line<'static> {
-        tab_title(ctx.minimap_view, width, ctx.theme)
+        popups::tab_title(ctx.minimap_view, width, ctx.theme)
     }
 
     fn area(&self, ctx: &Context) -> Rect {
@@ -104,10 +93,10 @@ impl PopupContent for Minimap {
     fn handle_key(&mut self, key: KeyEvent, _: Rect, ctx: &Context) -> Vec<Command> {
         let view = ctx.minimap_view;
         let command = match key.code {
-            KeyCode::Tab => Some(Command::SetMinimapView(next_tab(view))),
-            KeyCode::BackTab => Some(Command::SetMinimapView(previous_tab(view))),
+            KeyCode::Tab => Some(Command::SetMinimapView(popups::next_tab(view))),
+            KeyCode::BackTab => Some(Command::SetMinimapView(popups::previous_tab(view))),
             _ => keybindings::lookup(key).and_then(|command| match command {
-                Command::OpenMinimap => Some(Command::SetMinimapView(next_tab(view))),
+                Command::OpenMinimap => Some(Command::SetMinimapView(popups::next_tab(view))),
                 Command::ScrollUp { .. }
                 | Command::ScrollDown { .. }
                 | Command::ScrollLeft { .. }
@@ -119,7 +108,7 @@ impl PopupContent for Minimap {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, inner: Rect, ctx: &Context) -> Vec<Command> {
-        centre_on_pointer(
+        mouse::centre_on_pointer(
             mouse,
             inner,
             ctx.screen.window.columns.len(),
@@ -178,8 +167,13 @@ impl PopupContent for Minimap {
     }
 }
 
-fn render_note(buffer: &mut Buffer, area: Rect, note: &str, theme: &Theme) {
-    Paragraph::new(Line::from(note.set_style(theme.text_dim.italic()))).render(area, buffer);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::Display, strum::VariantArray)]
+pub enum MinimapView {
+    #[default]
+    Composition,
+    Entropy,
+    Differences,
+    Missing,
 }
 
 fn colour_shares(counts: &ColumnCounts, alignment_type: AlignmentType) -> [f32; COLOURS] {
@@ -201,49 +195,9 @@ fn prefix_sums(values: impl Iterator<Item = f64>) -> Vec<f64> {
         .collect()
 }
 
-fn tint_box(buffer: &mut Buffer, area: Rect, tint: Color) {
-    for position in area.positions() {
-        let cell = &mut buffer[position];
-        if let Some(fg) = blend(cell.fg, tint, MINIMAP_WINDOW_ALPHA) {
-            cell.set_fg(fg);
-        }
-        if let Some(bg) = blend(cell.bg, tint, MINIMAP_WINDOW_ALPHA) {
-            cell.set_bg(bg);
-        }
-    }
-}
-
-fn mark_box(buffer: &mut Buffer, area: Rect, style: Style) {
-    for x in area.left()..area.right() {
-        for y in [area.top().saturating_sub(1), area.bottom()] {
-            if let Some(cell) = buffer.cell_mut((x, y))
-                && cell.symbol() == symbols::line::HORIZONTAL
-            {
-                cell.set_symbol(symbols::line::THICK_HORIZONTAL)
-                    .set_style(style);
-            }
-        }
-    }
-}
-
-fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
-    let cells = usize::from(track_area.width);
-    let shows_window = |cell| {
-        let columns = cell_columns(cell, cells, total_columns);
-        columns.start.max(window.start) < columns.end.min(window.end)
-    };
-    let first = (0..cells).position(shows_window)?;
-    let last = (0..cells).rposition(shows_window)?;
-    Some(Rect {
-        x: track_area.x + first as u16,
-        width: (last + 1 - first) as u16,
-        ..track_area
-    })
-}
-
 #[allow(clippy::cast_precision_loss)]
 fn render_composition(
-    buffer: &mut Buffer,
+    buf: &mut Buffer,
     area: Rect,
     composition: &[[f32; COLOURS]],
     residues: &ResidueStyles,
@@ -256,57 +210,17 @@ fn render_composition(
         })
         .collect();
     let cells = usize::from(area.width);
-    let ticks = usize::from(area.height) * 8;
+    let ticks = ui::full_bar_ticks(area.height) as usize;
     for (cell, x) in (0..cells).zip(area.x..) {
-        let columns = &composition[cell_columns(cell, cells, composition.len())];
+        let columns = &composition[ui::cell_columns(cell, cells, composition.len())];
         let mut shares = [0.0; COLOURS];
         for column in columns {
             for (share, column_share) in shares.iter_mut().zip(column) {
                 *share += column_share / columns.len() as f32;
             }
         }
-        draw_stack(buffer, x, area, &colours, &stack_ticks(&shares, ticks));
+        draw_stack(buf, x, area, &colours, &stack_ticks(&shares, ticks));
     }
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
-fn render_plot(buffer: &mut Buffer, area: Rect, prefix_sums: &[f64], levels: [Color; 4]) {
-    let peaks = window_peaks(prefix_sums, usize::from(area.width));
-    let peak = peaks.iter().copied().fold(0.0, f64::max);
-    if peak <= 0.0 {
-        return;
-    }
-    Sparkline::default()
-        .data(peaks.iter().map(|&value| {
-            let fraction = value / peak;
-            let level = levels[((fraction * levels.len() as f64) as usize).min(levels.len() - 1)];
-            SparklineBar::from(bar_ticks(fraction, area.height)).style(Style::new().fg(level))
-        }))
-        .max(full_bar_ticks(area.height))
-        .render(area, buffer);
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn window_peaks(prefix_sums: &[f64], cells: usize) -> Vec<f64> {
-    let total_columns = prefix_sums.len() - 1;
-    let window = (WINDOW_CELLS * total_columns / cells.max(1)).clamp(1, total_columns);
-    let mean = |column: usize| {
-        let start = column
-            .saturating_sub(window / 2)
-            .min(total_columns - window);
-        (prefix_sums[start + window] - prefix_sums[start]) / window as f64
-    };
-    (0..cells)
-        .map(|cell| {
-            cell_columns(cell, cells, total_columns)
-                .map(mean)
-                .fold(0.0, f64::max)
-        })
-        .collect()
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss)]
@@ -315,15 +229,15 @@ fn stack_ticks(shares: &[f32; COLOURS], ticks: usize) -> [usize; COLOURS] {
     let mut allocated = exact.map(|exact| exact.floor() as usize);
     let coloured = exact.iter().sum::<f64>().round() as usize;
     let leftover = coloured.saturating_sub(allocated.iter().sum());
-    let mut by_remainder: [usize; COLOURS] = std::array::from_fn(|colour| colour);
-    by_remainder.sort_by(|&a, &b| exact[b].fract().total_cmp(&exact[a].fract()));
+    let mut by_remainder: [usize; COLOURS] = array::from_fn(|colour| colour);
+    by_remainder.sort_by(|&left, &right| exact[right].fract().total_cmp(&exact[left].fract()));
     for colour in by_remainder.into_iter().take(leftover) {
         allocated[colour] += 1;
     }
     allocated
 }
 
-fn draw_stack(buffer: &mut Buffer, x: u16, area: Rect, colours: &[Color], ticks: &[usize]) {
+fn draw_stack(buf: &mut Buffer, x: u16, area: Rect, colours: &[Color], ticks: &[usize]) {
     let colour_at = |tick: usize| {
         let mut end = 0;
         colours.iter().zip(ticks).find_map(|(&colour, &count)| {
@@ -337,7 +251,7 @@ fn draw_stack(buffer: &mut Buffer, x: u16, area: Rect, colours: &[Color], ticks:
             break;
         };
         let eighths = (lower_end - bottom).min(8);
-        let cell = &mut buffer[(x, y)];
+        let cell = &mut buf[(x, y)];
         cell.set_symbol(eighths_symbol(eighths)).set_fg(lower);
         if eighths < 8
             && let Some((upper, _)) = colour_at(bottom + 7)
@@ -359,6 +273,86 @@ fn eighths_symbol(eighths: usize) -> &'static str {
         6 => levels.three_quarters,
         7 => levels.seven_eighths,
         _ => levels.full,
+    }
+}
+
+#[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
+fn render_plot(buf: &mut Buffer, area: Rect, prefix_sums: &[f64], levels: [Color; 4]) {
+    let peaks = window_peaks(prefix_sums, usize::from(area.width));
+    let peak = peaks.iter().copied().fold(0.0, f64::max);
+    if peak <= 0.0 {
+        return;
+    }
+    Sparkline::default()
+        .data(peaks.iter().map(|&value| {
+            let fraction = value / peak;
+            let level = levels[((fraction * levels.len() as f64) as usize).min(levels.len() - 1)];
+            SparklineBar::from(ui::bar_ticks(fraction, area.height)).style(Style::new().fg(level))
+        }))
+        .max(ui::full_bar_ticks(area.height))
+        .render(area, buf);
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn window_peaks(prefix_sums: &[f64], cells: usize) -> Vec<f64> {
+    let total_columns = prefix_sums.len() - 1;
+    let window = (WINDOW_CELLS * total_columns / cells.max(1)).clamp(1, total_columns);
+    let mean = |column: usize| {
+        let start = column
+            .saturating_sub(window / 2)
+            .min(total_columns - window);
+        (prefix_sums[start + window] - prefix_sums[start]) / window as f64
+    };
+    (0..cells)
+        .map(|cell| {
+            ui::cell_columns(cell, cells, total_columns)
+                .map(mean)
+                .fold(0.0, f64::max)
+        })
+        .collect()
+}
+
+fn render_note(buf: &mut Buffer, area: Rect, note: &str, theme: &Theme) {
+    Paragraph::new(Line::from(note.set_style(theme.text_dim.italic()))).render(area, buf);
+}
+
+fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
+    let cells = usize::from(track_area.width);
+    let shows_window = |cell| {
+        let columns = ui::cell_columns(cell, cells, total_columns);
+        columns.start.max(window.start) < columns.end.min(window.end)
+    };
+    let first = (0..cells).position(shows_window)?;
+    let last = (0..cells).rposition(shows_window)?;
+    Some(Rect {
+        x: track_area.x + first as u16,
+        width: (last + 1 - first) as u16,
+        ..track_area
+    })
+}
+
+fn tint_box(buf: &mut Buffer, area: Rect, tint: Color) {
+    for position in area.positions() {
+        let cell = &mut buf[position];
+        if let Some(fg) = selection::blend(cell.fg, tint, MINIMAP_WINDOW_ALPHA) {
+            cell.set_fg(fg);
+        }
+        if let Some(bg) = selection::blend(cell.bg, tint, MINIMAP_WINDOW_ALPHA) {
+            cell.set_bg(bg);
+        }
+    }
+}
+
+fn mark_box(buf: &mut Buffer, area: Rect, style: Style) {
+    for x in area.left()..area.right() {
+        for y in [area.top().saturating_sub(1), area.bottom()] {
+            if let Some(cell) = buf.cell_mut((x, y))
+                && cell.symbol() == symbols::line::HORIZONTAL
+            {
+                cell.set_symbol(symbols::line::THICK_HORIZONTAL)
+                    .set_style(style);
+            }
+        }
     }
 }
 

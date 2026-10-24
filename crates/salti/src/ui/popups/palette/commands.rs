@@ -49,7 +49,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
             run: |_, argument| {
                 let position = argument
                     .parse::<NonZeroUsize>()
-                    .map_err(|_| format_err!("expected a positive integer, got '{argument}'"))?;
+                    .map_err(|_| format_err!("Expected a positive integer, got '{argument}'"))?;
                 Ok(Command::JumpToColumn(position.get() - 1))
             },
             completer: None,
@@ -80,7 +80,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
                     .features
                     .iter()
                     .position(|feature| feature.name == argument)
-                    .with_context(|| format!("no feature named '{argument}'"))?;
+                    .with_context(|| format!("No feature named '{argument}'"))?;
                 Ok(Command::JumpToFeature(index))
             },
             completer: Some(completers::features),
@@ -285,13 +285,13 @@ fn row_named(ctx: &Context, rows: fn(&Session) -> &[usize], name: &str) -> Resul
         .iter()
         .copied()
         .find(|&row| session.base_alignment().id(row) == name)
-        .with_context(|| format!("no sequence named '{name}'"))
+        .with_context(|| format!("No sequence named '{name}'"))
 }
 
 fn parse_choice<T: FromStr>(argument: &str, what: &str) -> Result<T> {
     argument
         .parse()
-        .map_err(|_| format_err!("unknown {what} '{argument}'"))
+        .map_err(|_| format_err!("Unknown {what} '{argument}'"))
 }
 
 fn parse_percentage(argument: &str) -> Result<Option<f64>> {
@@ -299,6 +299,6 @@ fn parse_percentage(argument: &str) -> Result<Option<f64>> {
         .parse::<f64>()
         .ok()
         .filter(|percent| (0.0..=100.0).contains(percent))
-        .with_context(|| format!("expected a percentage from 0 to 100, got '{argument}'"))?;
+        .with_context(|| format!("Expected a percentage from 0 to 100, got '{argument}'"))?;
     Ok((percent != 0.0).then_some(percent / 100.0))
 }

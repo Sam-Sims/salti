@@ -3,10 +3,7 @@ use nucleo_matcher::{
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 
-pub(super) fn fuzzy_match<T: AsRef<str>>(
-    query: &str,
-    items: impl IntoIterator<Item = T>,
-) -> Vec<T> {
+pub(super) fn rank<T: AsRef<str>>(query: &str, items: impl IntoIterator<Item = T>) -> Vec<T> {
     if query.is_empty() {
         return items.into_iter().collect();
     }
@@ -42,7 +39,7 @@ mod tests {
     #[case::ties_keep_order("ab", &["ab1", "ab2"], &["ab1", "ab2"])]
     #[case::drops_non_matching("ab", &["ab", "cd"], &["ab"])]
     #[case::ignores_case("AB", &["ab"], &["ab"])]
-    fn fuzzy_match_works(#[case] query: &str, #[case] items: &[&str], #[case] expected: &[&str]) {
-        assert_eq!(fuzzy_match(query, items.iter().copied()), expected);
+    fn rank_works(#[case] query: &str, #[case] items: &[&str], #[case] expected: &[&str]) {
+        assert_eq!(rank(query, items.iter().copied()), expected);
     }
 }

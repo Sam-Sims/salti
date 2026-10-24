@@ -10,7 +10,7 @@ use ratatui::{
 use super::commands::PaletteCommand;
 use crate::{
     config::theme::Theme,
-    ui::{popups::COLUMN_GAP, truncate_label},
+    ui::{self, popups::COLUMN_GAP},
 };
 
 const MAX_LIST_ROWS: usize = 10;
@@ -29,7 +29,8 @@ pub(super) fn rows_above_prompt(
 }
 
 pub(super) fn list_rows(items: &[String], width: u16) -> u16 {
-    u16::try_from(grid(items, width).1).unwrap_or(u16::MAX)
+    let (_, rows) = grid(items, width);
+    u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
 pub(super) fn draw_list(
@@ -66,7 +67,8 @@ pub(super) fn draw_list(
                     Span::raw(padding + &" ".repeat(COLUMN_GAP)),
                 ])
             });
-            Line::from(spans.flatten().collect::<Vec<_>>())
+            let spans: Vec<Span> = spans.flatten().collect();
+            Line::from(spans)
         })
         .collect();
     Paragraph::new(lines).render(area, buf);
@@ -124,7 +126,7 @@ fn doc_text(command: &PaletteCommand, width: u16) -> (Vec<String>, Vec<String>) 
 }
 
 fn pad_label(label: &str, width: usize) -> (String, String) {
-    let text = truncate_label(label, width);
+    let text = ui::truncate_label(label, width);
     let padding = width.saturating_sub(usize::from(text.cell_width()));
     (text, " ".repeat(padding))
 }

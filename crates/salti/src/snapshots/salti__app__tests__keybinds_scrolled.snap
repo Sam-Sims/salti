@@ -2,7 +2,7 @@
 source: crates/salti/src/app.rs
 expression: screen_text(&mut app)
 ---
- File: test.fasta | Status: Loaded | 3 alignments | Length: 12 | Positions: 1-12
+  File: test.fasta | Status: Loaded | 3 sequences | Length: 12 | Positions: 1-12
 ┌──────────────┬─┌ General │ Navigation │ Translation ─────────┐───────────────┐
 │              │1│Shift+Left   Fast scroll left                │               │
 ├──────────────┼─│Shift+Right  Fast scroll right               │───────────────┤

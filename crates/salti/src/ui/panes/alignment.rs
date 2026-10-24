@@ -11,12 +11,9 @@ use crate::{
     gff::Gff,
     session::{DiffMode, Session, WindowColumns},
     ui::{
-        layout::{Window, screen_rows, split_alignment_header},
-        panes::{
-            local_feature_track::LocalFeatureTrack, render_column_scrollbar, render_pane,
-            ruler::Ruler, separator_line, stretch,
-        },
-        render_centred_lines,
+        self,
+        layout::{self, Window},
+        panes::{self, local_feature_track::LocalFeatureTrack, ruler::Ruler},
         selection::Selection,
     },
 };
@@ -24,45 +21,46 @@ use crate::{
 const SELECTION_ROW_ALPHA: f32 = 0.22;
 const SELECTION_COLUMN_ALPHA: f32 = 0.28;
 
-pub(crate) struct AlignmentPane<'a> {
-    pub(crate) session: &'a Session,
-    pub(crate) window: &'a Window,
-    pub(crate) columns: &'a WindowColumns<'a>,
-    pub(crate) gff: Option<&'a Gff>,
-    pub(crate) local_feature_rows: u16,
-    pub(crate) selection: Option<Selection>,
-    pub(crate) theme: &'a Theme,
+pub struct AlignmentPane<'frame> {
+    pub session: &'frame Session,
+    pub window: &'frame Window,
+    pub columns: &'frame WindowColumns<'frame>,
+    pub gff: Option<&'frame Gff>,
+    pub local_feature_rows: u16,
+    pub selection: Option<Selection>,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for AlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(self.theme, None, area, buf);
+        let (session, window, columns, theme) =
+            (self.session, self.window, self.columns, self.theme);
+        let inner_area = panes::render_pane(theme, None, area, buf);
 
         let [local_feature_area, ruler_area, sequence_rows_area] =
-            split_alignment_header(inner_area, self.local_feature_rows);
+            layout::split_alignment_header(inner_area, self.local_feature_rows);
 
         if let Some(gff) = self.gff {
             LocalFeatureTrack {
                 gff,
-                session: self.session,
-                window: self.window,
-                theme: self.theme,
+                session,
+                window,
+                theme,
             }
             .render(local_feature_area, buf);
         }
         Ruler {
-            session: self.session,
-            window: self.window,
-            theme: self.theme,
+            session,
+            window,
+            theme,
         }
         .render(ruler_area, buf);
 
-        let (session, columns, theme) = (self.session, self.columns, self.theme);
         let layout = session.layout();
-        render_column_scrollbar(
+        panes::render_column_scrollbar(
             theme,
             layout.columns().len(),
-            &self.window.columns,
+            &window.columns,
             area.inner(Margin::new(1, 0)),
             buf,
         );
@@ -75,7 +73,7 @@ impl Widget for AlignmentPane<'_> {
             None
         };
         if let Some(message) = empty_message {
-            render_centred_lines(
+            ui::render_centred_lines(
                 vec![Line::from(message.set_style(theme.error))],
                 theme.base,
                 sequence_rows_area,
@@ -84,26 +82,21 @@ impl Widget for AlignmentPane<'_> {
             return;
         }
 
-        let bytes = |row| {
-            columns
-                .grid
-                .cells(row, &columns.columns)
-                .collect::<Vec<u8>>()
-        };
+        let bytes = |row| -> Vec<u8> { columns.grid.cells(row, &columns.columns).collect() };
         let diff = match session.diff_mode() {
             DiffMode::Off => None,
             DiffMode::Reference => session.state().reference().map(bytes),
             DiffMode::Consensus => Some(columns.consensus.clone()),
         };
-        let lines: Vec<Line> = screen_rows(layout, self.window)
-            .map(|pos| match pos {
-                Some(pos) => Line::from(stretch(
+        let lines: Vec<Line> = layout::screen_rows(layout, window)
+            .map(|row| match row {
+                Some(row) => panes::sequence_line(
                     columns,
-                    &bytes(layout.rows()[pos]),
+                    &bytes(layout.rows()[row]),
                     diff.as_deref(),
                     theme,
-                )),
-                None => separator_line(sequence_rows_area.width, theme),
+                ),
+                None => panes::separator_line(sequence_rows_area.width, theme),
             })
             .collect();
         Paragraph::new(lines)
@@ -115,14 +108,14 @@ impl Widget for AlignmentPane<'_> {
                 buf,
                 sequence_rows_area,
                 layout,
-                self.window,
+                window,
                 theme.selection_rows,
                 SELECTION_ROW_ALPHA,
             );
             selection.shade_columns(
                 buf,
                 sequence_rows_area,
-                self.window,
+                window,
                 theme.selection_columns,
                 SELECTION_COLUMN_ALPHA,
             );
@@ -135,13 +128,14 @@ mod tests {
     use std::ops::Range;
 
     use anyhow::Result;
+    use regex::Regex;
 
     use super::*;
     use crate::{
         gff::{Feature, FeatureType, Strand},
         session::{Position, ViewState},
         test_utils::{buffer_text, full_window, session},
-        ui::{layout::AppLayout, panes::local_feature_track::local_feature_row_count},
+        ui::{layout::AppLayout, panes::local_feature_track},
     };
 
     const CAT: &[u8] = b"CATCATCATCATCATCAT";
@@ -154,7 +148,12 @@ mod tests {
 
     fn render_text(session: &Session, gff: Option<&Gff>, window: &Window, area: Rect) -> String {
         let local_feature_rows = gff.map_or(0, |gff| {
-            u16::try_from(local_feature_row_count(gff, session, &window.columns)).unwrap()
+            u16::try_from(local_feature_track::row_count(
+                gff,
+                session,
+                &window.columns,
+            ))
+            .unwrap()
         });
         let layout = AppLayout::new(area, 0, local_feature_rows);
         let columns = session.window_columns(window.columns.clone());
@@ -350,7 +349,7 @@ mod tests {
     #[test]
     fn no_rows() {
         let session = changed(&[CAT, CAT], |state| {
-            state.row_regex_filter = Some(regex::Regex::new("nothing").unwrap());
+            state.row_regex_filter = Some(Regex::new("nothing").unwrap());
             Ok(())
         });
 

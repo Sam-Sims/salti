@@ -10,27 +10,27 @@ use crate::{
     config::theme::Theme,
     session::Session,
     ui::{
-        layout::{Window, screen_rows, split_alignment_header},
-        panes::{render_pane, separator_line},
+        layout::{self, Window},
+        panes,
         selection::Selection,
     },
 };
 
 const SELECTION_ALPHA: f32 = 0.3;
 
-pub(crate) struct SequenceIdPane<'a> {
-    pub(crate) session: &'a Session,
-    pub(crate) window: &'a Window,
-    pub(crate) local_feature_rows: u16,
-    pub(crate) selection: Option<Selection>,
-    pub(crate) theme: &'a Theme,
+pub struct SequenceIdPane<'frame> {
+    pub session: &'frame Session,
+    pub window: &'frame Window,
+    pub local_feature_rows: u16,
+    pub selection: Option<Selection>,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for SequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(self.theme, None, area, buf);
+        let inner_area = panes::render_pane(self.theme, None, area, buf);
         let [_, ruler_area, rows_area] =
-            split_alignment_header(inner_area, self.local_feature_rows);
+            layout::split_alignment_header(inner_area, self.local_feature_rows);
 
         let (layout, theme) = (self.session.layout(), self.theme);
         if !self.window.pinned.is_empty() {
@@ -42,11 +42,11 @@ impl Widget for SequenceIdPane<'_> {
         }
 
         let names = &self.window.names;
-        let lines: Vec<Line> = screen_rows(layout, self.window)
-            .map(|pos| match pos {
-                Some(pos) => {
-                    let row = layout.rows()[pos];
-                    let style = if pos < layout.pinned_count() {
+        let lines: Vec<Line> = layout::screen_rows(layout, self.window)
+            .map(|row| match row {
+                Some(row) => {
+                    let base_row = layout.rows()[row];
+                    let style = if row < layout.pinned_count() {
                         theme.accent
                     } else {
                         theme.text
@@ -55,17 +55,17 @@ impl Widget for SequenceIdPane<'_> {
                     let id: String = self
                         .session
                         .base_alignment()
-                        .id(row)
+                        .id(base_row)
                         .chars()
                         .skip(names.start)
                         .take(names.len())
                         .collect();
                     Line::from(vec![
-                        format!("{} ", row + 1).set_style(theme.success),
+                        format!("{} ", base_row + 1).set_style(theme.success),
                         id.set_style(style),
                     ])
                 }
-                None => separator_line(rows_area.width, theme),
+                None => panes::separator_line(rows_area.width, theme),
             })
             .collect();
         Paragraph::new(lines)
@@ -90,7 +90,7 @@ mod tests {
     use super::*;
     use crate::{
         session::Position,
-        test_utils::{buffer_text, full_window, session_with_ids},
+        test_utils::{buffer_text, full_window, session_with_ids, session_with_numbered_ids},
         ui::layout::AppLayout,
     };
 
@@ -114,29 +114,23 @@ mod tests {
         buffer_text(&buf, layout.sequence_id_pane)
     }
 
-    fn seqs(count: usize) -> Session {
-        let ids: Vec<String> = (1..=count).map(|i| format!("seq{i}")).collect();
-        let sequences: Vec<(&str, &[u8])> = ids.iter().map(|id| (id.as_str(), CAT)).collect();
-        session_with_ids(&sequences)
-    }
-
     #[test]
     fn basic() {
-        let session = seqs(3);
+        let session = session_with_numbered_ids(&[CAT; 3]);
 
         insta::assert_snapshot!(render_text(&session, &full_window(&session), 0));
     }
 
     #[test]
     fn feature_rows() {
-        let session = seqs(3);
+        let session = session_with_numbered_ids(&[CAT; 3]);
 
         insta::assert_snapshot!(render_text(&session, &full_window(&session), 2));
     }
 
     #[test]
     fn pinned() {
-        let mut session = seqs(4);
+        let mut session = session_with_numbered_ids(&[CAT; 4]);
         session
             .update(Position::default(), |state| {
                 state.pin(1);

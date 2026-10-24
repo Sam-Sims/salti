@@ -1,52 +1,53 @@
 use std::fs;
 
+use regex::Regex;
 use strum::VariantArray;
 
 use super::commands::COMMANDS;
 use crate::{
     config::theme::ThemeChoice,
     session::Session,
-    ui::popups::{Context, fuzzy::fuzzy_match},
+    ui::popups::{Context, fuzzy},
 };
 
 pub(super) fn command_names(word: &str) -> Vec<String> {
-    fuzzy_match(word, COMMANDS.iter().map(|command| command.name))
+    fuzzy::rank(word, COMMANDS.iter().map(|command| command.name))
         .into_iter()
         .map(str::to_string)
         .collect()
 }
 
 pub(super) fn sequences(ctx: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, names(ctx, |session| session.layout().rows()))
+    fuzzy::rank(word, names(ctx, |session| session.layout().rows()))
 }
 
 pub(super) fn main_sequences(ctx: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, names(ctx, |session| session.layout().main()))
+    fuzzy::rank(word, names(ctx, |session| session.layout().main()))
 }
 
 pub(super) fn pinned_sequences(ctx: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, names(ctx, |session| session.state().pinned()))
+    fuzzy::rank(word, names(ctx, |session| session.state().pinned()))
 }
 
 pub(super) fn features(ctx: &Context, word: &str) -> Vec<String> {
     let names = ctx.gff.into_iter().flat_map(|gff| &gff.features);
-    fuzzy_match(word, names.map(|feature| feature.name.clone()))
+    fuzzy::rank(word, names.map(|feature| feature.name.clone()))
 }
 
 pub(super) fn gap_percentages(_: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, ["0", "5", "10", "25", "50"].map(str::to_string))
+    fuzzy::rank(word, ["0", "5", "10", "25", "50"].map(str::to_string))
 }
 
 pub(super) fn constant_percentages(_: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, ["0", "70", "90", "95", "100"].map(str::to_string))
+    fuzzy::rank(word, ["0", "70", "90", "95", "100"].map(str::to_string))
 }
 
 pub(super) fn choices<T: VariantArray + ToString>(_: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, T::VARIANTS.iter().map(ToString::to_string))
+    fuzzy::rank(word, T::VARIANTS.iter().map(ToString::to_string))
 }
 
 pub(super) fn theme(_: &Context, word: &str) -> Vec<String> {
-    fuzzy_match(word, ThemeChoice::names().map(str::to_string))
+    fuzzy::rank(word, ThemeChoice::names().map(str::to_string))
 }
 
 pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
@@ -54,7 +55,7 @@ pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
     if word.is_empty() {
         return names;
     }
-    let Ok(regex) = regex::Regex::new(word) else {
+    let Ok(regex) = Regex::new(word) else {
         return Vec::new();
     };
     names
@@ -64,10 +65,10 @@ pub(super) fn filter_matches(ctx: &Context, word: &str) -> Vec<String> {
 }
 
 pub(super) fn filename(_: &Context, word: &str) -> Vec<String> {
-    let (dir, prefix) = word
+    let (directory, prefix) = word
         .rfind('/')
         .map_or(("", word), |index| word.split_at(index + 1));
-    let Ok(entries) = fs::read_dir(if dir.is_empty() { "." } else { dir }) else {
+    let Ok(entries) = fs::read_dir(if directory.is_empty() { "." } else { directory }) else {
         return Vec::new();
     };
     let mut matches: Vec<(bool, String)> = entries
@@ -78,11 +79,12 @@ pub(super) fn filename(_: &Context, word: &str) -> Vec<String> {
             if !name.starts_with(prefix) {
                 return None;
             }
-            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-            let slash = if is_dir { "/" } else { "" };
-            Some((!is_dir, format!("{dir}{name}{slash}")))
+            let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            let slash = if is_directory { "/" } else { "" };
+            Some((!is_directory, format!("{directory}{name}{slash}")))
         })
         .collect();
+    // directories sort first
     matches.sort();
     matches.into_iter().map(|(_, label)| label).collect()
 }

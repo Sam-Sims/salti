@@ -2,7 +2,7 @@ mod commands;
 mod completers;
 mod render;
 
-use anyhow::{Context as _, Result, bail, format_err};
+use anyhow::{Result, bail, format_err};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
@@ -25,15 +25,14 @@ use crate::{
 const QUOTES: [char; 2] = ['\'', '"'];
 
 #[derive(Debug)]
-pub(crate) struct PaletteState {
+pub struct Palette {
     input: TextInput,
     completions: Completions,
     selected: Option<usize>,
-    /// The theme the line sets when it parses as `set-theme <choice>`.
     preview: Option<ThemeChoice>,
 }
 
-impl PaletteState {
+impl Palette {
     pub(super) fn theme_preview(&self) -> Option<ThemeChoice> {
         self.preview
     }
@@ -52,16 +51,16 @@ impl PaletteState {
         self.selected = None;
     }
 
-    fn cycle(&mut self, forward: bool) {
+    fn cycle(&mut self, direction: Direction) {
         let count = self.completions.items.len();
         if count == 0 {
             return;
         }
-        let index = match (self.selected, forward) {
-            (None, true) => 0,
-            (None, false) => count - 1,
-            (Some(index), true) => (index + 1) % count,
-            (Some(index), false) => (index + count - 1) % count,
+        let index = match (self.selected, direction) {
+            (None, Direction::Next) => 0,
+            (None, Direction::Previous) => count - 1,
+            (Some(index), Direction::Next) => (index + 1) % count,
+            (Some(index), Direction::Previous) => (index + count - 1) % count,
         };
         self.selected = Some(index);
         let Completions {
@@ -76,7 +75,7 @@ impl PaletteState {
     }
 }
 
-impl Default for PaletteState {
+impl Default for Palette {
     fn default() -> Self {
         Self {
             input: TextInput::default(),
@@ -91,7 +90,7 @@ impl Default for PaletteState {
     }
 }
 
-impl PopupContent for PaletteState {
+impl PopupContent for Palette {
     fn frame(&self) -> PopupFrame {
         PopupFrame::Bare
     }
@@ -115,12 +114,12 @@ impl PopupContent for PaletteState {
     fn handle_key(&mut self, key: KeyEvent, _: Rect, ctx: &Context) -> Vec<Command> {
         match key.code {
             KeyCode::Tab => {
-                self.cycle(true);
+                self.cycle(Direction::Next);
                 if self.completions.items.len() == 1 && self.selected_is_directory() {
                     self.refresh(ctx);
                 }
             }
-            KeyCode::BackTab => self.cycle(false),
+            KeyCode::BackTab => self.cycle(Direction::Previous),
             KeyCode::Enter if self.selected_is_directory() => self.refresh(ctx),
             KeyCode::Enter => return run_line(self.input.text(), ctx),
             _ => {
@@ -155,11 +154,16 @@ impl PopupContent for PaletteState {
 
 #[derive(Debug)]
 struct Completions {
-    /// Byte index in the line where the word the completions replace starts.
+    // where the word the completions replace starts, as a byte index into the line
     word_start: usize,
-    /// The quote the user opened the word with, if any.
     quote: Option<char>,
     items: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    Next,
+    Previous,
 }
 
 fn run_line(line: &str, ctx: &Context) -> Vec<Command> {
@@ -172,6 +176,8 @@ fn run_line(line: &str, ctx: &Context) -> Vec<Command> {
 }
 
 fn parse_line(line: &str, ctx: &Context) -> Result<Command> {
+    use anyhow::Context as _;
+
     let (name, rest) = split_command(line);
     let arguments: Vec<String> = words(rest.unwrap_or_default())
         .into_iter()
@@ -183,7 +189,7 @@ fn parse_line(line: &str, ctx: &Context) -> Result<Command> {
     } else {
         (name, arguments)
     };
-    let command = find_command(name).with_context(|| format!("no such command: '{name}'"))?;
+    let command = find_command(name).with_context(|| format!("No such command: '{name}'"))?;
 
     let count = arguments.len();
     match (&command.action, arguments.as_slice()) {
@@ -191,9 +197,9 @@ fn parse_line(line: &str, ctx: &Context) -> Result<Command> {
         (Action::Optional { run, .. }, []) => run(ctx, None),
         (Action::Optional { run, .. }, [argument]) => run(ctx, Some(argument)),
         (Action::Required { run, .. }, [argument]) => run(ctx, argument),
-        (Action::Fixed(_), _) => bail!("expected no arguments, got {count}"),
-        (Action::Optional { .. }, _) => bail!("expected at most 1 argument, got {count}"),
-        (Action::Required { .. }, _) => bail!("expected 1 argument, got {count}"),
+        (Action::Fixed(_), _) => bail!("Expected no arguments, got {count}"),
+        (Action::Optional { .. }, _) => bail!("Expected at most 1 argument, got {count}"),
+        (Action::Required { .. }, _) => bail!("Expected 1 argument, got {count}"),
     }
     .map_err(|error| format_err!("'{}': {error}", command.name))
 }
@@ -493,8 +499,8 @@ mod tests {
         assert_eq!(quoted(completion, quote), expected);
     }
 
-    fn palette_after(typed: &str, keys: &[KeyCode], ctx: &Context) -> PaletteState {
-        let mut palette = PaletteState::default();
+    fn palette_after(typed: &str, keys: &[KeyCode], ctx: &Context) -> Palette {
+        let mut palette = Palette::default();
         for code in typed.chars().map(KeyCode::Char).chain(keys.iter().copied()) {
             palette.handle_key(KeyEvent::from(code), Rect::default(), ctx);
         }

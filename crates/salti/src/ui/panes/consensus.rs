@@ -10,21 +10,18 @@ use ratatui::{
 use crate::{
     config::theme::Theme,
     session::{Session, WindowColumns},
-    ui::{
-        bar_ticks, full_bar_ticks,
-        panes::{render_pane, stretch},
-    },
+    ui::{self, panes},
 };
 
-pub(crate) struct ConsensusAlignmentPane<'a> {
-    pub(crate) session: &'a Session,
-    pub(crate) columns: &'a WindowColumns<'a>,
-    pub(crate) theme: &'a Theme,
+pub struct ConsensusAlignmentPane<'frame> {
+    pub session: &'frame Session,
+    pub columns: &'frame WindowColumns<'frame>,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for ConsensusAlignmentPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(self.theme, None, area, buf);
+        let inner_area = panes::render_pane(self.theme, None, area, buf);
         let [sequences_area, conservation_area] = inner_area.layout(&vertical![==2, ==1]);
 
         let (columns, theme) = (self.columns, self.theme);
@@ -32,12 +29,12 @@ impl Widget for ConsensusAlignmentPane<'_> {
             || Line::from("No reference selected.".set_style(theme.text_dim.italic())),
             |row| {
                 let bytes: Vec<u8> = columns.grid.cells(row, &columns.columns).collect();
-                Line::from(stretch(columns, &bytes, None, theme))
+                panes::sequence_line(columns, &bytes, None, theme)
             },
         );
         let lines = vec![
             reference,
-            Line::from(stretch(columns, &columns.consensus, None, theme)),
+            panes::sequence_line(columns, &columns.consensus, None, theme),
         ];
         Paragraph::new(lines)
             .style(theme.base)
@@ -46,9 +43,11 @@ impl Widget for ConsensusAlignmentPane<'_> {
         match &columns.conservation {
             Some(conservation) => Sparkline::default()
                 .data(columns.cells.iter().map(|cell| {
-                    cell.map(|cell| bar_ticks(conservation[cell.index], conservation_area.height))
+                    cell.map(|cell| {
+                        ui::bar_ticks(conservation[cell.index], conservation_area.height)
+                    })
                 }))
-                .max(full_bar_ticks(conservation_area.height))
+                .max(ui::full_bar_ticks(conservation_area.height))
                 .style(theme.accent_alt)
                 .render(conservation_area, buf),
             None => Paragraph::new(Line::from(
@@ -60,13 +59,13 @@ impl Widget for ConsensusAlignmentPane<'_> {
     }
 }
 
-pub(crate) struct ConsensusSequenceIdPane<'a> {
-    pub(crate) theme: &'a Theme,
+pub struct ConsensusSequenceIdPane<'frame> {
+    pub theme: &'frame Theme,
 }
 
 impl Widget for ConsensusSequenceIdPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = render_pane(self.theme, None, area, buf);
+        let inner_area = panes::render_pane(self.theme, None, area, buf);
 
         let lines: Vec<Line> = [
             "Reference Sequence:",
@@ -85,6 +84,8 @@ impl Widget for ConsensusSequenceIdPane<'_> {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use super::*;
     use crate::{
         session::{Position, ViewState},
@@ -114,7 +115,7 @@ mod tests {
 
     fn consensus_text(
         sequences: &[&[u8]],
-        change: impl FnOnce(&mut ViewState) -> anyhow::Result<()>,
+        change: impl FnOnce(&mut ViewState) -> Result<()>,
     ) -> String {
         let mut session = session(sequences);
         session.update(Position::default(), change).unwrap();

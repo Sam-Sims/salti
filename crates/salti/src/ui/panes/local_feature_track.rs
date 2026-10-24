@@ -8,17 +8,18 @@ use crate::{
     session::Session,
     ui::{
         layout::Window,
-        panes::features::{DisplayFeature, PlacedFeature, display_features, render_features},
+        panes::features::{self, DisplayFeature, PlacedFeature},
     },
 };
 
+// features that don't fit in this many rows are left out
 const MAX_LOCAL_FEATURE_ROWS: usize = 5;
 
-pub(crate) struct LocalFeatureTrack<'a> {
-    pub(crate) gff: &'a Gff,
-    pub(crate) session: &'a Session,
-    pub(crate) window: &'a Window,
-    pub(crate) theme: &'a Theme,
+pub struct LocalFeatureTrack<'frame> {
+    pub gff: &'frame Gff,
+    pub session: &'frame Session,
+    pub window: &'frame Window,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for LocalFeatureTrack<'_> {
@@ -27,41 +28,40 @@ impl Widget for LocalFeatureTrack<'_> {
             return;
         }
 
-        let display_features = display_features(self.gff, self.session);
+        let display_features = features::display(self.gff, self.session);
         let placed_features = place_visible_features(&display_features, &self.window.columns);
-        render_features(&placed_features, area, self.theme, buf);
+        features::render(&placed_features, area, self.theme, buf);
     }
 }
 
-pub(crate) fn local_feature_row_count(
-    gff: &Gff,
-    session: &Session,
-    columns: &Range<usize>,
-) -> usize {
-    place_visible_features(&display_features(gff, session), columns)
+/// how many rows the track needs for the columns in view, always at least one
+pub fn row_count(gff: &Gff, session: &Session, columns: &Range<usize>) -> usize {
+    place_visible_features(&features::display(gff, session), columns)
         .iter()
         .map(|placed| placed.row + 1)
         .max()
         .unwrap_or(1)
 }
 
-fn place_visible_features<'a>(
-    display_features: &[DisplayFeature<'a>],
-    col_range: &Range<usize>,
-) -> Vec<PlacedFeature<'a>> {
-    let mut res: Vec<PlacedFeature<'a>> = Vec::new();
+fn place_visible_features<'gff>(
+    display_features: &[DisplayFeature<'gff>],
+    columns: &Range<usize>,
+) -> Vec<PlacedFeature<'gff>> {
+    let mut placed: Vec<PlacedFeature<'gff>> = Vec::new();
     let mut row_ends = [0; MAX_LOCAL_FEATURE_ROWS];
 
     for display_feature in display_features {
-        let Some(visible_range) = intersect(&display_feature.columns, col_range) else {
+        let Some(visible_range) = intersect(&display_feature.columns, columns) else {
             continue;
         };
-        let span = visible_range.start - col_range.start..visible_range.end - col_range.start;
+        // cells count from the left of the window
+        let span = visible_range.start - columns.start..visible_range.end - columns.start;
+        // the first row with room for it
         let Some(row) = row_ends.iter().position(|&row_end| row_end <= span.start) else {
             continue;
         };
         row_ends[row] = span.end;
-        res.push(PlacedFeature {
+        placed.push(PlacedFeature {
             feature: display_feature.feature,
             span,
             row,
@@ -69,7 +69,7 @@ fn place_visible_features<'a>(
         });
     }
 
-    res
+    placed
 }
 
 fn intersect(left: &Range<usize>, right: &Range<usize>) -> Option<Range<usize>> {
@@ -126,16 +126,13 @@ mod tests {
     #[rstest]
     #[case::none_visible_keeps_one_row(&[0..5], 10..15, 1)]
     #[case::stacked(&[0..10, 2..8], 0..12, 2)]
-    fn local_feature_row_count_works(
+    fn row_count_works(
         #[case] ranges: &[Range<usize>],
         #[case] columns: Range<usize>,
         #[case] expected: usize,
     ) {
         let session = session(&[&[b'A'; 20]]);
 
-        assert_eq!(
-            local_feature_row_count(&genes(ranges), &session, &columns),
-            expected
-        );
+        assert_eq!(row_count(&genes(ranges), &session, &columns), expected);
     }
 }

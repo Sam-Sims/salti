@@ -10,13 +10,11 @@ use strum::VariantArray;
 use crate::{
     command::Command,
     config::keybindings::{Binding, Category, KEY_BINDINGS},
-    ui::popups::{
-        COLUMN_GAP, Context, PopupContent, PopupFrame, next_tab, previous_tab, tab_title,
-    },
+    ui::popups::{self, COLUMN_GAP, Context, PopupContent, PopupFrame},
 };
 
 #[derive(Debug, Default)]
-pub(crate) struct Keybinds {
+pub struct Keybinds {
     tab: Category,
     scroll: usize,
 }
@@ -39,7 +37,7 @@ impl PopupContent for Keybinds {
     }
 
     fn title(&self, width: u16, ctx: &Context) -> Line<'static> {
-        tab_title(self.tab, width, ctx.theme)
+        popups::tab_title(self.tab, width, ctx.theme)
     }
 
     fn area(&self, ctx: &Context) -> Rect {
@@ -63,8 +61,8 @@ impl PopupContent for Keybinds {
 
     fn handle_key(&mut self, key: KeyEvent, inner: Rect, _: &Context) -> Vec<Command> {
         match key.code {
-            KeyCode::Left | KeyCode::BackTab => self.select_tab(previous_tab(self.tab)),
-            KeyCode::Right | KeyCode::Tab => self.select_tab(next_tab(self.tab)),
+            KeyCode::Left | KeyCode::BackTab => self.select_tab(popups::previous_tab(self.tab)),
+            KeyCode::Right | KeyCode::Tab => self.select_tab(popups::next_tab(self.tab)),
             KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
             KeyCode::Down => self.scroll = (self.scroll + 1).min(self.max_scroll(inner)),
             _ => {}

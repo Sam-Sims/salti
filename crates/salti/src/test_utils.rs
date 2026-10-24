@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -11,6 +11,7 @@ use crate::{
         UiState,
         layout::{AppLayout, FrameLayout, ScreenLayout, Window},
         popups::{Context, minimap::MinimapView},
+        selection::Selection,
     },
 };
 
@@ -102,6 +103,13 @@ pub(crate) fn with_context<T>(
         screen: &screen,
         minimap_view: MinimapView::default(),
     })
+}
+
+pub fn selection(rows: RangeInclusive<usize>, columns: RangeInclusive<usize>) -> Selection {
+    Selection {
+        rows: rows.into(),
+        columns: columns.into(),
+    }
 }
 
 pub(crate) fn ui_state() -> UiState {

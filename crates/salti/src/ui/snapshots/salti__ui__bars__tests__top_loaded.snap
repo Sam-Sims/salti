@@ -2,4 +2,4 @@
 source: crates/salti/src/ui/bars.rs
 expression: "top(&session, &window, None)"
 ---
-File: test.fasta | Status: Loaded | 3 alignments | Length: 8 | Positions: 1-5
+File: test.fasta | Status: Loaded | 3 sequences | Length: 8 | Positions: 1-5

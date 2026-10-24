@@ -2,4 +2,4 @@
 source: crates/salti/src/ui/bars.rs
 expression: "top(&session, &full_window(&session), Some(\"/data/next.fasta\"))"
 ---
-File: test.fasta | Loading next.fasta | 3 alignments | Length: 8 | Positions: 1-8
+File: test.fasta | Loading next.fasta | 3 sequences | Length: 8 | Positions: 1-8

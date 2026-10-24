@@ -1,100 +1,145 @@
+use std::cmp::Ordering;
+
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
+use ratatui::layout::{self, Rect};
 
 use crate::{
     command::Command,
     gff::Gff,
     session::Session,
     ui::{
-        UiState, cell_columns,
-        layout::{ScreenLayout, Window, screen_rows},
+        self, UiState,
+        layout::{ScreenLayout, Window},
         panes::gff,
         selection::Selection,
     },
 };
 
-pub(crate) fn handle(
-    tracker: &mut MouseTracker,
-    session: Option<&Session>,
-    gff: Option<&Gff>,
-    ui: &mut UiState,
-    screen: &ScreenLayout,
-    mouse: MouseEvent,
-) -> Vec<Command> {
-    ui.gff_tooltip = None;
-    let Some(session) = session else {
-        return Vec::new();
-    };
-    if matches!(mouse.kind, MouseEventKind::Down(_)) {
-        tracker.clear_anchors();
-    }
-
-    let point = (mouse.column, mouse.row).into();
-    if let Some(gff) = gff
-        && screen.app.gff_pane_rows.contains(point)
-    {
-        return handle_gff_mouse_event(gff, session, ui, screen, mouse);
-    }
-    if screen.app.alignment_pane_sequence_rows.contains(point) {
-        return handle_alignment_mouse_event(tracker, session, ui, screen, mouse);
-    }
-    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-        ui.selection = None;
-    }
-    Vec::new()
-}
-
 #[derive(Debug, Default)]
-pub(crate) struct MouseTracker {
+pub struct MouseTracker {
     selection_drag: Option<SelectionDrag>,
-    pan_anchor: Option<(u16, u16)>,
+    pan_anchor: Option<layout::Position>,
 }
 
 impl MouseTracker {
+    pub fn handle(
+        &mut self,
+        session: Option<&Session>,
+        gff: Option<&Gff>,
+        ui: &mut UiState,
+        screen: &ScreenLayout,
+        mouse: MouseEvent,
+    ) -> Vec<Command> {
+        ui.gff_tooltip = None;
+        let Some(session) = session else {
+            return Vec::new();
+        };
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            self.clear_anchors();
+        }
+
+        let point: layout::Position = (mouse.column, mouse.row).into();
+        if let Some(gff) = gff
+            && screen.app.gff_pane_rows.contains(point)
+        {
+            return handle_gff_mouse_event(gff, session, ui, screen, mouse);
+        }
+        if screen.app.alignment_pane_sequence_rows.contains(point) {
+            return self.handle_alignment_mouse_event(session, ui, screen, mouse);
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            ui.selection = None;
+        }
+        Vec::new()
+    }
+
     pub fn clear_anchors(&mut self) {
         self.selection_drag = None;
         self.pan_anchor = None;
     }
 
-    fn pan_drag_commands(&mut self, column: u16, row: u16) -> [Option<Command>; 2] {
-        let Some((anchor_x, anchor_y)) = self.pan_anchor else {
-            return [None, None];
-        };
+    fn handle_alignment_mouse_event(
+        &mut self,
+        session: &Session,
+        ui: &mut UiState,
+        screen: &ScreenLayout,
+        mouse: MouseEvent,
+    ) -> Vec<Command> {
+        let resolved_anchor = anchor_at(
+            session,
+            &screen.window,
+            screen.app.alignment_pane_sequence_rows,
+            mouse.column,
+            mouse.row,
+        );
 
-        let (row_delta, scroll_up) = if row >= anchor_y {
-            (usize::from(row - anchor_y), true)
-        } else {
-            (usize::from(anchor_y - row), false)
-        };
-
-        let (column_delta, scroll_left) = if column >= anchor_x {
-            (usize::from(column - anchor_x), true)
-        } else {
-            (usize::from(anchor_x - column), false)
-        };
-
-        self.pan_anchor = Some((column, row));
-
-        [
-            (row_delta > 0).then_some(if scroll_up {
-                Command::ScrollUp { amount: row_delta }
-            } else {
-                Command::ScrollDown { amount: row_delta }
-            }),
-            (column_delta > 0).then_some(if scroll_left {
-                Command::ScrollLeft {
-                    amount: column_delta,
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some(anchor) = resolved_anchor else {
+                    ui.selection = None;
+                    return Vec::new();
+                };
+                self.selection_drag = Some(if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                    SelectionDrag::Box(anchor)
+                } else {
+                    SelectionDrag::Follow
+                });
+                ui.selection = Some(anchor);
+            }
+            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+                if let (Some(drag), Some(current)) = (self.selection_drag, resolved_anchor) {
+                    ui.selection = Some(match drag {
+                        SelectionDrag::Follow => current,
+                        SelectionDrag::Box(anchor) => selection_from_anchors(anchor, current),
+                    });
                 }
-            } else {
-                Command::ScrollRight {
-                    amount: column_delta,
+                if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                    self.selection_drag = None;
                 }
+            }
+            MouseEventKind::Down(MouseButton::Middle) => {
+                self.pan_anchor = Some((mouse.column, mouse.row).into());
+            }
+            MouseEventKind::Drag(MouseButton::Middle) => {
+                return self.pan_drag_commands(mouse.column, mouse.row);
+            }
+            MouseEventKind::Up(MouseButton::Middle) => {
+                self.pan_anchor = None;
+            }
+            _ => (),
+        }
+        Vec::new()
+    }
+
+    fn pan_drag_commands(&mut self, column: u16, row: u16) -> Vec<Command> {
+        let Some(anchor) = self.pan_anchor else {
+            return Vec::new();
+        };
+        self.pan_anchor = Some((column, row).into());
+
+        let vertical = match row.cmp(&anchor.y) {
+            Ordering::Greater => Some(Command::ScrollUp {
+                amount: usize::from(row - anchor.y),
             }),
-        ]
+            Ordering::Less => Some(Command::ScrollDown {
+                amount: usize::from(anchor.y - row),
+            }),
+            Ordering::Equal => None,
+        };
+        let horizontal = match column.cmp(&anchor.x) {
+            Ordering::Greater => Some(Command::ScrollLeft {
+                amount: usize::from(column - anchor.x),
+            }),
+            Ordering::Less => Some(Command::ScrollRight {
+                amount: usize::from(anchor.x - column),
+            }),
+            Ordering::Equal => None,
+        };
+        [vertical, horizontal].into_iter().flatten().collect()
     }
 }
 
-pub(crate) fn centre_on_pointer(
+pub fn centre_on_pointer(
     mouse: MouseEvent,
     area: Rect,
     window_span: usize,
@@ -113,7 +158,9 @@ pub(crate) fn centre_on_pointer(
 
 #[derive(Debug, Clone, Copy)]
 enum SelectionDrag {
+    // a plain drag moves a one-cell selection with the pointer
     Follow,
+    // a Ctrl drag grows a box from where it started
     Box(Selection),
 }
 
@@ -131,69 +178,12 @@ fn handle_gff_mouse_event(
 
     centre_on_pointer(
         mouse,
-        gff::gff_content_area(gff_pane_rows, total_columns),
+        gff::content_area(gff_pane_rows, total_columns),
         screen.window.columns.len(),
         total_columns,
     )
     .into_iter()
     .collect()
-}
-
-fn handle_alignment_mouse_event(
-    tracker: &mut MouseTracker,
-    session: &Session,
-    ui: &mut UiState,
-    screen: &ScreenLayout,
-    mouse: MouseEvent,
-) -> Vec<Command> {
-    let resolved_anchor = anchor_at(
-        session,
-        &screen.window,
-        screen.app.alignment_pane_sequence_rows,
-        mouse.column,
-        mouse.row,
-    );
-
-    match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            let Some(anchor) = resolved_anchor else {
-                ui.selection = None;
-                return Vec::new();
-            };
-            tracker.selection_drag = Some(if mouse.modifiers.contains(KeyModifiers::CONTROL) {
-                SelectionDrag::Box(anchor)
-            } else {
-                SelectionDrag::Follow
-            });
-            ui.selection = Some(anchor);
-        }
-        MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
-            if let (Some(drag), Some(current)) = (tracker.selection_drag, resolved_anchor) {
-                ui.selection = Some(match drag {
-                    SelectionDrag::Follow => current,
-                    SelectionDrag::Box(anchor) => selection_from_anchors(anchor, current),
-                });
-            }
-            if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
-                tracker.selection_drag = None;
-            }
-        }
-        MouseEventKind::Down(MouseButton::Middle) => {
-            tracker.pan_anchor = Some((mouse.column, mouse.row));
-        }
-        MouseEventKind::Drag(MouseButton::Middle) => {
-            return tracker
-                .pan_drag_commands(mouse.column, mouse.row)
-                .into_iter()
-                .flatten()
-                .collect();
-        }
-        MouseEventKind::Up(MouseButton::Middle) => {
-            tracker.pan_anchor = None;
-        }
-        _ => (),
-    }
-    Vec::new()
 }
 
 fn anchor_at(
@@ -205,10 +195,10 @@ fn anchor_at(
 ) -> Option<Selection> {
     debug_assert!(
         sequence_rows_area.contains((mouse_x, mouse_y).into()),
-        "pointer should be inside the sequence rows"
+        "pointer at ({mouse_x}, {mouse_y}) is outside the sequence rows {sequence_rows_area:?}"
     );
 
-    let row = screen_rows(session.layout(), window)
+    let row = ui::layout::screen_rows(session.layout(), window)
         .nth(usize::from(mouse_y - sequence_rows_area.y))
         .flatten()?;
     let column = window
@@ -236,20 +226,18 @@ fn selection_from_anchors(anchor: Selection, current: Selection) -> Selection {
 fn column_at(mouse_x: u16, area: Rect, total_columns: usize) -> usize {
     let cells = usize::from(area.width);
     let cell = usize::from(mouse_x.saturating_sub(area.x)).min(cells - 1);
-    cell_columns(cell, cells, total_columns).start
+    ui::cell_columns(cell, cells, total_columns).start
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
-    use std::ops;
-
     use rstest::rstest;
 
     use super::*;
     use crate::{
-        gff::{Feature, FeatureType, Strand},
         session::{Position, ViewState},
-        test_utils::{mouse_event, pinned_session, screen, session, ui_state},
+        test_utils::{genes, mouse_event, pinned_session, screen, selection, session, ui_state},
     };
 
     const LEFT_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);
@@ -258,18 +246,8 @@ mod tests {
     const MIDDLE_DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Middle);
     const MIDDLE_DRAG: MouseEventKind = MouseEventKind::Drag(MouseButton::Middle);
     const MIDDLE_UP: MouseEventKind = MouseEventKind::Up(MouseButton::Middle);
-
-    fn selection(
-        rows: ops::RangeInclusive<usize>,
-        columns: ops::RangeInclusive<usize>,
-    ) -> Selection {
-        Selection {
-            rows: rows.into(),
-            columns: columns.into(),
-        }
-    }
-
     const AREA: Rect = Rect::new(0, 0, 80, 24);
+    const TRACK_AREA: Rect = Rect::new(10, 0, 10, 1);
 
     fn pinned_screen() -> ScreenLayout {
         screen(
@@ -311,7 +289,7 @@ mod tests {
                     modifiers,
                     ..mouse_event(kind, area.x + x, area.y + y)
                 };
-                handle(&mut tracker, Some(session), None, ui, &screen, mouse)
+                tracker.handle(Some(session), None, ui, &screen, mouse)
             })
             .collect()
     }
@@ -374,37 +352,31 @@ mod tests {
     #[case::no_movement(10, 10, &[])]
     fn pan_drag_commands_works(#[case] x: u16, #[case] y: u16, #[case] expected: &[Command]) {
         let mut tracker = MouseTracker {
-            pan_anchor: Some((10, 10)),
+            pan_anchor: Some((10, 10).into()),
             ..MouseTracker::default()
         };
 
-        let commands: Vec<Command> = tracker
-            .pan_drag_commands(x, y)
-            .into_iter()
-            .flatten()
-            .collect();
-
-        assert_eq!(commands, expected);
+        assert_eq!(tracker.pan_drag_commands(x, y), expected);
     }
 
     #[test]
     fn pan_drag_commands_measures_from_last_drag() {
         let mut tracker = MouseTracker {
-            pan_anchor: Some((10, 10)),
+            pan_anchor: Some((10, 10).into()),
             ..MouseTracker::default()
         };
         tracker.pan_drag_commands(10, 12);
 
         let commands = tracker.pan_drag_commands(10, 13);
 
-        assert_eq!(commands, [Some(Command::ScrollUp { amount: 1 }), None]);
+        assert_eq!(commands, [Command::ScrollUp { amount: 1 }]);
     }
 
     #[test]
     fn pan_drag_commands_rejects_without_anchor() {
         let mut tracker = MouseTracker::default();
 
-        assert_eq!(tracker.pan_drag_commands(12, 12), [None, None]);
+        assert_eq!(tracker.pan_drag_commands(12, 12), []);
     }
 
     #[rstest]
@@ -468,22 +440,14 @@ mod tests {
     #[test]
     fn handle_gff_hover_sets_tooltip_until_mouse_leaves() {
         let session = session(&[&[b'A'; 100]]);
-        let gff = Gff {
-            features: vec![Feature {
-                name: "gene1".to_string(),
-                kind: FeatureType::Gene,
-                range: 0..100,
-                strand: Strand::Forward,
-            }],
-        };
+        let gff = genes(&[0..100]);
         let mut ui = ui_state();
         let screen = gff_screen();
         let mut tracker = MouseTracker::default();
         let gff_rows = screen.app.gff_pane_rows;
         let alignment_rows = screen.app.alignment_pane_sequence_rows;
         let mut handle = |x, y| {
-            handle(
-                &mut tracker,
+            tracker.handle(
                 Some(&session),
                 Some(&gff),
                 &mut ui,
@@ -500,21 +464,13 @@ mod tests {
     #[test]
     fn handle_gff_click_jumps() {
         let session = session(&[&[b'A'; 100]]);
-        let gff = Gff {
-            features: vec![Feature {
-                name: "gene1".to_string(),
-                kind: FeatureType::Gene,
-                range: 0..100,
-                strand: Strand::Forward,
-            }],
-        };
+        let gff = genes(&[0..100]);
         let mut ui = ui_state();
         let screen = gff_screen();
         let mut tracker = MouseTracker::default();
         let area = screen.app.gff_pane_rows;
 
-        let commands = handle(
-            &mut tracker,
+        let commands = tracker.handle(
             Some(&session),
             Some(&gff),
             &mut ui,
@@ -527,8 +483,6 @@ mod tests {
             [Command::JumpToVisibleColumn(_)]
         ));
     }
-
-    const TRACK_AREA: Rect = Rect::new(10, 0, 10, 1);
 
     #[rstest]
     #[case::first_cell(10, 100, 0)]

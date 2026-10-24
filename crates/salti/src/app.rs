@@ -16,9 +16,9 @@ use crate::{
     ui::{
         self, UiState,
         layout::ScreenLayout,
-        mouse::{self, MouseTracker},
+        mouse::MouseTracker,
         notification::Notification,
-        popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::PaletteState},
+        popups::{self, Popup, keybinds::Keybinds, minimap::Minimap, palette::Palette},
     },
     update::{CRATE_VERSION, UpdateResult},
 };
@@ -91,8 +91,7 @@ impl App {
                             minimap_view: self.ui.minimap_view,
                         },
                     ),
-                    None => mouse::handle(
-                        &mut self.mouse_tracker,
+                    None => self.mouse_tracker.handle(
                         self.session.as_ref(),
                         self.gff.as_ref(),
                         &mut self.ui,
@@ -151,7 +150,7 @@ impl App {
     fn execute_command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Quit => self.should_quit = true,
-            Command::OpenPalette => self.ui.popup = Some(Popup::Palette(PaletteState::default())),
+            Command::OpenPalette => self.ui.popup = Some(Popup::Palette(Palette::default())),
             Command::OpenMinimap => {
                 let minimap = Minimap::new(self.session()?);
                 self.ui.popup = Some(Popup::Minimap(minimap));
@@ -353,8 +352,6 @@ pub(crate) enum Event {
 
 #[cfg(test)]
 mod tests {
-    use std::ops;
-
     use crossterm::event::KeyCode;
     use ratatui::{Terminal, backend::TestBackend};
     use rstest::rstest;
@@ -362,8 +359,8 @@ mod tests {
     use super::*;
     use crate::{
         config::theme::Theme,
-        test_utils::{buffer_text, session},
-        ui::{notification::NotificationLevel, popups::minimap::MinimapView, selection::Selection},
+        test_utils::{buffer_text, selection, session},
+        ui::{notification::NotificationLevel, popups::minimap::MinimapView},
     };
 
     const AREA: Rect = Rect::new(0, 0, 80, 24);
@@ -379,16 +376,6 @@ mod tests {
         app.session = Some(session(sequences));
         app.handle(Event::Resize(AREA));
         app
-    }
-
-    fn selection(
-        rows: ops::RangeInclusive<usize>,
-        columns: ops::RangeInclusive<usize>,
-    ) -> Selection {
-        Selection {
-            rows: rows.into(),
-            columns: columns.into(),
-        }
     }
 
     fn alignment(sequences: &[&[u8]]) -> libmsa::Alignment {
@@ -572,7 +559,7 @@ mod tests {
     #[test]
     fn handle_key_keeps_notification() {
         let mut app = app(DNA);
-        app.ui.notify(Notification::info("shown"));
+        app.ui.notify(Notification::info("shown".to_string()));
 
         press(&mut app, [KeyCode::Down]);
 

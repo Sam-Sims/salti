@@ -1,19 +1,19 @@
 #![allow(clippy::cast_possible_truncation)]
 
-pub(crate) mod bars;
-pub(crate) mod layout;
-pub(crate) mod mouse;
-pub(crate) mod notification;
-pub(crate) mod panes;
-pub(crate) mod popups;
-pub(crate) mod selection;
+pub mod bars;
+pub mod layout;
+pub mod mouse;
+pub mod notification;
+pub mod panes;
+pub mod popups;
+pub mod selection;
 
-use std::{ops::Range, time::Duration};
+use std::{ops::Range, path::Path, time::Duration};
 
 use ratatui::{
-    buffer::{Buffer, CellWidth},
+    buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Rect},
-    style::{Color, Style, Styled},
+    style::{Color, Style},
     text::Line,
     widgets::{Paragraph, Widget},
 };
@@ -31,6 +31,8 @@ use crate::{
     },
 };
 
+const ELLIPSIS: &str = "...";
+
 pub fn render(
     buf: &mut Buffer,
     screen: &ScreenLayout,
@@ -42,7 +44,7 @@ pub fn render(
     if buf.area.height == 0 {
         return;
     }
-    let preview = ui
+    let preview: Option<Theme> = ui
         .popup
         .as_ref()
         .and_then(Popup::theme_preview)
@@ -92,28 +94,30 @@ pub fn render(
 
 #[derive(Debug, Default)]
 pub struct UiState {
-    pub(crate) popup: Option<Popup>,
-    pub(crate) notifications: Notifications,
+    pub popup: Option<Popup>,
+    pub notifications: Notifications,
     pub selection: Option<Selection>,
     pub theme: Theme,
+    /// the theme picked from the terminal background, or `None` if it couldn't be detected
     pub auto_theme: Option<ThemeName>,
     pub position: Position,
+    /// the alignment being loaded in the background, as the user typed it
     pub loading: Option<String>,
     pub gff_tooltip: Option<String>,
-    pub(crate) minimap_view: MinimapView,
+    pub minimap_view: MinimapView,
 }
 
 impl UiState {
     pub fn notify(&mut self, notification: Notification) {
-        let input_bg = self.theme.base.bg.unwrap_or(Color::Reset);
-        self.notifications.notify(notification, input_bg);
+        let input_background = self.theme.base.bg.unwrap_or(Color::Reset);
+        self.notifications.notify(notification, input_background);
     }
 
     pub fn set_theme(&mut self, choice: ThemeChoice) {
         self.theme = Theme::builtin(choice.resolve(self.auto_theme));
         if choice == ThemeChoice::Auto && self.auto_theme.is_none() {
             self.notify(Notification::error(
-                "Could not detect the terminal background. Using a dark theme",
+                "Could not detect the terminal background. Using a dark theme".to_string(),
             ));
         }
     }
@@ -126,40 +130,83 @@ impl UiState {
     }
 }
 
-pub(crate) fn input_name(input: &str) -> &str {
-    std::path::Path::new(input)
+/// the file name of an input path, or the input as it is when it has none
+pub fn input_name(input: &str) -> &str {
+    Path::new(input)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(input)
 }
 
-pub(crate) fn cell_columns(cell: usize, cells: usize, total_columns: usize) -> Range<usize> {
-    debug_assert!(cell < cells);
+/// the alignment columns that one of `cells` screen cells stands for
+///
+/// a narrow alignment is stretched, so neighbouring cells can share a column
+pub fn cell_columns(cell: usize, cells: usize, total_columns: usize) -> Range<usize> {
+    debug_assert!(
+        cell < cells,
+        "cell {cell} is past the last of {cells} cells"
+    );
     let start = cell * total_columns / cells;
     start..(start + 1).max((cell + 1) * total_columns / cells)
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
-pub(crate) fn bar_ticks(fraction: f64, rows: u16) -> u64 {
-    debug_assert!((0.0..=1.0).contains(&fraction));
+/// how many eighths of a row a bar `rows` tall fills to show `fraction`
+#[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
+pub fn bar_ticks(fraction: f64, rows: u16) -> u64 {
+    debug_assert!(
+        (0.0..=1.0).contains(&fraction),
+        "bar fraction {fraction} is outside 0 to 1"
+    );
     (fraction * full_bar_ticks(rows) as f64).round() as u64
 }
 
-pub(crate) fn full_bar_ticks(rows: u16) -> u64 {
+pub fn full_bar_ticks(rows: u16) -> u64 {
     u64::from(rows) * 8
 }
 
-struct EmptyState<'a> {
-    loading: Option<&'a str>,
-    theme: &'a Theme,
+pub fn render_centred_lines(lines: Vec<Line<'_>>, style: Style, area: Rect, buf: &mut Buffer) {
+    let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    buf.set_style(area, style);
+    Paragraph::new(lines)
+        .alignment(HorizontalAlignment::Center)
+        .style(style)
+        .render(area.centered_vertically(Constraint::Length(height)), buf);
+}
+
+/// cuts `value` down to `width` cells, ending in `...` when there's room for it
+///
+/// wide characters are never split, so the result can be a cell short
+pub fn truncate_label(value: &str, width: usize) -> String {
+    use ratatui::buffer::CellWidth;
+
+    if usize::from(value.cell_width()) <= width {
+        return value.to_string();
+    }
+
+    let ellipsis = if width > ELLIPSIS.len() { ELLIPSIS } else { "" };
+    let budget = width - ellipsis.len();
+    let mut text = String::new();
+    let mut used = 0;
+    for character in value.chars() {
+        used += usize::from(character.encode_utf8(&mut [0; 4]).cell_width());
+        if used > budget {
+            break;
+        }
+        text.push(character);
+    }
+    text.push_str(ellipsis);
+    text
+}
+
+struct EmptyState<'frame> {
+    loading: Option<&'frame str>,
+    theme: &'frame Theme,
 }
 
 impl Widget for EmptyState<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        use ratatui::style::Styled;
+
         let theme = self.theme;
         let lines = match self.loading {
             Some(input) => vec![Line::from(
@@ -181,46 +228,15 @@ impl Widget for EmptyState<'_> {
     }
 }
 
-fn render_centred_lines(lines: Vec<Line<'_>>, style: Style, area: Rect, buf: &mut Buffer) {
-    let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
-    buf.set_style(area, style);
-    Paragraph::new(lines)
-        .alignment(HorizontalAlignment::Center)
-        .style(style)
-        .render(area.centered_vertically(Constraint::Length(height)), buf);
-}
-
-fn truncate_label(value: &str, width: usize) -> String {
-    if usize::from(value.cell_width()) <= width {
-        return value.to_string();
-    }
-
-    let budget = if width <= 3 { width } else { width - 3 };
-    let mut used = 0;
-    let mut text: String = value
-        .chars()
-        .take_while(|ch| {
-            used += usize::from(ch.encode_utf8(&mut [0; 4]).cell_width());
-            used <= budget
-        })
-        .collect();
-    if width > 3 {
-        text.push_str("...");
-    }
-    text
-}
-
 #[cfg(test)]
 mod tests {
-    use std::ops;
-
     use ratatui::{Terminal, backend::TestBackend};
     use rstest::rstest;
 
     use super::*;
     use crate::{
         session::{DiffMode, ViewState},
-        test_utils::{buffer_text, session_with_numbered_ids, ui_state},
+        test_utils::{buffer_text, selection, session_with_numbered_ids, ui_state},
     };
 
     const AREA: Rect = Rect::new(0, 0, 100, 24);
@@ -243,16 +259,6 @@ mod tests {
             .unwrap();
 
         buffer_text(terminal.backend().buffer(), AREA)
-    }
-
-    fn selection(
-        rows: ops::RangeInclusive<usize>,
-        columns: ops::RangeInclusive<usize>,
-    ) -> Selection {
-        Selection {
-            rows: rows.into(),
-            columns: columns.into(),
-        }
     }
 
     #[test]
@@ -316,7 +322,7 @@ mod tests {
     fn notification() {
         let session = session_with_numbered_ids(&[b"CATCATCATCATCATCAT", b"CATCATCATCATCATCAT"]);
         let mut ui = ui_state();
-        ui.notify(Notification::info("Loaded alignment"));
+        ui.notify(Notification::info("Loaded alignment".to_string()));
 
         insta::assert_snapshot!(render_text(Some(&session), ui));
     }

@@ -1,10 +1,10 @@
-pub(crate) mod alignment;
-pub(crate) mod consensus;
+pub mod alignment;
+pub mod consensus;
 mod features;
-pub(crate) mod gff;
-pub(crate) mod local_feature_track;
+pub mod gff;
+pub mod local_feature_track;
 mod ruler;
-pub(crate) mod sequence_id;
+pub mod sequence_id;
 
 use std::ops::Range;
 
@@ -12,7 +12,6 @@ use libmsa::residue;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Styled,
     symbols::merge::MergeStrategy,
     text::{Line, Span},
     widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
@@ -31,12 +30,9 @@ use crate::{
     ui::{UiState, layout::ScreenLayout},
 };
 
-/// Lookup table that maps each byte value (`0-255`) to a str for display.
-///
-/// All printable ASCII bytes map to themselves.
-/// Any byte not mapped to one of those outputs is rendered as `"?"`.
-// TODO: This was originally for quick rendering of IUPAC bases and handling any chars outside of those.
-// Revisit this now we have full ASCII mapping.
+// the text drawn for each byte: printable ASCII shows as itself, anything else as a question mark
+// TODO: this was for drawing IUPAC codes quickly, so revisit it now all printable ASCII maps
+// to itself
 const BYTE_TO_CHAR: [&str; 256] = [
     "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?",
     "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", " ", "!", "\"", "#", "$", "%",
@@ -54,7 +50,7 @@ const BYTE_TO_CHAR: [&str; 256] = [
     "?", "?", "?", "?", "?", "?", "?", "?", "?",
 ];
 
-pub(super) fn render(
+pub fn render(
     buf: &mut Buffer,
     screen: &ScreenLayout,
     session: &Session,
@@ -107,12 +103,16 @@ pub(super) fn render(
     .render(layout.consensus_alignment_pane, buf);
 }
 
-fn stretch(
+/// a residue that matches `diff` shows as `.`
+///
+/// in the translation overlay a codon is coloured across its three columns, and only the middle one
+/// shows the amino acid
+pub fn sequence_line(
     columns: &WindowColumns<'_>,
     bytes: &[u8],
     diff: Option<&[u8]>,
     theme: &Theme,
-) -> Vec<Span<'static>> {
+) -> Line<'static> {
     let alignment_type = columns.grid.alignment_type();
     columns
         .cells
@@ -126,18 +126,18 @@ fn stretch(
                 diff.is_some_and(|diff| residue::same_residue(diff[index], byte, alignment_type));
             let style = theme.residues.style(alignment_type, byte);
             match (matches, centre) {
-                // diff mode rendering
                 (true, true) => Span::styled(".", theme.diff_match),
                 (true, false) => Span::raw(" "),
                 (false, true) => Span::styled(BYTE_TO_CHAR[usize::from(byte)], style),
-                // translation overlay rendering
+                // the rest of a codon is blank but keeps its colour, so it reads as one block
                 (false, false) => Span::styled(" ", style),
             }
         })
         .collect()
 }
 
-fn render_column_scrollbar(
+/// only draws when the columns don't all fit
+pub fn render_column_scrollbar(
     theme: &Theme,
     total: usize,
     window: &Range<usize>,
@@ -163,7 +163,7 @@ fn render_column_scrollbar(
         );
 }
 
-fn render_pane(theme: &Theme, title: Option<Line<'_>>, area: Rect, buf: &mut Buffer) -> Rect {
+pub fn render_pane(theme: &Theme, title: Option<Line<'_>>, area: Rect, buf: &mut Buffer) -> Rect {
     let mut block = Block::bordered()
         .border_style(theme.border)
         .style(theme.base)
@@ -176,7 +176,9 @@ fn render_pane(theme: &Theme, title: Option<Line<'_>>, area: Rect, buf: &mut Buf
     inner_area
 }
 
-fn separator_line(width: u16, theme: &Theme) -> Line<'static> {
+pub fn separator_line(width: u16, theme: &Theme) -> Line<'static> {
+    use ratatui::style::Styled;
+
     Line::from("─".repeat(usize::from(width)).set_style(theme.border))
 }
 
@@ -187,7 +189,16 @@ mod tests {
     use super::*;
     use crate::test_utils::session;
 
-    fn stretched(cell: Option<Cell>, byte: u8, diff: Option<u8>) -> String {
+    const CENTRE: Option<Cell> = Some(Cell {
+        index: 0,
+        centre: true,
+    });
+    const FLANK: Option<Cell> = Some(Cell {
+        index: 0,
+        centre: false,
+    });
+
+    fn line_text(cell: Option<Cell>, byte: u8, diff: Option<u8>) -> String {
         let session = session(&[b"A"]);
         let columns = WindowColumns {
             grid: session.grid(),
@@ -198,20 +209,8 @@ mod tests {
         };
         let diff = diff.map(|byte| vec![byte]);
 
-        stretch(&columns, &[byte], diff.as_deref(), &Theme::default())
-            .into_iter()
-            .map(|span| span.content.into_owned())
-            .collect()
+        sequence_line(&columns, &[byte], diff.as_deref(), &Theme::default()).to_string()
     }
-
-    const CENTRE: Option<Cell> = Some(Cell {
-        index: 0,
-        centre: true,
-    });
-    const FLANK: Option<Cell> = Some(Cell {
-        index: 0,
-        centre: false,
-    });
 
     #[rstest]
     #[case::centre_shows_letter(CENTRE, b'A', None, "A")]
@@ -222,17 +221,17 @@ mod tests {
     #[case::diff_mismatch_shows_letter(CENTRE, b'G', Some(b'A'), "G")]
     #[case::diff_ignores_case(CENTRE, b'a', Some(b'A'), ".")]
     #[case::unprintable_is_question_mark(CENTRE, 0x07, None, "?")]
-    fn stretch_works(
+    fn sequence_line_works(
         #[case] cell: Option<Cell>,
         #[case] byte: u8,
         #[case] diff: Option<u8>,
         #[case] expected: &str,
     ) {
-        assert_eq!(stretched(cell, byte, diff), expected);
+        assert_eq!(line_text(cell, byte, diff), expected);
     }
 
     #[test]
-    fn stretch_reads_byte_at_cell_index() {
+    fn sequence_line_reads_byte_at_cell_index() {
         let session = session(&[b"AC"]);
         let columns = WindowColumns {
             grid: session.grid(),
@@ -251,11 +250,8 @@ mod tests {
             conservation: None,
         };
 
-        let text: String = stretch(&columns, b"AC", Some(b"AG"), &Theme::default())
-            .into_iter()
-            .map(|span| span.content.into_owned())
-            .collect();
+        let line = sequence_line(&columns, b"AC", Some(b"AG"), &Theme::default());
 
-        assert_eq!(text, "C.");
+        assert_eq!(line.to_string(), "C.");
     }
 }

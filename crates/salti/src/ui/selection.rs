@@ -1,9 +1,9 @@
 use std::range::RangeInclusive;
 
 use ratatui::{
-    buffer::Buffer,
+    buffer::{Buffer, Cell},
     layout::Rect,
-    style::{Color, Color::Rgb, Style},
+    style::{Color, Style},
 };
 
 use crate::{
@@ -18,7 +18,7 @@ pub struct Selection {
 }
 
 impl Selection {
-    pub(crate) fn shade_rows(
+    pub fn shade_rows(
         &self,
         buf: &mut Buffer,
         area: Rect,
@@ -27,8 +27,8 @@ impl Selection {
         tint: Color,
         alpha: f32,
     ) {
-        for (y, position) in (area.top()..area.bottom()).zip(screen_rows(layout, window)) {
-            if position.is_some_and(|position| self.rows.contains(&position)) {
+        for (y, row) in (area.top()..area.bottom()).zip(screen_rows(layout, window)) {
+            if row.is_some_and(|row| self.rows.contains(&row)) {
                 shade(
                     buf,
                     Rect {
@@ -43,7 +43,7 @@ impl Selection {
         }
     }
 
-    pub(crate) fn shade_columns(
+    pub fn shade_columns(
         &self,
         buf: &mut Buffer,
         area: Rect,
@@ -64,6 +64,19 @@ impl Selection {
     }
 }
 
+pub fn blend(base: Color, tint: Color, alpha: f32) -> Option<Color> {
+    match (base, tint) {
+        (Color::Rgb(red, green, blue), Color::Rgb(red_tint, green_tint, blue_tint)) => {
+            Some(Color::Rgb(
+                interpolate(red, red_tint, alpha),
+                interpolate(green, green_tint, alpha),
+                interpolate(blue, blue_tint, alpha),
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn shade(buf: &mut Buffer, area: Rect, tint: Color, alpha: f32) {
     for position in area.positions() {
         if let Some(cell) = buf.cell_mut(position) {
@@ -72,7 +85,7 @@ fn shade(buf: &mut Buffer, area: Rect, tint: Color, alpha: f32) {
     }
 }
 
-fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32) {
+fn shade_selected_cell(cell: &mut Cell, tint: Color, alpha: f32) {
     match blend(cell.bg, tint, alpha) {
         Some(background) => {
             cell.set_bg(background);
@@ -83,18 +96,7 @@ fn shade_selected_cell(cell: &mut ratatui::buffer::Cell, tint: Color, alpha: f32
     }
 }
 
-pub(crate) fn blend(base: Color, tint: Color, alpha: f32) -> Option<Color> {
-    match (base, tint) {
-        (Rgb(red, green, blue), Rgb(red_tint, green_tint, blue_tint)) => Some(Rgb(
-            interpolate(red, red_tint, alpha),
-            interpolate(green, green_tint, alpha),
-            interpolate(blue, blue_tint, alpha),
-        )),
-        _ => None,
-    }
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss)]
 fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
     let from = f32::from(from);
     let to = f32::from(to);
@@ -103,23 +105,14 @@ fn interpolate(from: u8, to: u8, alpha: f32) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use std::ops;
-
     use ratatui::style::Modifier;
     use rstest::rstest;
 
     use super::*;
-    use crate::{session::Session, test_utils::pinned_session};
-
-    fn selection(
-        rows: ops::RangeInclusive<usize>,
-        columns: ops::RangeInclusive<usize>,
-    ) -> Selection {
-        Selection {
-            rows: rows.into(),
-            columns: columns.into(),
-        }
-    }
+    use crate::{
+        session::Session,
+        test_utils::{pinned_session, selection},
+    };
 
     fn highlighted(session: &Session, window: &Window, selection: Selection) -> Vec<String> {
         let id_area = Rect::new(0, 0, 1, 4);

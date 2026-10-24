@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -8,24 +10,28 @@ use ratatui::{
 
 use crate::{config::theme::Theme, session::Session, ui::layout::Window};
 
-pub(crate) struct Ruler<'a> {
-    pub(crate) session: &'a Session,
-    pub(crate) window: &'a Window,
-    pub(crate) theme: &'a Theme,
+// breaks this close together are drawn as one `~` span
+const DENSE_BREAK_DISTANCE: usize = 3;
+
+pub struct Ruler<'frame> {
+    pub session: &'frame Session,
+    pub window: &'frame Window,
+    pub theme: &'frame Theme,
 }
 
 impl Widget for Ruler<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let cols = self.session.layout().columns();
-        let (Some(&first), Some(&last)) = (cols.first(), cols.last()) else {
+        let columns = self.session.layout().columns();
+        let (Some(&first), Some(&last)) = (columns.first(), columns.last()) else {
             return;
         };
         let shown = self.window.columns.clone();
         let filtered_leading = shown.start == 0 && first > 0;
-        let filtered_trailing = shown.end == cols.len() && last < self.session.grid().width() - 1;
+        let filtered_trailing =
+            shown.end == columns.len() && last < self.session.grid().width() - 1;
 
         let (number_line, marker_line) = build_ruler(
-            &cols[shown],
+            &columns[shown],
             filtered_leading,
             filtered_trailing,
             self.theme,
@@ -36,41 +42,74 @@ impl Widget for Ruler<'_> {
     }
 }
 
-fn add_number_to_ruler(
-    number_line: &mut [Span<'static>],
-    centre_pos: usize,
-    number: usize,
-    theme: &Theme,
-) -> bool {
-    let number_string = number.to_string();
-    let number_length = number_string.len();
-    let ruler_width = number_line.len();
-    let start_idx = centre_pos
-        .saturating_sub(number_length / 2)
-        .min(ruler_width.saturating_sub(number_length));
-    let left_padding = start_idx.saturating_sub(1);
-    let right_padding = (start_idx + number_length + 1).min(ruler_width);
-
-    if number_line[left_padding..right_padding]
-        .iter()
-        .any(|span| span.content.as_ref() != " ")
-    {
-        return false;
-    }
-
-    for (offset, digit) in number_string.chars().enumerate() {
-        if let Some(cell) = number_line.get_mut(start_idx + offset) {
-            *cell = digit.to_string().set_style(theme.accent);
-        }
-    }
-
-    true
-}
-
+// where hidden columns sit next to a shown one: before it for Leading, after it for Trailing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BreakMarker {
     Leading,
     Trailing,
+}
+
+fn build_ruler(
+    absolute_columns: &[usize],
+    filtered_leading: bool,
+    filtered_trailing: bool,
+    theme: &Theme,
+) -> (Line<'static>, Line<'static>) {
+    let width = absolute_columns.len();
+    if width == 0 {
+        return (Line::from(""), Line::from(""));
+    }
+
+    let mut number_line = vec![Span::raw(" "); width];
+    let mut marker_line = vec![Span::raw(" "); width];
+    let breaks = break_positions(absolute_columns, filtered_leading, filtered_trailing);
+    let fragmented_view = !breaks.is_empty();
+
+    for (index, marker_span) in marker_line.iter_mut().enumerate() {
+        let column_number = absolute_columns[index] + 1;
+        if column_number != 1 && !column_number.is_multiple_of(5) {
+            continue;
+        }
+        let is_major_tick = column_number.is_multiple_of(10);
+        *marker_span = if is_major_tick {
+            "|".set_style(theme.accent)
+        } else {
+            ".".set_style(theme.text_dim)
+        };
+
+        // after a break, the first tick gets a number so the jump is easy to read
+        let is_run_start = fragmented_view
+            && (index == 0 || absolute_columns[index - 1] + 1 != absolute_columns[index]);
+        if is_major_tick || column_number == 1 || is_run_start {
+            add_number(&mut number_line, index, column_number, theme);
+        }
+    }
+
+    let dense_spans = dense_break_spans(&breaks, width);
+
+    for (position, marker) in breaks {
+        let marker_position = dense_break_marker_position(position, marker, width);
+        if dense_spans
+            .iter()
+            .any(|span| span.contains(&marker_position))
+        {
+            continue;
+        }
+
+        let symbol = match marker {
+            BreakMarker::Leading => "‹",
+            BreakMarker::Trailing => "›",
+        };
+        marker_line[position] = symbol.set_style(theme.warning);
+    }
+
+    for span in dense_spans {
+        for marker in &mut marker_line[span] {
+            *marker = "~".set_style(theme.warning);
+        }
+    }
+
+    (Line::from(number_line), Line::from(marker_line))
 }
 
 fn break_positions(
@@ -79,10 +118,7 @@ fn break_positions(
     filtered_trailing: bool,
 ) -> Vec<(usize, BreakMarker)> {
     let width = absolute_columns.len();
-    if width == 0 {
-        return Vec::new();
-    }
-
+    debug_assert!(width > 0, "the ruler has no columns to mark breaks in");
     let mut breaks = Vec::new();
 
     if filtered_leading {
@@ -105,20 +141,32 @@ fn break_positions(
     breaks
 }
 
-fn dense_break_marker_position(position: usize, marker: BreakMarker, width: usize) -> usize {
-    match marker {
-        BreakMarker::Leading => position,
-        BreakMarker::Trailing => {
-            if position + 1 < width {
-                position + 1
-            } else {
-                position
-            }
+fn add_number(number_line: &mut [Span<'static>], centre: usize, number: usize, theme: &Theme) {
+    let number_string = number.to_string();
+    let number_length = number_string.len();
+    let ruler_width = number_line.len();
+    let start_idx = centre
+        .saturating_sub(number_length / 2)
+        .min(ruler_width.saturating_sub(number_length));
+    let left_padding = start_idx.saturating_sub(1);
+    let right_padding = (start_idx + number_length + 1).min(ruler_width);
+
+    // left out if it would overlap existing number
+    if number_line[left_padding..right_padding]
+        .iter()
+        .any(|span| span.content.as_ref() != " ")
+    {
+        return;
+    }
+
+    for (offset, digit) in number_string.chars().enumerate() {
+        if let Some(cell) = number_line.get_mut(start_idx + offset) {
+            *cell = digit.to_string().set_style(theme.accent);
         }
     }
 }
 
-fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<(usize, usize)> {
+fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<RangeInclusive<usize>> {
     let marker_positions: Vec<usize> = breaks
         .iter()
         .map(|&(position, marker)| dense_break_marker_position(position, marker, width))
@@ -129,16 +177,14 @@ fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<(usiz
     while cluster_start < marker_positions.len() {
         let mut cluster_end = cluster_start + 1;
         while cluster_end < marker_positions.len()
-            && marker_positions[cluster_end] <= marker_positions[cluster_end - 1] + 3
+            && marker_positions[cluster_end]
+                <= marker_positions[cluster_end - 1] + DENSE_BREAK_DISTANCE
         {
             cluster_end += 1;
         }
 
         if cluster_end - cluster_start >= 2 {
-            spans.push((
-                marker_positions[cluster_start],
-                marker_positions[cluster_end - 1],
-            ));
+            spans.push(marker_positions[cluster_start]..=marker_positions[cluster_end - 1]);
         }
 
         cluster_start = cluster_end;
@@ -147,93 +193,16 @@ fn dense_break_spans(breaks: &[(usize, BreakMarker)], width: usize) -> Vec<(usiz
     spans
 }
 
-fn run_start_positions(absolute_columns: &[usize]) -> Vec<usize> {
-    let mut starts = Vec::new();
-    if absolute_columns.is_empty() {
-        return starts;
+fn dense_break_marker_position(position: usize, marker: BreakMarker, width: usize) -> usize {
+    match marker {
+        BreakMarker::Leading => position,
+        // counts from the column after the break, unless it's the last column
+        BreakMarker::Trailing => (position + 1).min(width - 1),
     }
-
-    starts.push(0);
-    for (index, pair) in absolute_columns.windows(2).enumerate() {
-        if pair[1] != pair[0] + 1 {
-            starts.push(index + 1);
-        }
-    }
-
-    starts
-}
-
-fn build_ruler(
-    absolute_columns: &[usize],
-    filtered_leading: bool,
-    filtered_trailing: bool,
-    theme: &Theme,
-) -> (Line<'static>, Line<'static>) {
-    let width = absolute_columns.len();
-    if width == 0 {
-        return (Line::from(""), Line::from(""));
-    }
-
-    let mut number_line = vec![Span::raw(" "); width];
-    let mut marker_line = vec![Span::raw(" "); width];
-    let breaks = break_positions(absolute_columns, filtered_leading, filtered_trailing);
-    let fragmented_view = !breaks.is_empty();
-    let mut run_starts =
-        fragmented_view.then(|| run_start_positions(absolute_columns).into_iter().peekable());
-
-    for (index, marker_span) in marker_line.iter_mut().enumerate() {
-        let is_run_start = run_starts.as_mut().is_some_and(|starts| {
-            while starts.peek().is_some_and(|&start| start < index) {
-                let _ = starts.next();
-            }
-            matches!(starts.peek(), Some(&start) if start == index)
-        });
-        let display_pos = absolute_columns[index] + 1;
-        if display_pos == 1 || display_pos.is_multiple_of(5) {
-            let is_major_tick = display_pos.is_multiple_of(10);
-            *marker_span = if is_major_tick {
-                "|".set_style(theme.accent)
-            } else {
-                ".".set_style(theme.text_dim)
-            };
-
-            if is_run_start {
-                let _ = run_starts.as_mut().and_then(Iterator::next);
-            }
-            if is_major_tick || display_pos == 1 || is_run_start {
-                let _ = add_number_to_ruler(&mut number_line, index, display_pos, theme);
-            }
-        }
-    }
-
-    let dense_spans = dense_break_spans(&breaks, width);
-
-    for (position, marker) in breaks {
-        let marker_position = dense_break_marker_position(position, marker, width);
-        if dense_spans
-            .iter()
-            .any(|&(start, end)| start <= marker_position && marker_position <= end)
-        {
-            continue;
-        }
-
-        let symbol = match marker {
-            BreakMarker::Leading => "‹",
-            BreakMarker::Trailing => "›",
-        };
-        marker_line[position] = symbol.set_style(theme.warning);
-    }
-
-    for (start, end) in dense_spans {
-        for marker in marker_line.iter_mut().take(end + 1).skip(start) {
-            *marker = "~".set_style(theme.warning);
-        }
-    }
-
-    (Line::from(number_line), Line::from(marker_line))
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use std::ops::Range;
 
@@ -301,21 +270,19 @@ mod tests {
         );
     }
 
-    #[rstest]
-    #[case::contiguous(&[0, 1, 2], false)]
-    #[case::no_columns(&[], true)]
-    fn break_positions_is_empty(#[case] columns: &[usize], #[case] filtered_trailing: bool) {
-        assert_eq!(break_positions(columns, false, filtered_trailing), []);
+    #[test]
+    fn break_positions_is_empty_when_contiguous() {
+        assert_eq!(break_positions(&[0, 1, 2], false, false), []);
     }
 
     #[rstest]
-    #[case::within_three(&[(0, Trailing), (3, Trailing)], &[(1, 4)])]
-    #[case::leading_marks_own_column(&[(0, Leading), (1, Trailing)], &[(0, 2)])]
-    #[case::trailing_at_end_stays(&[(8, Trailing), (9, Trailing)], &[(9, 9)])]
-    #[case::two_clusters(&[(0, Trailing), (1, Trailing), (6, Trailing), (7, Trailing)], &[(1, 2), (7, 8)])]
+    #[case::within_three(&[(0, Trailing), (3, Trailing)], &[1..=4])]
+    #[case::leading_marks_own_column(&[(0, Leading), (1, Trailing)], &[0..=2])]
+    #[case::trailing_at_end_stays(&[(8, Trailing), (9, Trailing)], &[9..=9])]
+    #[case::two_clusters(&[(0, Trailing), (1, Trailing), (6, Trailing), (7, Trailing)], &[1..=2, 7..=8])]
     fn dense_break_spans_works(
         #[case] breaks: &[(usize, BreakMarker)],
-        #[case] expected: &[(usize, usize)],
+        #[case] expected: &[RangeInclusive<usize>],
     ) {
         assert_eq!(dense_break_spans(breaks, 10), expected);
     }
