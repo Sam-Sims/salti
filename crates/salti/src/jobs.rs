@@ -1,4 +1,7 @@
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    task,
+};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{debug, error};
 
@@ -11,7 +14,9 @@ use crate::{
 pub struct Jobs {
     tx: UnboundedSender<Done>,
     rx: UnboundedReceiver<Done>,
+    // cancels every job when Jobs is dropped
     all: CancellationToken,
+    // dropping the guard cancels the load it belongs to, so storing a new one cancels the old load
     load: Option<DropGuard>,
 }
 
@@ -26,6 +31,7 @@ impl Jobs {
         }
     }
 
+    /// cancels any load still running, so only the latest one reports back
     pub fn load(&mut self, input: String) {
         let cancel = self.all.child_token();
         self.load = Some(cancel.clone().drop_guard());
@@ -35,7 +41,7 @@ impl Jobs {
                 let input = input.clone();
                 move || fasta::read(&input, &token)
             };
-            let result = match tokio::task::spawn_blocking(parse).await {
+            let result = match task::spawn_blocking(parse).await {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(error) => {
                     error!(error = ?error, "Alignment load panicked");
@@ -56,6 +62,7 @@ impl Jobs {
         });
     }
 
+    /// skips jobs that were cancelled while they ran
     pub async fn next(&mut self) -> JobEvent {
         loop {
             let done = self.rx.recv().await.expect("jobs holds a sender");
@@ -73,6 +80,7 @@ impl Jobs {
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let event = work.await;
+            // only fails once Jobs is dropped, and then no one is waiting for the result
             let _ = tx.send(Done { cancel, event });
         });
     }
@@ -96,14 +104,12 @@ pub enum JobEvent {
     },
 }
 
-/// why an update check ran, so a check the user asked for can report that salti is up to date
 #[derive(Debug)]
 pub enum UpdateCheckTrigger {
     Startup,
     Requested,
 }
 
-#[derive(Debug)]
 struct Done {
     cancel: CancellationToken,
     event: JobEvent,

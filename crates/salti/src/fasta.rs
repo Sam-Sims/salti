@@ -1,9 +1,13 @@
+use std::str;
+
 use anyhow::{Result, ensure, format_err};
 use libmsa::{Alignment, Sequence};
 use paraseq::{BoxedReader, ReaderBuilder, fasta};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
+/// `input` is a file path, an http(s) URL or an `ssh://` path
+/// returns an error as soon as `cancel` fires
 pub fn read(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
     info!(input = %input, "Starting fasta parse");
     let mut reader =
@@ -18,7 +22,7 @@ pub fn read(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
         ensure!(!cancel.is_cancelled(), "Cancelled fasta parse");
         for record in record_set.iter() {
             let record = record.map_err(|error| format_err!("Error reading record: {error}"))?;
-            let id = std::str::from_utf8(record.id())
+            let id = str::from_utf8(record.id())
                 .map_err(|error| format_err!("Invalid sequence ID: {error}"))?
                 .to_string();
             sequences.push(Sequence {
@@ -38,18 +42,10 @@ pub fn read(input: &str, cancel: &CancellationToken) -> Result<Alignment> {
     Ok(Alignment::new(sequences)?)
 }
 
-fn is_http_url(input: &str) -> bool {
-    input.starts_with("http://") || input.starts_with("https://")
-}
-
-fn is_ssh_path(input: &str) -> bool {
-    input.starts_with("ssh://")
-}
-
 fn open_fasta_reader(input: &str) -> Result<fasta::Reader<BoxedReader>> {
-    let builder = if is_http_url(input) {
+    let builder = if input.starts_with("http://") || input.starts_with("https://") {
         ReaderBuilder::url(input)
-    } else if is_ssh_path(input) {
+    } else if input.starts_with("ssh://") {
         ReaderBuilder::ssh(input)
     } else {
         ReaderBuilder::path(input)
@@ -59,6 +55,8 @@ fn open_fasta_reader(input: &str) -> Result<fasta::Reader<BoxedReader>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use rstest::rstest;
     use tempfile::NamedTempFile;
 
@@ -66,7 +64,7 @@ mod tests {
 
     fn fasta_file(content: &[u8]) -> NamedTempFile {
         let file = NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), content).unwrap();
+        fs::write(file.path(), content).unwrap();
         file
     }
 
