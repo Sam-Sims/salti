@@ -12,7 +12,7 @@ mod test_utils;
 mod ui;
 mod update;
 
-use std::{io::stdout, time::Duration};
+use std::{io, time::Duration};
 
 use anyhow::Result;
 use clap::Parser;
@@ -21,7 +21,7 @@ use crossterm::{
     execute,
 };
 use ratatui::{DefaultTerminal, layout::Rect};
-use tokio::time::{Instant, sleep_until};
+use tokio::time::{self, Instant};
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 
@@ -30,7 +30,8 @@ use crate::{
     cli::{Cli, StartupState},
 };
 
-const FRAME: Duration = Duration::from_millis(16);
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+// caps the time animations see between frames, so they don't jump ahead after a pause
 const MAX_FRAME_DELTA: Duration = Duration::from_millis(100);
 
 #[tokio::main]
@@ -46,57 +47,45 @@ async fn main() -> Result<()> {
     info!(
         has_input_file = startup.input.is_some(),
         update_check = startup.update_check,
-        "startup state: "
+        "Startup state"
     );
 
     info!("Initialising terminal");
     let terminal = ratatui::init();
-    let mut mouse_capture = match MouseCapture::enable() {
+    let mouse_capture = match MouseCapture::enable() {
         Ok(mouse_capture) => mouse_capture,
-        Err(error_value) => {
-            error!(error = ?error_value, "Failed to enable mouse capture");
+        Err(error) => {
+            error!(error = ?error, "Failed to enable mouse capture");
             ratatui::restore();
-            return Err(error_value.into());
+            return Err(error.into());
         }
     };
-    info!("Loading salti....");
+    info!("Loading salti");
     let app_result = run(terminal, startup).await;
-    match &app_result {
-        Ok(()) => {}
-        Err(error_value) => error!(error = ?error_value, "salti exited with error"),
+    if let Err(error) = &app_result {
+        error!(error = ?error, "salti exited with error");
     }
 
-    mouse_capture.disable();
+    drop(mouse_capture);
     info!("Restoring terminal");
     ratatui::restore();
     app_result
 }
 
-struct MouseCapture {
-    enabled: bool,
-}
+struct MouseCapture;
 
 impl MouseCapture {
-    fn enable() -> std::io::Result<Self> {
-        execute!(stdout(), EnableMouseCapture)?;
-        Ok(Self { enabled: true })
-    }
-
-    fn disable(&mut self) {
-        if !self.enabled {
-            return;
-        }
-
-        self.enabled = false;
-        if let Err(error_value) = execute!(stdout(), DisableMouseCapture) {
-            error!(error = ?error_value, "Failed to disable mouse capture");
-        }
+    fn enable() -> io::Result<Self> {
+        execute!(io::stdout(), EnableMouseCapture)?;
+        Ok(Self)
     }
 }
 
 impl Drop for MouseCapture {
     fn drop(&mut self) {
-        self.disable();
+        if let Err(error) = execute!(io::stdout(), DisableMouseCapture) {
+            error!(error = ?error, "Failed to disable mouse capture");
+        }
     }
 }
 
@@ -116,7 +105,7 @@ async fn run(mut terminal: DefaultTerminal, startup: StartupState) -> Result<()>
             last_draw = now;
             terminal.draw(|frame| app.draw(frame, delta))?;
             dirty = app.is_animating();
-            next_draw = Instant::now() + FRAME;
+            next_draw = Instant::now() + FRAME_INTERVAL;
         }
 
         tokio::select! {
@@ -143,7 +132,7 @@ async fn run(mut terminal: DefaultTerminal, startup: StartupState) -> Result<()>
                 app.handle(Event::Job(job));
                 dirty = true;
             }
-            () = sleep_until(next_draw), if dirty => {}
+            () = time::sleep_until(next_draw), if dirty => {}
         }
     }
 

@@ -92,6 +92,7 @@ impl ThemeChoice {
         iter::once("auto").chain(ThemeName::VARIANTS.iter().map(|&name| name.into()))
     }
 
+    /// `auto` is the theme detected from the terminal, falling back to the default when it's `None`
     pub fn resolve(self, auto: Option<ThemeName>) -> ThemeName {
         match self {
             Self::Named(name) => name,
@@ -103,25 +104,24 @@ impl ThemeChoice {
 impl FromStr for ThemeChoice {
     type Err = strum::ParseError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text {
             "auto" => Ok(Self::Auto),
             name => name.parse().map(Self::Named),
         }
     }
 }
 
-pub fn auto_theme(choice: ThemeChoice) -> Option<ThemeName> {
-    match choice {
-        ThemeChoice::Auto => terminal_colorsaurus::theme_mode(QueryOptions::default())
-            .inspect_err(|error_value| {
-                warn!(error = ?error_value, "Failed to detect the terminal theme mode");
-            })
-            .ok()
-            .map(|mode| match mode {
-                ThemeMode::Dark => ThemeName::EverforestDark,
-                ThemeMode::Light => ThemeName::EverforestLight,
-            }),
-        ThemeChoice::Named(_) => None,
-    }
+/// asks the terminal whether its background is light or dark
+/// `None` when the terminal doesn't answer
+pub fn auto_theme() -> Option<ThemeName> {
+    terminal_colorsaurus::theme_mode(QueryOptions::default())
+        .inspect_err(|error| {
+            warn!(error = ?error, "Failed to detect the terminal theme mode");
+        })
+        .ok()
+        .map(|mode| match mode {
+            ThemeMode::Dark => ThemeName::EverforestDark,
+            ThemeMode::Light => ThemeName::EverforestLight,
+        })
 }

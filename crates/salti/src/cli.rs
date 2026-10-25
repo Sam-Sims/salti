@@ -30,7 +30,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn into_startup_state(self) -> StartupState {
-        let auto_theme = theme::auto_theme(self.theme);
+        let auto_theme = theme::auto_theme();
         StartupState {
             input: self.input,
             update_check: !self.skip_update_check,

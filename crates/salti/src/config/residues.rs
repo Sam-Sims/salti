@@ -124,9 +124,10 @@ pub struct ResidueStyles {
 }
 
 impl ResidueStyles {
+    /// generic alignments get one colour per character, and anything without a colour is drawn plain
     pub fn style(&self, alignment_type: AlignmentType, byte: u8) -> Style {
         match alignment_type {
-            AlignmentType::Generic => generic(byte),
+            AlignmentType::Generic => generic_style(byte),
             _ => ResidueColour::of(alignment_type, byte)
                 .map_or_else(Style::new, |colour| self.get(colour)),
         }
@@ -153,7 +154,7 @@ impl ResidueStyles {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+#[derive(Clone, Copy, strum::VariantArray)]
 pub enum ResidueColour {
     A,
     C,
@@ -173,6 +174,8 @@ pub enum ResidueColour {
 }
 
 impl ResidueColour {
+    /// `None` for generic alignments, which colour by character instead, and for residues outside the
+    /// clustal groups
     pub fn of(alignment_type: AlignmentType, byte: u8) -> Option<Self> {
         match (alignment_type, residue::classify(byte, alignment_type)) {
             (AlignmentType::Generic, _) => None,
@@ -205,7 +208,7 @@ impl ResidueColour {
     }
 }
 
-fn generic(byte: u8) -> Style {
+fn generic_style(byte: u8) -> Style {
     byte.checked_sub(b'!')
         .and_then(|index| FULL_ASCII_COLOURS.get(usize::from(index)))
         .map_or_else(Style::new, |&colour| {

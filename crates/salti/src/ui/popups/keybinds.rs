@@ -78,7 +78,10 @@ impl PopupContent for Keybinds {
             .skip(scroll)
             .map(|binding| {
                 Line::from(vec![
-                    Span::styled(format!("{:column_width$}", binding.key()), theme.accent),
+                    Span::styled(
+                        format!("{:column_width$}", binding.key_label()),
+                        theme.accent,
+                    ),
                     Span::styled(binding.description, theme.text),
                 ])
             })
@@ -90,7 +93,7 @@ impl PopupContent for Keybinds {
 fn key_width() -> usize {
     KEY_BINDINGS
         .iter()
-        .map(|binding| usize::from(binding.key().as_str().cell_width()))
+        .map(|binding| usize::from(binding.key_label().as_str().cell_width()))
         .max()
         .unwrap_or_default()
 }

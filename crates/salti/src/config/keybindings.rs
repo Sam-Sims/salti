@@ -14,7 +14,8 @@ pub(crate) struct Binding {
 }
 
 impl Binding {
-    pub(crate) fn key(&self) -> String {
+    /// the key as shown in the keybinds popup, like `Shift+Up`
+    pub(crate) fn key_label(&self) -> String {
         if self.modifiers.is_empty() {
             self.code.to_string()
         } else {
@@ -236,7 +237,8 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
 
 pub(crate) fn lookup(key: KeyEvent) -> Option<Command> {
     let mut modifiers = key.modifiers;
-    if let KeyCode::Char(_) = key.code {
+    // the character already shows shift (`T`, `?`), so terminals that also report the modifier still match
+    if matches!(key.code, KeyCode::Char(_)) {
         modifiers.remove(KeyModifiers::SHIFT);
     }
     KEY_BINDINGS
@@ -304,7 +306,11 @@ mod tests {
     #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, "Shift+Up")]
     #[case::letter(KeyCode::Char('T'), KeyModifiers::NONE, "T")]
     #[case::punctuation(KeyCode::Char('?'), KeyModifiers::NONE, "?")]
-    fn key_works(#[case] code: KeyCode, #[case] modifiers: KeyModifiers, #[case] expected: &str) {
+    fn key_label_works(
+        #[case] code: KeyCode,
+        #[case] modifiers: KeyModifiers,
+        #[case] expected: &str,
+    ) {
         let binding = Binding {
             name: "test",
             code,
@@ -313,6 +319,6 @@ mod tests {
             category: Category::General,
             description: "",
         };
-        assert_eq!(binding.key(), expected);
+        assert_eq!(binding.key_label(), expected);
     }
 }
