@@ -217,7 +217,9 @@ Use `?` in app to open the help page.
 - `:` - Opens the command palette.
 - `Up` / `Down` - Scroll vertically 1 row
 - `Left` / `Right` - Scroll horizontally 1 column.
-- `Shift` + `Left`/`Right`/`Up`/`Down` scrolls 10 columns/rows in that direction.
+- `Shift` + `Left`/`Right`/`Up`/`Down` scrolls by the scroll step, 10 by default and can be set by `:set-scroll-step`.
+- `Ctrl` + `Left`/`Right`/`Up`/`Down` scrolls a screens worth.
+- `Home` / `End` - Jump to the start or end of the alignment.
 - `Alt+Left` / `Alt+Right` - Scroll sequence name pane.
 - `Left click` - Select a sequence or position. Click again to clear selection.
 - `Ctrl + Left click` - Select a range of sequences or positions
@@ -261,6 +263,7 @@ Commands:
 - `set-consensus-method` - Choose `majority` or `majority-non-gap`.
 - `set-translation-frame` - Set translation frame (`+1`, `+2`, `+3`, `-1`, `-2` or `-3`).
 - `set-theme` - Set active theme (`auto`, `everforest-dark`, `everforest-light`, `solarized-dark`, `solarized-light`, `tokyo-night`, or `ansi`).
+- `set-scroll-step` - Set how far `Shift` + arrow keys scroll (columns and rows).
 - `set-sequence-type` - Override auto-detection if it fails (`dna`, `protein`, or `generic`).
 - `check-update` - Check for updates and show the latest version.
 - `keybinds` - Open the keybinds help page.
