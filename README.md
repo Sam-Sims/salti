@@ -150,7 +150,7 @@ Precompiled binaries for Linux, MacOS and Windows are attached to the latest rel
 You can also use the installer script:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.8.0/salti-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.10.0/salti-installer.sh | sh
 ```
 
 ### Cargo:
