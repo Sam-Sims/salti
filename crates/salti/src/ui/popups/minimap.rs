@@ -315,15 +315,15 @@ fn render_note(buf: &mut Buffer, area: Rect, note: &str, theme: &Theme) {
 
 fn highlight_box(track_area: Rect, window: Range<usize>, total_columns: usize) -> Option<Rect> {
     let cells = usize::from(track_area.width);
-    let shows_window = |cell| {
-        let columns = ui::cell_columns(cell, cells, total_columns);
-        columns.start.max(window.start) < columns.end.min(window.end)
-    };
-    let first = (0..cells).position(shows_window)?;
-    let last = (0..cells).rposition(shows_window)?;
+    if cells == 0 || window.is_empty() {
+        return None;
+    }
+    let rounding_divide = |numerator: usize| (numerator + total_columns / 2) / total_columns;
+    let width = rounding_divide(window.len() * cells).clamp(1, cells);
+    let start = rounding_divide(window.start * cells).min(cells - width);
     Some(Rect {
-        x: track_area.x + first as u16,
-        width: (last + 1 - first) as u16,
+        x: track_area.x + start as u16,
+        width: width as u16,
         ..track_area
     })
 }
@@ -366,10 +366,13 @@ mod tests {
 
     #[rstest]
     #[case::inside_one_cell(10, 100, 32..38, 13, 1)]
-    #[case::across_cells(10, 100, 35..55, 13, 3)]
+    #[case::across_cells(10, 100, 35..55, 14, 2)]
+    #[case::one_width_at_cell_edge(10, 100, 30..43, 13, 1)]
+    #[case::one_width_across_cell_edge(10, 100, 39..52, 14, 1)]
+    #[case::kept_inside_at_end(10, 100, 96..100, 19, 1)]
     #[case::whole_alignment(10, 100, 0..100, 10, 10)]
     #[case::column_over_several_cells(5, 3, 1..2, 12, 2)]
-    #[case::skips_cell_without_window_columns(2, 3, 1..2, 11, 1)]
+    #[case::window_under_one_cell(2, 3, 1..2, 11, 1)]
     fn highlight_box_works(
         #[case] cells: u16,
         #[case] total_columns: usize,
