@@ -4,7 +4,7 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{self, Rect};
 
 use crate::{
-    command::Command,
+    command::{Command, Direction, Distance},
     gff::Gff,
     session::Session,
     ui::{
@@ -117,22 +117,16 @@ impl MouseTracker {
         };
         self.pan_anchor = Some((column, row).into());
 
+        let rows = Distance::Amount(usize::from(row.abs_diff(anchor.y)));
         let vertical = match row.cmp(&anchor.y) {
-            Ordering::Greater => Some(Command::ScrollUp {
-                amount: usize::from(row - anchor.y),
-            }),
-            Ordering::Less => Some(Command::ScrollDown {
-                amount: usize::from(anchor.y - row),
-            }),
+            Ordering::Greater => Some(Command::Scroll(Direction::Up, rows)),
+            Ordering::Less => Some(Command::Scroll(Direction::Down, rows)),
             Ordering::Equal => None,
         };
+        let columns = Distance::Amount(usize::from(column.abs_diff(anchor.x)));
         let horizontal = match column.cmp(&anchor.x) {
-            Ordering::Greater => Some(Command::ScrollLeft {
-                amount: usize::from(column - anchor.x),
-            }),
-            Ordering::Less => Some(Command::ScrollRight {
-                amount: usize::from(anchor.x - column),
-            }),
+            Ordering::Greater => Some(Command::Scroll(Direction::Left, columns)),
+            Ordering::Less => Some(Command::Scroll(Direction::Right, columns)),
             Ordering::Equal => None,
         };
         [vertical, horizontal].into_iter().flatten().collect()
@@ -346,9 +340,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::down_right(12, 13, &[Command::ScrollUp { amount: 3 }, Command::ScrollLeft { amount: 2 }])]
-    #[case::up_left(8, 7, &[Command::ScrollDown { amount: 3 }, Command::ScrollRight { amount: 2 }])]
-    #[case::vertical_only(10, 12, &[Command::ScrollUp { amount: 2 }])]
+    #[case::down_right(12, 13, &[Command::Scroll(Direction::Up, Distance::Amount(3)), Command::Scroll(Direction::Left, Distance::Amount(2))])]
+    #[case::up_left(8, 7, &[Command::Scroll(Direction::Down, Distance::Amount(3)), Command::Scroll(Direction::Right, Distance::Amount(2))])]
+    #[case::vertical_only(10, 12, &[Command::Scroll(Direction::Up, Distance::Amount(2))])]
     #[case::no_movement(10, 10, &[])]
     fn pan_drag_commands_works(#[case] x: u16, #[case] y: u16, #[case] expected: &[Command]) {
         let mut tracker = MouseTracker {
@@ -369,7 +363,10 @@ mod tests {
 
         let commands = tracker.pan_drag_commands(10, 13);
 
-        assert_eq!(commands, [Command::ScrollUp { amount: 1 }]);
+        assert_eq!(
+            commands,
+            [Command::Scroll(Direction::Up, Distance::Amount(1))]
+        );
     }
 
     #[test]
@@ -425,7 +422,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::middle_drag(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[Command::ScrollLeft { amount: 2 }])]
+    #[case::middle_drag(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[Command::Scroll(Direction::Left, Distance::Amount(2))])]
     #[case::after_release(&[(MIDDLE_DOWN, KeyModifiers::NONE, 2, 0), (MIDDLE_UP, KeyModifiers::NONE, 2, 0), (MIDDLE_DRAG, KeyModifiers::NONE, 4, 0)], &[])]
     fn handle_pans(
         #[case] events: &[(MouseEventKind, KeyModifiers, u16, u16)],

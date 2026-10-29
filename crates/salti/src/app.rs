@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::{
     cli::StartupState,
-    command::Command,
+    command::{Command, Direction, Distance},
     config::keybindings,
     gff::{self, Gff},
     jobs::{JobEvent, Jobs, UpdateCheckTrigger},
@@ -168,14 +168,16 @@ impl App {
             }
             Command::CheckForUpdate => self.jobs.check_for_update(UpdateCheckTrigger::Requested),
 
-            Command::ScrollDown { amount } => self.ui.position.row += amount,
-            Command::ScrollUp { amount } => {
-                self.ui.position.row = self.ui.position.row.saturating_sub(amount);
+            Command::Scroll(direction, Distance::Amount(amount)) => {
+                let offset = match direction {
+                    Direction::Up | Direction::Down => &mut self.ui.position.row,
+                    Direction::Left | Direction::Right => &mut self.ui.position.column,
+                };
+                *offset = match direction {
+                    Direction::Up | Direction::Left => offset.saturating_sub(amount),
+                    Direction::Down | Direction::Right => *offset + amount,
+                };
             }
-            Command::ScrollLeft { amount } => {
-                self.ui.position.column = self.ui.position.column.saturating_sub(amount);
-            }
-            Command::ScrollRight { amount } => self.ui.position.column += amount,
             Command::ScrollNamesLeft { amount } => {
                 self.ui.position.name = self.ui.position.name.saturating_sub(amount);
             }
@@ -399,7 +401,7 @@ mod tests {
         let mut app = app(&[&[b'A'; 200], &gapped]);
 
         app.execute_commands(vec![
-            Command::ScrollRight { amount: 1000 },
+            Command::Scroll(Direction::Right, Distance::Amount(1000)),
             Command::SetGapFilter(Some(0.25)),
         ]);
 
@@ -414,7 +416,7 @@ mod tests {
 
         app.execute_commands(vec![
             Command::SetRowFilter(Some("(".to_string())),
-            Command::ScrollRight { amount: 3 },
+            Command::Scroll(Direction::Right, Distance::Amount(3)),
         ]);
 
         assert_eq!(app.ui.position.column, 3);
@@ -466,7 +468,7 @@ mod tests {
     #[test]
     fn finish_load_works() {
         let mut app = app(DNA);
-        app.execute_commands(vec![Command::ScrollRight { amount: 2 }]);
+        app.execute_commands(vec![Command::Scroll(Direction::Right, Distance::Amount(2))]);
         app.ui.selection = Some(selection(0..=0, 0..=0));
         app.ui.loading = Some("next.fasta".to_string());
 

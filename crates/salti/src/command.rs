@@ -22,18 +22,7 @@ pub enum Command {
     },
     CheckForUpdate,
 
-    ScrollDown {
-        amount: usize,
-    },
-    ScrollUp {
-        amount: usize,
-    },
-    ScrollLeft {
-        amount: usize,
-    },
-    ScrollRight {
-        amount: usize,
-    },
+    Scroll(Direction, Distance),
     ScrollNamesLeft {
         amount: usize,
     },
@@ -64,4 +53,18 @@ pub enum Command {
     SetConsensusMethod(libmsa::ConsensusMethod),
     SetDiffMode(DiffMode),
     CycleDiffMode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// how far a scroll moves, in columns or rows
+#[derive(Debug, Clone, PartialEq)]
+pub enum Distance {
+    Amount(usize),
 }

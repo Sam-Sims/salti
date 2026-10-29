@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::command::Command;
+use crate::command::{Command, Direction, Distance};
 
 pub(crate) struct Binding {
     // unsure if to add keybinds config file - if so name will be useful/needed
@@ -77,7 +77,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-up",
         code: KeyCode::Up,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollUp { amount: 1 },
+        command: Command::Scroll(Direction::Up, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll up",
     },
@@ -85,7 +85,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-down",
         code: KeyCode::Down,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollDown { amount: 1 },
+        command: Command::Scroll(Direction::Down, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll down",
     },
@@ -93,7 +93,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-left",
         code: KeyCode::Left,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollLeft { amount: 1 },
+        command: Command::Scroll(Direction::Left, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll left",
     },
@@ -101,7 +101,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-right",
         code: KeyCode::Right,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollRight { amount: 1 },
+        command: Command::Scroll(Direction::Right, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll right",
     },
@@ -109,7 +109,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-up-fast",
         code: KeyCode::Up,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollUp { amount: 10 },
+        command: Command::Scroll(Direction::Up, Distance::Amount(10)),
         category: Category::Navigation,
         description: "Fast scroll up",
     },
@@ -117,7 +117,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-down-fast",
         code: KeyCode::Down,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollDown { amount: 10 },
+        command: Command::Scroll(Direction::Down, Distance::Amount(10)),
         category: Category::Navigation,
         description: "Fast scroll down",
     },
@@ -125,7 +125,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-left-fast",
         code: KeyCode::Left,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollLeft { amount: 10 },
+        command: Command::Scroll(Direction::Left, Distance::Amount(10)),
         category: Category::Navigation,
         description: "Fast scroll left",
     },
@@ -133,7 +133,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-right-fast",
         code: KeyCode::Right,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollRight { amount: 10 },
+        command: Command::Scroll(Direction::Right, Distance::Amount(10)),
         category: Category::Navigation,
         description: "Fast scroll right",
     },
@@ -260,8 +260,16 @@ mod tests {
     #[case::shifted_letter(KeyCode::Char('T'), KeyModifiers::SHIFT, Command::ToggleProteinView)]
     #[case::shifted_punctuation(KeyCode::Char(':'), KeyModifiers::SHIFT, Command::OpenPalette)]
     #[case::shifted_question_mark(KeyCode::Char('?'), KeyModifiers::SHIFT, Command::OpenKeybinds)]
-    #[case::arrow(KeyCode::Up, KeyModifiers::NONE, Command::ScrollUp { amount: 1 })]
-    #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, Command::ScrollUp { amount: 10 })]
+    #[case::arrow(
+        KeyCode::Up,
+        KeyModifiers::NONE,
+        Command::Scroll(Direction::Up, Distance::Amount(1))
+    )]
+    #[case::shifted_arrow(
+        KeyCode::Up,
+        KeyModifiers::SHIFT,
+        Command::Scroll(Direction::Up, Distance::Amount(10))
+    )]
     fn lookup_works(
         #[case] code: KeyCode,
         #[case] modifiers: KeyModifiers,
