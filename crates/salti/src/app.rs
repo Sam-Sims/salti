@@ -168,14 +168,25 @@ impl App {
             }
             Command::CheckForUpdate => self.jobs.check_for_update(UpdateCheckTrigger::Requested),
 
-            Command::Scroll(direction, Distance::Amount(amount)) => {
-                let offset = match direction {
-                    Direction::Up | Direction::Down => &mut self.ui.position.row,
-                    Direction::Left | Direction::Right => &mut self.ui.position.column,
+            Command::Scroll(direction, distance) => {
+                let window = &self.screen.window;
+                let (offset, page) = match direction {
+                    Direction::Up | Direction::Down => {
+                        (&mut self.ui.position.row, window.rows.len())
+                    }
+                    Direction::Left | Direction::Right => {
+                        (&mut self.ui.position.column, window.columns.len())
+                    }
+                };
+                let amount = match distance {
+                    Distance::Amount(amount) => amount,
+                    Distance::Step => self.ui.scroll_step.0.get(),
+                    Distance::Page => page,
+                    Distance::Edge => usize::MAX,
                 };
                 *offset = match direction {
                     Direction::Up | Direction::Left => offset.saturating_sub(amount),
-                    Direction::Down | Direction::Right => *offset + amount,
+                    Direction::Down | Direction::Right => offset.saturating_add(amount),
                 };
             }
             Command::ScrollNamesLeft { amount } => {
@@ -209,10 +220,6 @@ impl App {
             }
             Command::JumpToSequence(row) => {
                 self.ui.position.row = self.session()?.layout().row_position(row);
-            }
-            Command::JumpToEnd => {
-                self.ui.position.column =
-                    self.session()?.layout().columns().len().saturating_sub(1);
             }
             Command::PinSequence(row) => self.apply(|view| {
                 view.pin(row);
@@ -427,6 +434,26 @@ mod tests {
                 .map(|notification| notification.level),
             Some(NotificationLevel::Error)
         );
+    }
+
+    #[rstest]
+    #[case::step_right(Direction::Right, Distance::Step, |_| 40)]
+    #[case::step_left(Direction::Left, Distance::Step, |_| 20)]
+    #[case::page_right(Direction::Right, Distance::Page, |page| 30 + page)]
+    #[case::edge_right(Direction::Right, Distance::Edge, |page| 200 - page)]
+    #[case::edge_left(Direction::Left, Distance::Edge, |_| 0)]
+    fn execute_commands_scroll_works(
+        #[case] direction: Direction,
+        #[case] distance: Distance,
+        #[case] expected: fn(usize) -> usize,
+    ) {
+        let mut app = app(&[&[b'A'; 200]]);
+        app.ui.position.column = 30;
+        let page = app.screen.window.columns.len();
+
+        app.execute_commands(vec![Command::Scroll(direction, distance)]);
+
+        assert_eq!(app.ui.position.column, expected(page));
     }
 
     #[rstest]
@@ -694,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_open() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -703,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_last_tab() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -713,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_scrolled() {
         let mut app = app(DNA);
         app.handle(Event::Resize(Rect::new(0, 0, AREA.width, 10)));

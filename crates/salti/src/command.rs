@@ -14,30 +14,17 @@ pub enum Command {
     SetTheme(ThemeChoice),
     SetMinimapView(MinimapView),
     ShowNotification(Notification),
-    LoadAlignment {
-        input: String,
-    },
-    LoadGff {
-        path: String,
-    },
+    LoadAlignment { input: String },
+    LoadGff { path: String },
     CheckForUpdate,
 
     Scroll(Direction, Distance),
-    ScrollNamesLeft {
-        amount: usize,
-    },
-    ScrollNamesRight {
-        amount: usize,
-    },
-    /// a position among the shown columns, after filters
+    ScrollNamesLeft { amount: usize },
+    ScrollNamesRight { amount: usize },
     JumpToVisibleColumn(usize),
-    /// a column in the alignment; jumps to the first shown column at or after it
     JumpToColumn(usize),
-    /// an index into the loaded GFF's features
     JumpToFeature(usize),
-    /// a row in the alignment
     JumpToSequence(usize),
-    JumpToEnd,
 
     PinSequence(usize),
     UnpinSequence(usize),
@@ -67,4 +54,7 @@ pub enum Direction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distance {
     Amount(usize),
+    Step,
+    Page,
+    Edge,
 }
