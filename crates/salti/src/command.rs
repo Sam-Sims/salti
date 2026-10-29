@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     config::theme::ThemeChoice,
     session::DiffMode,
@@ -13,6 +15,7 @@ pub enum Command {
     ClosePopup,
     SetTheme(ThemeChoice),
     SetMinimapView(MinimapView),
+    SetScrollStep(NonZeroUsize),
     ShowNotification(Notification),
     LoadAlignment { input: String },
     LoadGff { path: String },

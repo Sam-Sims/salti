@@ -46,12 +46,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         aliases: &["jp"],
         doc: "Jump to an alignment position (1 based), skipping forward to the next visible column if needed.",
         action: Action::Required {
-            run: |_, argument| {
-                let position = argument
-                    .parse::<NonZeroUsize>()
-                    .map_err(|_| format_err!("Expected a positive integer, got '{argument}'"))?;
-                Ok(Command::JumpToColumn(position.get() - 1))
-            },
+            run: |_, argument| Ok(Command::JumpToColumn(parse_positive(argument)?.get() - 1)),
             completer: None,
         },
     },
@@ -251,6 +246,15 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
         },
     },
     PaletteCommand {
+        name: "set-scroll-step",
+        aliases: &[],
+        doc: "Set how many rows Shift+arrows scroll",
+        action: Action::Required {
+            run: |_, argument| Ok(Command::SetScrollStep(parse_positive(argument)?)),
+            completer: None,
+        },
+    },
+    PaletteCommand {
         name: "set-sequence-type",
         aliases: &[],
         doc: "Override sequence type detection for rendering.",
@@ -292,6 +296,12 @@ fn parse_choice<T: FromStr>(argument: &str, what: &str) -> Result<T> {
     argument
         .parse()
         .map_err(|_| format_err!("Unknown {what} '{argument}'"))
+}
+
+fn parse_positive(argument: &str) -> Result<NonZeroUsize> {
+    argument
+        .parse()
+        .map_err(|_| format_err!("Expected a positive integer, got '{argument}'"))
 }
 
 fn parse_percentage(argument: &str) -> Result<Option<f64>> {

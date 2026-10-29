@@ -14,7 +14,7 @@ use crate::{
     jobs::{JobEvent, Jobs, UpdateCheckTrigger},
     session::{Position, Session, ViewState},
     ui::{
-        self, UiState,
+        self, ScrollStep, UiState,
         layout::ScreenLayout,
         mouse::MouseTracker,
         notification::Notification,
@@ -159,6 +159,7 @@ impl App {
             Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(choice) => self.ui.set_theme(choice),
             Command::SetMinimapView(view) => self.ui.minimap_view = view,
+            Command::SetScrollStep(step) => self.ui.scroll_step = ScrollStep(step),
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment { input } => self.load(input),
             Command::LoadGff { path } => {

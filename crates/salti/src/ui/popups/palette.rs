@@ -279,7 +279,7 @@ fn words(line: &str) -> Vec<(usize, String)> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, num::NonZeroUsize};
 
     use rstest::rstest;
 
@@ -375,6 +375,10 @@ mod tests {
         Command::SetTheme(ThemeChoice::Named(ThemeName::TokyoNight))
     )]
     #[case::theme_auto("set-theme auto", Command::SetTheme(ThemeChoice::Auto))]
+    #[case::scroll_step(
+        "set-scroll-step 20",
+        Command::SetScrollStep(NonZeroUsize::new(20).unwrap())
+    )]
     #[case::sequence_type(
         "set-sequence-type protein",
         Command::SetActiveType(libmsa::AlignmentType::Protein)
@@ -386,6 +390,7 @@ mod tests {
     #[rstest]
     #[case::jump_position_zero("jump-position 0")]
     #[case::jump_position_not_a_number("jump-position x")]
+    #[case::scroll_step_zero("set-scroll-step 0")]
     #[case::jump_sequence_pinned("jump-sequence s1")]
     #[case::jump_sequence_unknown("jump-sequence nope")]
     #[case::jump_feature_unknown("jump-feature nope")]
