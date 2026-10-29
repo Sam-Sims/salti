@@ -248,7 +248,7 @@ pub(super) const COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
         name: "set-scroll-step",
         aliases: &[],
-        doc: "Set how many rows Shift+arrows scroll",
+        doc: "Set how many rows Shift+arrows scroll.",
         action: Action::Required {
             run: |_, argument| Ok(Command::SetScrollStep(parse_positive(argument)?)),
             completer: None,
