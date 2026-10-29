@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typing a bare number in the command palette (`:42`) jumps to that position.
 - A `--skip-update-check` flag, which does the same as the `SALTI_SKIP_UPDATE_CHECK` variable.
   - To always skip the check, use an alias: `alias salti="salti --skip-update-check"`.
+- A `set-scroll-step` command for how far `Shift`+arrow keys scroll, still uses the 10 columns or rows by default.
+- `Ctrl`+arrow keys scroll by the entire screen.
 
 ### Changed
 
