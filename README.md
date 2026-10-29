@@ -18,7 +18,7 @@ salti is a multiple sequence alignment browser for the terminal. It aims to be f
 If using linux/macOS
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.9.0/salti-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Sam-Sims/salti/releases/download/salti-0.10.0/salti-installer.sh | sh
 ```
 
 or conda (All supported platforms)
@@ -173,7 +173,7 @@ To install please refer to the rust documentation: [docs](https://www.rust-lang.
 git clone https://github.com/Sam-Sims/salti
 ```
 
-Note: `main` may contain active development, so it could contain unfinished or broken features. If you want a specific version, check out a release tag (e.g. `git checkout salti-0.9.0`) or grab it from the [releases](https://github.com/Sam-Sims/salti/releases) page.
+Note: `main` may contain active development, so it could contain unfinished or broken features. If you want a specific version, check out a release tag (e.g. `git checkout salti-0.10.0`) or grab it from the [releases](https://github.com/Sam-Sims/salti/releases) page.
 
 #### Build and add to path:
 
