@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::command::Command;
+use crate::command::{Command, Direction, Distance};
 
 pub(crate) struct Binding {
     // unsure if to add keybinds config file - if so name will be useful/needed
@@ -77,7 +77,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-up",
         code: KeyCode::Up,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollUp { amount: 1 },
+        command: Command::Scroll(Direction::Up, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll up",
     },
@@ -85,7 +85,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-down",
         code: KeyCode::Down,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollDown { amount: 1 },
+        command: Command::Scroll(Direction::Down, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll down",
     },
@@ -93,7 +93,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-left",
         code: KeyCode::Left,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollLeft { amount: 1 },
+        command: Command::Scroll(Direction::Left, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll left",
     },
@@ -101,41 +101,73 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "scroll-right",
         code: KeyCode::Right,
         modifiers: KeyModifiers::NONE,
-        command: Command::ScrollRight { amount: 1 },
+        command: Command::Scroll(Direction::Right, Distance::Amount(1)),
         category: Category::Navigation,
         description: "Scroll right",
     },
     Binding {
-        name: "scroll-up-fast",
+        name: "scroll-up-step",
         code: KeyCode::Up,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollUp { amount: 10 },
+        command: Command::Scroll(Direction::Up, Distance::Step),
         category: Category::Navigation,
-        description: "Fast scroll up",
+        description: "Scroll up by the scroll step",
     },
     Binding {
-        name: "scroll-down-fast",
+        name: "scroll-down-step",
         code: KeyCode::Down,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollDown { amount: 10 },
+        command: Command::Scroll(Direction::Down, Distance::Step),
         category: Category::Navigation,
-        description: "Fast scroll down",
+        description: "Scroll down by the scroll step",
     },
     Binding {
-        name: "scroll-left-fast",
+        name: "scroll-left-step",
         code: KeyCode::Left,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollLeft { amount: 10 },
+        command: Command::Scroll(Direction::Left, Distance::Step),
         category: Category::Navigation,
-        description: "Fast scroll left",
+        description: "Scroll left by the scroll step",
     },
     Binding {
-        name: "scroll-right-fast",
+        name: "scroll-right-step",
         code: KeyCode::Right,
         modifiers: KeyModifiers::SHIFT,
-        command: Command::ScrollRight { amount: 10 },
+        command: Command::Scroll(Direction::Right, Distance::Step),
         category: Category::Navigation,
-        description: "Fast scroll right",
+        description: "Scroll right by the scroll step",
+    },
+    Binding {
+        name: "page-up",
+        code: KeyCode::Up,
+        modifiers: KeyModifiers::CONTROL,
+        command: Command::Scroll(Direction::Up, Distance::Page),
+        category: Category::Navigation,
+        description: "Scroll up one page",
+    },
+    Binding {
+        name: "page-down",
+        code: KeyCode::Down,
+        modifiers: KeyModifiers::CONTROL,
+        command: Command::Scroll(Direction::Down, Distance::Page),
+        category: Category::Navigation,
+        description: "Scroll down one page",
+    },
+    Binding {
+        name: "page-left",
+        code: KeyCode::Left,
+        modifiers: KeyModifiers::CONTROL,
+        command: Command::Scroll(Direction::Left, Distance::Page),
+        category: Category::Navigation,
+        description: "Scroll left one page",
+    },
+    Binding {
+        name: "page-right",
+        code: KeyCode::Right,
+        modifiers: KeyModifiers::CONTROL,
+        command: Command::Scroll(Direction::Right, Distance::Page),
+        category: Category::Navigation,
+        description: "Scroll right one page",
     },
     Binding {
         name: "scroll-names-left",
@@ -157,7 +189,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "jump-start",
         code: KeyCode::Home,
         modifiers: KeyModifiers::NONE,
-        command: Command::JumpToVisibleColumn(0),
+        command: Command::Scroll(Direction::Left, Distance::Edge),
         category: Category::Navigation,
         description: "Jump to start of alignment",
     },
@@ -165,7 +197,7 @@ pub(crate) const KEY_BINDINGS: &[Binding] = &[
         name: "jump-end",
         code: KeyCode::End,
         modifiers: KeyModifiers::NONE,
-        command: Command::JumpToEnd,
+        command: Command::Scroll(Direction::Right, Distance::Edge),
         category: Category::Navigation,
         description: "Jump to end of alignment",
     },
@@ -260,8 +292,31 @@ mod tests {
     #[case::shifted_letter(KeyCode::Char('T'), KeyModifiers::SHIFT, Command::ToggleProteinView)]
     #[case::shifted_punctuation(KeyCode::Char(':'), KeyModifiers::SHIFT, Command::OpenPalette)]
     #[case::shifted_question_mark(KeyCode::Char('?'), KeyModifiers::SHIFT, Command::OpenKeybinds)]
-    #[case::arrow(KeyCode::Up, KeyModifiers::NONE, Command::ScrollUp { amount: 1 })]
-    #[case::shifted_arrow(KeyCode::Up, KeyModifiers::SHIFT, Command::ScrollUp { amount: 10 })]
+    #[case::arrow(
+        KeyCode::Up,
+        KeyModifiers::NONE,
+        Command::Scroll(Direction::Up, Distance::Amount(1))
+    )]
+    #[case::shifted_arrow(
+        KeyCode::Up,
+        KeyModifiers::SHIFT,
+        Command::Scroll(Direction::Up, Distance::Step)
+    )]
+    #[case::control_arrow(
+        KeyCode::Right,
+        KeyModifiers::CONTROL,
+        Command::Scroll(Direction::Right, Distance::Page)
+    )]
+    #[case::control_down(
+        KeyCode::Down,
+        KeyModifiers::CONTROL,
+        Command::Scroll(Direction::Down, Distance::Page)
+    )]
+    #[case::end(
+        KeyCode::End,
+        KeyModifiers::NONE,
+        Command::Scroll(Direction::Right, Distance::Edge)
+    )]
     fn lookup_works(
         #[case] code: KeyCode,
         #[case] modifiers: KeyModifiers,

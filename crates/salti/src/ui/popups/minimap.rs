@@ -97,10 +97,7 @@ impl PopupContent for Minimap {
             KeyCode::BackTab => Some(Command::SetMinimapView(popups::previous_tab(view))),
             _ => keybindings::lookup(key).and_then(|command| match command {
                 Command::OpenMinimap => Some(Command::SetMinimapView(popups::next_tab(view))),
-                Command::ScrollUp { .. }
-                | Command::ScrollDown { .. }
-                | Command::ScrollLeft { .. }
-                | Command::ScrollRight { .. } => Some(command),
+                Command::Scroll(..) => Some(command),
                 _ => None,
             }),
         };

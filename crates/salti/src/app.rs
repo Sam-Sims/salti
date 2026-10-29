@@ -8,13 +8,13 @@ use tracing::debug;
 
 use crate::{
     cli::StartupState,
-    command::Command,
+    command::{Command, Direction, Distance},
     config::keybindings,
     gff::{self, Gff},
     jobs::{JobEvent, Jobs, UpdateCheckTrigger},
     session::{Position, Session, ViewState},
     ui::{
-        self, UiState,
+        self, ScrollStep, UiState,
         layout::ScreenLayout,
         mouse::MouseTracker,
         notification::Notification,
@@ -159,6 +159,7 @@ impl App {
             Command::ClosePopup => self.ui.popup = None,
             Command::SetTheme(choice) => self.ui.set_theme(choice),
             Command::SetMinimapView(view) => self.ui.minimap_view = view,
+            Command::SetScrollStep(step) => self.ui.scroll_step = ScrollStep(step),
             Command::ShowNotification(notification) => self.ui.notify(notification),
             Command::LoadAlignment { input } => self.load(input),
             Command::LoadGff { path } => {
@@ -168,14 +169,27 @@ impl App {
             }
             Command::CheckForUpdate => self.jobs.check_for_update(UpdateCheckTrigger::Requested),
 
-            Command::ScrollDown { amount } => self.ui.position.row += amount,
-            Command::ScrollUp { amount } => {
-                self.ui.position.row = self.ui.position.row.saturating_sub(amount);
+            Command::Scroll(direction, distance) => {
+                let window = &self.screen.window;
+                let (offset, page) = match direction {
+                    Direction::Up | Direction::Down => {
+                        (&mut self.ui.position.row, window.rows.len())
+                    }
+                    Direction::Left | Direction::Right => {
+                        (&mut self.ui.position.column, window.columns.len())
+                    }
+                };
+                let amount = match distance {
+                    Distance::Amount(amount) => amount,
+                    Distance::Step => self.ui.scroll_step.0.get(),
+                    Distance::Page => page,
+                    Distance::Edge => usize::MAX,
+                };
+                *offset = match direction {
+                    Direction::Up | Direction::Left => offset.saturating_sub(amount),
+                    Direction::Down | Direction::Right => offset.saturating_add(amount),
+                };
             }
-            Command::ScrollLeft { amount } => {
-                self.ui.position.column = self.ui.position.column.saturating_sub(amount);
-            }
-            Command::ScrollRight { amount } => self.ui.position.column += amount,
             Command::ScrollNamesLeft { amount } => {
                 self.ui.position.name = self.ui.position.name.saturating_sub(amount);
             }
@@ -207,10 +221,6 @@ impl App {
             }
             Command::JumpToSequence(row) => {
                 self.ui.position.row = self.session()?.layout().row_position(row);
-            }
-            Command::JumpToEnd => {
-                self.ui.position.column =
-                    self.session()?.layout().columns().len().saturating_sub(1);
             }
             Command::PinSequence(row) => self.apply(|view| {
                 view.pin(row);
@@ -399,7 +409,7 @@ mod tests {
         let mut app = app(&[&[b'A'; 200], &gapped]);
 
         app.execute_commands(vec![
-            Command::ScrollRight { amount: 1000 },
+            Command::Scroll(Direction::Right, Distance::Amount(1000)),
             Command::SetGapFilter(Some(0.25)),
         ]);
 
@@ -414,7 +424,7 @@ mod tests {
 
         app.execute_commands(vec![
             Command::SetRowFilter(Some("(".to_string())),
-            Command::ScrollRight { amount: 3 },
+            Command::Scroll(Direction::Right, Distance::Amount(3)),
         ]);
 
         assert_eq!(app.ui.position.column, 3);
@@ -425,6 +435,26 @@ mod tests {
                 .map(|notification| notification.level),
             Some(NotificationLevel::Error)
         );
+    }
+
+    #[rstest]
+    #[case::step_right(Direction::Right, Distance::Step, |_| 40)]
+    #[case::step_left(Direction::Left, Distance::Step, |_| 20)]
+    #[case::page_right(Direction::Right, Distance::Page, |page| 30 + page)]
+    #[case::edge_right(Direction::Right, Distance::Edge, |page| 200 - page)]
+    #[case::edge_left(Direction::Left, Distance::Edge, |_| 0)]
+    fn execute_commands_scroll_works(
+        #[case] direction: Direction,
+        #[case] distance: Distance,
+        #[case] expected: fn(usize) -> usize,
+    ) {
+        let mut app = app(&[&[b'A'; 200]]);
+        app.ui.position.column = 30;
+        let page = app.screen.window.columns.len();
+
+        app.execute_commands(vec![Command::Scroll(direction, distance)]);
+
+        assert_eq!(app.ui.position.column, expected(page));
     }
 
     #[rstest]
@@ -466,7 +496,7 @@ mod tests {
     #[test]
     fn finish_load_works() {
         let mut app = app(DNA);
-        app.execute_commands(vec![Command::ScrollRight { amount: 2 }]);
+        app.execute_commands(vec![Command::Scroll(Direction::Right, Distance::Amount(2))]);
         app.ui.selection = Some(selection(0..=0, 0..=0));
         app.ui.loading = Some("next.fasta".to_string());
 
@@ -692,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_open() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -701,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_last_tab() {
         let mut app = app(DNA);
         type_text(&mut app, "?");
@@ -711,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn keybinds_scrolled() {
         let mut app = app(DNA);
         app.handle(Event::Resize(Rect::new(0, 0, AREA.width, 10)));

@@ -5,22 +5,22 @@ expression: screen_text(&mut app)
   File: test.fasta | Status: Loaded | 3 sequences | Length: 12 | Positions: 1-12
 ┌──────────────┬───────────────────────────────────────────────────────────────┐
 │              │1       10                                                     │
-│              │.   .    |                                                     │
-│1 s0          │ATGAAATTTCCC                                                   │
-│2 s1          │A┌ General │ Navigation │ Translation ─────────┐               │
-│3 s2          │A│q            Quit application                │               │
-│              │ │:            Open command palette            │               │
-│              │ │?            Show key bindings               │               │
-│              │ │m            Open minimap, or switch its view│               │
-│              │ │d            Cycle diff mode                 │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-├──────────────┼─│                                             │───────────────┤
-│Reference Sequ│N└─────────────────────────────────────────────┘               │
-│Consensus Sequ│ATGAAATTTCCC                                                   │
-│Conservation: │███▅▅▃██████                                                   │
+│              │┌ General │ Navigation │ Translation ───────────┐              │
+│1 s0          ││q              Quit application                │              │
+│2 s1          ││:              Open command palette            │              │
+│3 s2          ││?              Show key bindings               │              │
+│              ││m              Open minimap, or switch its view│              │
+│              ││d              Cycle diff mode                 │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+├──────────────┼│                                               │──────────────┤
+│Reference Sequ││                                               │              │
+│Consensus Sequ││                                               │              │
+│Conservation: │└───────────────────────────────────────────────┘              │
 └──────────────┴───────────────────────────────────────────────────────────────┘

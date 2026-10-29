@@ -5,22 +5,22 @@ expression: screen_text(&mut app)
   File: test.fasta | Status: Loaded | 3 sequences | Length: 12 | Positions: 1-12
 ┌──────────────┬───────────────────────────────────────────────────────────────┐
 │              │1       10                                                     │
-│              │.   .    |                                                     │
-│1 s0          │ATGAAATTTCCC                                                   │
-│2 s1          │A┌ General │ Navigation │ Translation ─────────┐               │
-│3 s2          │A│t            Toggle the translation overlay  │               │
-│              │ │T            Toggle the protein view         │               │
-│              │ │Alt+1        Set translation frame +1        │               │
-│              │ │Alt+2        Set translation frame +2        │               │
-│              │ │Alt+3        Set translation frame +3        │               │
-│              │ │Alt+4        Set translation frame -1        │               │
-│              │ │Alt+5        Set translation frame -2        │               │
-│              │ │Alt+6        Set translation frame -3        │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-│              │ │                                             │               │
-├──────────────┼─│                                             │───────────────┤
-│Reference Sequ│N└─────────────────────────────────────────────┘               │
-│Consensus Sequ│ATGAAATTTCCC                                                   │
-│Conservation: │███▅▅▃██████                                                   │
+│              │┌ General │ Navigation │ Translation ───────────┐              │
+│1 s0          ││t              Toggle the translation overlay  │              │
+│2 s1          ││T              Toggle the protein view         │              │
+│3 s2          ││Alt+1          Set translation frame +1        │              │
+│              ││Alt+2          Set translation frame +2        │              │
+│              ││Alt+3          Set translation frame +3        │              │
+│              ││Alt+4          Set translation frame -1        │              │
+│              ││Alt+5          Set translation frame -2        │              │
+│              ││Alt+6          Set translation frame -3        │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+│              ││                                               │              │
+├──────────────┼│                                               │──────────────┤
+│Reference Sequ││                                               │              │
+│Consensus Sequ││                                               │              │
+│Conservation: │└───────────────────────────────────────────────┘              │
 └──────────────┴───────────────────────────────────────────────────────────────┘

@@ -3,11 +3,11 @@ source: crates/salti/src/app.rs
 expression: screen_text(&mut app)
 ---
   File: test.fasta | Status: Loaded | 3 sequences | Length: 12 | Positions: 1-12
-┌──────────────┬─┌ General │ Navigation │ Translation ─────────┐───────────────┐
-│              │1│Shift+Left   Fast scroll left                │               │
-├──────────────┼─│Shift+Right  Fast scroll right               │───────────────┤
-│Reference Sequ│N│Alt+Left     Scroll names left               │               │
-│Consensus Sequ│A│Alt+Right    Scroll names right              │               │
-│Conservation: │█│Home         Jump to start of alignment      │               │
-└──────────────┴─│End          Jump to end of alignment        │───────────────┘
-                 └─────────────────────────────────────────────┘
+┌──────────────┬┌ General │ Navigation │ Translation ───────────┐──────────────┐
+│              ││Control+Left   Scroll left one page            │              │
+├──────────────┼│Control+Right  Scroll right one page           │──────────────┤
+│Reference Sequ││Alt+Left       Scroll names left               │              │
+│Consensus Sequ││Alt+Right      Scroll names right              │              │
+│Conservation: ││Home           Jump to start of alignment      │              │
+└──────────────┴│End            Jump to end of alignment        │──────────────┘
+                └───────────────────────────────────────────────┘

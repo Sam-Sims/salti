@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     config::theme::ThemeChoice,
     session::DiffMode,
@@ -13,42 +15,19 @@ pub enum Command {
     ClosePopup,
     SetTheme(ThemeChoice),
     SetMinimapView(MinimapView),
+    SetScrollStep(NonZeroUsize),
     ShowNotification(Notification),
-    LoadAlignment {
-        input: String,
-    },
-    LoadGff {
-        path: String,
-    },
+    LoadAlignment { input: String },
+    LoadGff { path: String },
     CheckForUpdate,
 
-    ScrollDown {
-        amount: usize,
-    },
-    ScrollUp {
-        amount: usize,
-    },
-    ScrollLeft {
-        amount: usize,
-    },
-    ScrollRight {
-        amount: usize,
-    },
-    ScrollNamesLeft {
-        amount: usize,
-    },
-    ScrollNamesRight {
-        amount: usize,
-    },
-    /// a position among the shown columns, after filters
+    Scroll(Direction, Distance),
+    ScrollNamesLeft { amount: usize },
+    ScrollNamesRight { amount: usize },
     JumpToVisibleColumn(usize),
-    /// a column in the alignment; jumps to the first shown column at or after it
     JumpToColumn(usize),
-    /// an index into the loaded GFF's features
     JumpToFeature(usize),
-    /// a row in the alignment
     JumpToSequence(usize),
-    JumpToEnd,
 
     PinSequence(usize),
     UnpinSequence(usize),
@@ -64,4 +43,21 @@ pub enum Command {
     SetConsensusMethod(libmsa::ConsensusMethod),
     SetDiffMode(DiffMode),
     CycleDiffMode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// how far a scroll moves, in columns or rows
+#[derive(Debug, Clone, PartialEq)]
+pub enum Distance {
+    Amount(usize),
+    Step,
+    Page,
+    Edge,
 }

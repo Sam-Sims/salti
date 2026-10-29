@@ -8,7 +8,7 @@ pub mod panes;
 pub mod popups;
 pub mod selection;
 
-use std::{ops::Range, path::Path, time::Duration};
+use std::{num::NonZeroUsize, ops::Range, path::Path, time::Duration};
 
 use ratatui::{
     buffer::Buffer,
@@ -105,6 +105,7 @@ pub struct UiState {
     pub loading: Option<String>,
     pub gff_tooltip: Option<String>,
     pub minimap_view: MinimapView,
+    pub scroll_step: ScrollStep,
 }
 
 impl UiState {
@@ -127,6 +128,16 @@ impl UiState {
         self.popup = None;
         self.notifications = Notifications::default();
         self.gff_tooltip = None;
+    }
+}
+
+/// how far Shift+arrows scroll, defaults to 10 but user can override with`set-scroll-step`
+#[derive(Debug)]
+pub struct ScrollStep(pub NonZeroUsize);
+
+impl Default for ScrollStep {
+    fn default() -> Self {
+        Self(NonZeroUsize::new(10).expect("10 isn't zero"))
     }
 }
 
